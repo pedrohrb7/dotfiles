@@ -3,7 +3,16 @@ return {
 		"williamboman/mason.nvim",
 		lazy = false,
 		config = function()
-			require("mason").setup()
+			require("mason").setup({
+				ui = {
+					border = "rounded",
+					icons = {
+						package_installed = "✓",
+						package_pending = "➜",
+						package_uninstalled = "✗",
+					},
+				},
+			})
 		end,
 	},
 	{
@@ -16,7 +25,50 @@ return {
 	{
 		"neovim/nvim-lspconfig",
 		lazy = false,
+		event = { "BufReadPre", "BufNewFile" },
+		dependencies = {
+			{ "williamboman/mason.nvim", config = true },
+			"williamboman/mason-lspconfig.nvim",
+			{ "j-hui/fidget.nvim", opts = {} },
+			"folke/neodev.nvim",
+			{ "b0o/schemastore.nvim" },
+			{ "hrsh7th/cmp-nvim-lsp" },
+			{ "HiPhish/rainbow-delimiters.nvim" },
+			{ "b0o/schemastore.nvim" },
+			{ "ray-x/navigator.lua" },
+			{ "ray-x/guihua.lua", run = "cd lua/fzy && make" },
+			"ray-x/guihua.lua",
+			"nvim-treesitter/nvim-treesitter",
+			"nvim-lua/plenary.nvim",
+			"stevearc/dressing.nvim", -- optional for vim.ui.select
+			"pmizio/typescript-tools.nvim",
+			"jay-babu/mason-null-ls.nvim",
+		},
 		config = function()
+			local mason_null_ls = require("mason-null-ls")
+			mason_null_ls.setup({
+				ensure_installed = {
+					"prettier", -- prettier formatter
+					"stylua", -- lua formatter
+					"eslint_d", -- js linter
+					"golangci_lint", -- go linter
+					"terraform_fmt", -- terraform formatter
+					"terraform_validate", -- terraform linter
+					"shellcheck", -- shell linter
+					"buf", -- buf formatter
+					"gofumpt", -- go formatter "gofmt",
+					"golines",
+					"goimports_reviser",
+					"yamlfmt", -- yaml formatter
+					"goimports",
+					"spell", -- spell checker
+					"black",
+					"blackd",
+					"pylint",
+					"golangci_lint",
+				},
+			})
+
 			local capabilities = require("cmp_nvim_lsp").default_capabilities()
 
 			local lspconfig = require("lspconfig")
