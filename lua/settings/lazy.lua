@@ -16,4 +16,4 @@ local opts = {
     }
 }
 
-require("lazy").setup({{ import = "settings.plugins" }, { import = "settings.plugins.lsp" }, opts})
+require("lazy").setup({{ import = "settings.plugins" }, { import = "settings.plugins.lsp" }}, opts)
