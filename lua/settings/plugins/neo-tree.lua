@@ -12,9 +12,6 @@ return {
 		neoTree.setup({
 			window = {
 				position = "right",
-				mappings = {
-					["<cr>"] = "open_tabnew",
-				},
 			},
 			filesystem = {
 				filtered_items = {
