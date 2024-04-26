@@ -6,6 +6,7 @@ return {
     { "nvim-telescope/telescope-fzf-native.nvim", build = "make" },
     "nvim-tree/nvim-web-devicons",
     "folke/todo-comments.nvim",
+    "nvim-telescope/telescope-ui-select.nvim"
   },
   config = function()
     local telescope = require("telescope")
@@ -39,10 +40,16 @@ return {
           theme = "ivy",
         }
       },
+      extensions = {
+        ["ui-select"] = {
+          require("telescope.themes").get_dropdown {
+          }
+        }
+      }
     })
 
     telescope.load_extension("fzf")
-
+    telescope.load_extension("ui-select")
     -- set keymaps
     local builtin = require('telescope.builtin')
     vim.keymap.set('n', '<leader>ff', builtin.find_files, {})
