@@ -13,7 +13,7 @@ keymap.set("n", "<leader>+", "<C-a>", { desc = "Increment number" }) -- incremen
 keymap.set("n", "<leader>-", "<C-x>", { desc = "Decrement number" }) -- decrement
 
 -- custom buffer navigation
-keymap.set("n", "<S-l>", "<cmd>bNext<CR>", { desc = "better way to navigate to next buffer" })
+keymap.set("n", "<S-l>", "<cmd>bnext<CR>", { desc = "better way to navigate to next buffer" })
 keymap.set("n", "<S-h>", "<cmd>bprevious<CR>", { desc = "better way to navigate to previous buffer" })
 keymap.set("n", "<C-n>", "<cmd>tabnew<CR>", { desc = "better way to create new buffer" })
 keymap.set("n", "<C-w>", "<cmd>BufferClose<CR>", { desc = "Close current tab" }) -- close current tab

@@ -7,7 +7,7 @@ return {
 		config = function()
 			local tkn = require("tokyonight")
 			tkn.setup({
-				style = "night",
+				style = "storm",
 				transparent = true,
 				styles = {
 					sidebars = "transparent",
