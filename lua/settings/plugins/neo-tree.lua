@@ -19,7 +19,7 @@ return {
 					hide_gitignored = false,
 				},
 				follow_current_file = {
-					enabled = false,
+					enabled = true,
 				},
 			},
 			buffers = {
@@ -51,6 +51,6 @@ return {
 		local keymap = vim.keymap -- for conciseness
 
 		keymap.set("n", "<leader>ee", "<cmd>Neotree toggle<CR>", { desc = "Toggle file explorer" }) -- toggle file explorer
-		keymap.set("n", "<leader>bf", ":Neotree buffers reveal float<CR>", {})
+		keymap.set("n", "<leader>bf", ":Neotree buffers reveal float<CR>", { desc = "Reveal buffers in modal" })
 	end,
 }
