@@ -30,5 +30,7 @@ keymap.set("n", "<C-q>", "<cmd>:q<CR>", { desc = "Quit nvim" })
 
 -- Visual Block --
 -- Move text up and down
-keymap.set("x", "<A-k>", ":move '<-2<CR>gv-gv", { desc = "move text block up" })
-keymap.set("x", "<A-j>", ":move '>+1<CR>gv-gv", { desc = "move text block down" })
+keymap.set("n", "<A-j>", ":m .+1<CR>==", { desc = "move line up (normal mode)" }) -- move line up(n)
+keymap.set("n", "<A-k>", ":m .-2<CR>==", { desc = "move line down(normal mode)" }) -- move line down(n)
+keymap.set("v", "<A-k>", ":move '<-2<CR>gv-gv", { desc = "move text block up" })
+keymap.set("v", "<A-j>", ":move '>+1<CR>gv-gv", { desc = "move text block down" })
