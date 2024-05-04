@@ -26,7 +26,7 @@ set $urgent-bg-color     #ee3355
 
 # set window colors
 # class                 border              background         text                 indicator
-client.focused          $bg-color           $bg-color          $white               $bg-color
+client.focused          $bg-color           $bg-color          $red               $bg-color
 client.unfocused        $inactive-bg-color  $inactive-bg-color $inactive-text-color $bg-color
 client.focused_inactive $inactive-bg-color  $inactive-bg-color $inactive-text-color $bg-color
 client.urgent           $urgent-bg-color    $urgent-bg-color   $text-color          $bg-color
@@ -60,7 +60,7 @@ set $mod Mod4
 
 # Font for window titles. Will also be used by the bar unless a different font
 # is used in the bar {} block below.
-font pango:monospace 16
+font pango:FiraCode Nerd Font 16
 
 # This font is widely installed, provides lots of unicode glyphs, right-to-left
 # text rendering and scalability on retina/hidpi displays (thanks to pango).
@@ -71,7 +71,7 @@ font pango:monospace 16
 
 # xss-lock grabs a logind suspend inhibit lock and will use i3lock to lock the
 # screen before suspend. Use loginctl lock-session to lock your screen.
-exec --no-startup-id xss-lock --transfer-sleep-lock -- "sh $HOME/dotfiles/configs/i3lock/lock.sh" --nofork
+exec --no-startup-id xss-lock --transfer-sleep-lock -- "sh $HOME/dotfiles_config/i3/i3lock_custom/lock.sh" --nofork
 
 # NetworkManager is the most popular way to manage wireless networks on Linux,
 # and nm-applet is a desktop environment-independent system tray GUI for it.
@@ -89,8 +89,7 @@ floating_modifier $mod
 
 # start a terminal
 # bindsym $mod+Return exec i3-sensible-terminal
-bindsym $mod+Return exec alacritty
-
+bindsym $mod+Return exec kitty
 
 # kill focused window
 bindsym $mod+Shift+q kill
@@ -239,7 +238,7 @@ bindsym $mod+p move workspace to output right
 ################################
 # Polybar
 ################################
-exec_always --no-startup-id $HOME/dotfiles/polybar/launch.sh
+exec_always --no-startup-id $HOME/.config/polybar/launch.sh
 # bindsym $mod+Shift+p exec "sh $HOME/dotfiles/configs/polybar/launch.sh &"
 
 ################################
@@ -247,7 +246,7 @@ exec_always --no-startup-id $HOME/dotfiles/polybar/launch.sh
 ################################
 # exec_always setxkbmap -layout us -variant altgr-intl
 
-exec_always setxkbmap -model abnt2 -layout br
+exec_always setxkbmap -model abnt2 -layout pt_br
 
 ################################
 # Background
@@ -277,7 +276,7 @@ smart_borders no_gaps
 ################################
 #exec_always --no-startup-id picom &
 #exec $HOME/.fehbg
-exec_always picom --config $HOME/dotfiles/picom/picom.conf &
+exec picom --config $HOME/.config/picom/picom.conf &
 
 ################################
 # Rofi
@@ -286,16 +285,14 @@ exec_always picom --config $HOME/dotfiles/picom/picom.conf &
 
 # exec_always set -eu | export DISPLAY=:0 | /usr/bin/feh --bg-fill --randomize /home/renan/Pictures/wallpapers/*
 
-
-
 ################################
 # Scripts
 ################################
 # Walppaper
-exec_always sh $HOME/dotfiles/scripts/wallpaper.sh
+# exec_always sh /myhome/lotofwallpapers/dotfiles/scripts/wallpaper.sh
 # Docker
 # More info: https://docs.docker.com/engine/security/rootless/
-exec_always dockerd-rootless.sh --experimental
+# exec_always dockerd-rootless.sh --experimental
 
 # # Enable/disable caps mode
 # mode "caps" {
@@ -303,25 +300,9 @@ exec_always dockerd-rootless.sh --experimental
 # }
 # bindsym Caps_Lock mode "caps"
 
-exec_always --no-startup-id dunst -config ~/.config/dunst/dunstrc
+# exec_always --no-startup-id dunst -config ~/.config/dunst/dunstrc
 
 bar {
-    output            LVDS1
-    status_command    i3status
+    status_command    i3status -c $HOME/.config/i3/i3status/config
     position          top
-    mode              hide
-    workspace_buttons yes
-    tray_output       none
-
-    font -misc-fixed-medium-r-normal--13-120-75-75-C-70-iso10646-1
-
-    colors {
-        background #000000
-        statusline #ffffff
-
-        focused_workspace  #ffffff #285577
-        active_workspace   #ffffff #333333
-        inactive_workspace #888888 #222222
-        urgent_workspace   #ffffff #900000
-    }
 }
