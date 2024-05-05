@@ -99,10 +99,10 @@ bindsym $mod+d exec --no-startup-id dmenu_run
 # bindcode $mod+40 exec --no-startup-id i3-dmenu-desktop
 
 # change focus
-bindsym $mod+j focus left
-bindsym $mod+k focus down
-bindsym $mod+l focus up
-bindsym $mod+semicolon focus right
+# bindsym $mod+j focus left
+# bindsym $mod+k focus down
+# bindsym $mod+l focus up
+# bindsym $mod+semicolon focus right
 
 # alternatively, you can use the cursor keys:
 bindsym $mod+Left focus left
@@ -111,10 +111,10 @@ bindsym $mod+Up focus up
 bindsym $mod+Right focus right
 
 # move focused window
-bindsym $mod+Shift+j move left
-bindsym $mod+Shift+k move down
-bindsym $mod+Shift+l move up
-bindsym $mod+Shift+semicolon move right
+# bindsym $mod+Shift+j move left
+# bindsym $mod+Shift+k move down
+# bindsym $mod+Shift+l move up
+# bindsym $mod+Shift+semicolon move right
 
 # alternatively, you can use the cursor keys:
 bindsym $mod+Shift+Left move left
@@ -190,7 +190,7 @@ bindsym $mod+Shift+c reload
 # restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
 bindsym $mod+Shift+r restart
 # exit i3 (logs you out of your X session)
-bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -B 'Yes, exit i3' 'i3-msg exit'"
+bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Do you really want to exit i3? ' -B 'Yes, exit i3' 'i3-msg exit'"
 
 # resize window (you can also use the mouse for that)
 mode "resize" {
@@ -220,20 +220,47 @@ mode "resize" {
 bindsym $mod+r mode "resize"
 
 ################################
+# Keyboard 
+################################
+# exec_always setxkbmap -layout us
+exec_always setxkbmap -model abnt2 -layout br
+
+################################
+# Background
+################################
+
+################################
+# i3 Gaps 
+################################
+for_window [class=".*"] border pixel 0
+gaps inner 5
+gaps outer 1
+gaps horizontal 2
+################# i3-radius #######################
+smart_borders on
+smart_borders no_gaps
+#border_radius 2
+
+################################
 # Picom
 ################################
 #exec_always --no-startup-id picom &
-exec_always feh --bg-scale $HOME/Pictures/black_cat.jpg &
+exec_always feh --bg-scale $HOME/Pictures/mountain.jpg &
 exec_always picom --config $HOME/.config/picom/picom.conf &
 
 # Start i3bar to display a workspace bar (plus the system information i3status
 # finds out, if available)
-bar {
-        status_command i3status -c $HOME/.config/i3/i3status/config
-        position bottom
-}
 
 bar {
         status_command i3status -c $HOME/.config/i3/i3status/config_top
         position top
 }
+
+bar {
+        status_command i3blocks
+        position bottom
+}
+# bar {
+#         status_command i3status -c $HOME/.config/i3/i3status/config
+#         position bottom
+# }
