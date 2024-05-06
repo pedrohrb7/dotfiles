@@ -78,7 +78,7 @@ exec --no-startup-id xss-lock --transfer-sleep-lock -- i3lock --nofork
 # and nm-applet is a desktop environment-independent system tray GUI for it.
 exec_always --no-startup-id nm-applet
 exec_always --no-startup-id blueman-applet
-exec_always --no-startup-id pa-applet
+exec --no-startup-id pa-applet
 
 # Use pactl to adjust volume in PulseAudio.
 set $refresh_i3status killall -SIGUSR1 i3status
@@ -128,6 +128,11 @@ bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOU
 
 # start a terminal
 bindsym $mod+Return exec i3-sensible-terminal
+
+# screeshot
+bindsym --release Print         exec gnome-screenshot
+bindsym --release Mod1+Sys_Req  exec gnome-screenshot -w
+bindsym --release Shift+Print   exec gnome-screenshot -a
 
 # change container layout (stacked, tabbed, toggle split)
 bindsym $mod+s layout stacking
@@ -254,14 +259,14 @@ mode "resize" {
 ################################
 # i3 Gaps 
 ################################
-for_window [class=".*"] border pixel 0
+for_window [class=".*"] border pixel 2
 gaps inner 5
 gaps outer 1
 gaps horizontal 2
 ################# i3-radius #######################
 smart_borders on
 smart_borders no_gaps
-#border_radius 2
+# border_radius 2
 
 ################################
 # Start i3bar to display a workspace bar (plus the system information i3status
@@ -278,8 +283,10 @@ bar {
 #         status_command i3blocks
 #         position bottom
 # }
+
 bar {
         status_command i3status -c $HOME/.config/i3/i3status/config
         position bottom
         output eDP-1
+        tray_padding 2
 }
