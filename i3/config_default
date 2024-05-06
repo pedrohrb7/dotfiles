@@ -108,7 +108,7 @@ exec xrandr --output VGA-1 --auto --right-of eDP-1
 ################################
 # Polybar
 ################################
-exec_always --no-startup-id polybar $HOME/.config/i3/polybar/config.ini &
+exec polybar &
 # exec_always --no-startup-id $HOME/.config/polybar/launch.sh
 
 ################################
