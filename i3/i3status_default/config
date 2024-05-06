@@ -8,12 +8,21 @@ general {
 order += "wireless wlan0"
 order += "ethernet enp0s25"
 order += "volume master"
+order += "volume mic" 
 order += "battery 0"
 order += "tztime local"
 
+volume mic { 
+  format = "" 
+  format_muted = " " 
+  device = "default" 
+  mixer = "Rear Mic" 
+  mixer_idx = 0 
+}   
+
 wireless wlan0 {
-        format_up = "Wifi: (%quality at %essid, %bitrate) | %ip"
-        format_down = "Wifi: down"
+        format_up = " : (%quality at %essid, %bitrate) | %ip"
+        format_down = " : down"
 }
 
 ethernet enp0s25 {
@@ -22,7 +31,7 @@ ethernet enp0s25 {
 }
 
 tztime local {
-        format = "%d-%m-%Y %H:%M:%S"
+        format = "  %d-%m-%Y %H:%M:%S"
         hide_if_equals_localtime = false
         timezone = "America/Sao_Paulo"
         locale = "pt_BR.UTF-8"
@@ -44,5 +53,5 @@ battery 0 {
         status_unk = "? UNK"
         status_full = "☻ FULL"
         path = "/sys/class/power_supply/BAT%d/uevent"
-        low_threshold = 10
+        low_threshold = 20
 }

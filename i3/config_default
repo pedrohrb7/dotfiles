@@ -10,7 +10,7 @@
 # Please see https://i3wm.org/docs/userguide.html for a complete reference!
 # My custom settings and base colors
 
-# set color variables
+# set color variables and styles for the interface
 # optional theme colorscheme
 set $grey                #334455
 set $magenta             #ddbbcc
@@ -37,30 +37,39 @@ client.focused_inactive $inactive-bg-color  $inactive-bg-color $inactive-text-co
 client.urgent           $urgent-bg-color    $urgent-bg-color   $text-color          $bg-color
 client.background       $bg-color
 
-focus_follows_mouse yes
-
-#
-#
-#
-#
-
-set $mod Mod4
-
 # Font for window titles. Will also be used by the bar unless a different font
 # is used in the bar {} block below.
 font pango:FiraCode Nerd Font 8
 
-# This font is widely installed, provides lots of unicode glyphs, right-to-left
-# text rendering and scalability on retina/hidpi displays (thanks to pango).
-#font pango:DejaVu Sans Mono 8
+#
+#
+#
+#
 
+###########################
+# General settings
+###########################
+# Use Mouse+$mod to drag floating windows to their wanted position
+floating_modifier $mod
+
+focus_follows_mouse yes
+set $mod Mod4
+
+exec_always setxkbmap -layout us
+# exec_always setxkbmap -model abnt2 -layout br
+
+###########################
+
+###########################
+# Startup configs
+# this section should be used to set what need startup on login
+###########################
 # Start XDG autostart .desktop files using dex. See also
 # https://wiki.archlinux.org/index.php/XDG_Autostart
 exec --no-startup-id dex --autostart --environment i3
 
 # The combination of xss-lock, nm-applet and pactl is a popular choice, so
 # they are included here as an example. Modify as you see fit.
-
 # xss-lock grabs a logind suspend inhibit lock and will use i3lock to lock the
 # screen before suspend. Use loginctl lock-session to lock your screen.
 exec --no-startup-id xss-lock --transfer-sleep-lock -- i3lock --nofork
@@ -69,16 +78,49 @@ exec --no-startup-id xss-lock --transfer-sleep-lock -- i3lock --nofork
 # and nm-applet is a desktop environment-independent system tray GUI for it.
 exec --no-startup-id nm-applet
 exec --no-startup-id blueman-applet
+exec --no-startup-id pa-applet
 
 # Use pactl to adjust volume in PulseAudio.
 set $refresh_i3status killall -SIGUSR1 i3status
-bindsym XF86AudioRaiseVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ +10% && $refresh_i3status
-bindsym XF86AudioLowerVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ -10% && $refresh_i3status
-bindsym XF86AudioMute exec --no-startup-id pactl set-sink-mute @DEFAULT_SINK@ toggle && $refresh_i3status
-bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOURCE@ toggle && $refresh_i3status
 
-# Use Mouse+$mod to drag floating windows to their wanted position
-floating_modifier $mod
+################################
+# Background
+# Feh
+# Picom
+################################
+#exec_always --no-startup-id picom &
+exec_always feh --bg-scale $HOME/Pictures/mountain.jpg &
+exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
+
+################################
+# screen
+################################
+# exec xrandr --output HDMI-A-0 --mode 2560x1440
+# exec_always xrandr --output HDMI-1 --auto --left-of eDP-1
+# eDP-1 connected primary 1366x768+0+0 (normal left inverted right x axis y axis) 310mm x 174mm
+# VGA-1 connected 1366x768+1366+0 (normal left inverted right x axis y axis) 410mm x 230mm
+# exec xrandr --output HDMI-A-0 --mode 3840x2160
+exec xrandr --output VGA-1 --auto --left-of eDP-1
+
+################################
+# Polybar
+################################
+exec_always --no-startup-id $HOME/.config/polybar/launch.sh
+# bindsym $mod+Shift+p exec "sh $HOME/dotfiles/configs/polybar/launch.sh &"
+
+################################
+# Custom startup settings 
+################################
+# exec --no-startup-id /usr/lib/gsd-xsettings
+
+###########################
+# Keybinds and keymaps for the system
+###########################
+bindsym XF86AudioRaiseVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ +5% && $refresh_i3status
+bindsym XF86AudioLowerVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ -5% && $refresh_i3status
+bindsym XF86AudioMute exec --no-startup-id pactl set-sink-mute @DEFAULT_SINK@ toggle && $refresh_i3status
+
+bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOURCE@ toggle && $refresh_i3status
 
 # move tiling windows via drag & drop by left-clicking into the title bar,
 # or left-clicking anywhere into the window while holding the floating modifier.
@@ -87,18 +129,42 @@ floating_modifier $mod
 # start a terminal
 bindsym $mod+Return exec i3-sensible-terminal
 
-# kill focused window
-bindsym $mod+Shift+q kill
+# change container layout (stacked, tabbed, toggle split)
+bindsym $mod+s layout stacking
+bindsym $mod+w layout tabbed
+bindsym $mod+e layout toggle split
 
 # start dmenu (a program launcher)
 bindsym $mod+d exec --no-startup-id dmenu_run
+# split in horizontal orientation
+bindsym $mod+h split h
+# split in vertical orientation
+bindsym $mod+v split v
+# enter fullscreen mode for the focused container
+bindsym $mod+f fullscreen toggle
+# focus the parent container
+bindsym $mod+a focus parent
 
-# A more modern dmenu replacement is rofi:
-# bindcode $mod+40 exec "rofi -modi drun,run -show drun"
-# There also is i3-dmenu-desktop which only displays applications shipping a
-# .desktop file. It is a wrapper around dmenu, so you need that installed.
-# bindcode $mod+40 exec --no-startup-id i3-dmenu-desktop
+bindsym $mod+r mode "resize"
 
+# kill focused window
+bindsym $mod+Shift+q kill
+# toggle tiling / floating
+bindsym $mod+Shift+space floating toggle
+# change focus between tiling / floating windows
+bindsym $mod+space focus mode_toggle
+# reload the configuration file
+bindsym $mod+Shift+c reload
+# restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
+bindsym $mod+Shift+r restart
+# Moving workspaces between screens 
+bindsym $mod+p move workspace to output right
+
+# exit i3 (logs you out of your X session)
+bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Do you really want to exit i3? ' -B 'Yes, exit i3' 'i3-msg exit'"
+
+# focus the child container
+#bindsym $mod+d focus child
 # change focus
 bindsym $mod+j focus left
 bindsym $mod+k focus down
@@ -122,32 +188,6 @@ bindsym $mod+Shift+Left move left
 bindsym $mod+Shift+Down move down
 bindsym $mod+Shift+Up move up
 bindsym $mod+Shift+Right move right
-
-# split in horizontal orientation
-bindsym $mod+h split h
-
-# split in vertical orientation
-bindsym $mod+v split v
-
-# enter fullscreen mode for the focused container
-bindsym $mod+f fullscreen toggle
-
-# change container layout (stacked, tabbed, toggle split)
-bindsym $mod+s layout stacking
-bindsym $mod+w layout tabbed
-bindsym $mod+e layout toggle split
-
-# toggle tiling / floating
-bindsym $mod+Shift+space floating toggle
-
-# change focus between tiling / floating windows
-bindsym $mod+space focus mode_toggle
-
-# focus the parent container
-bindsym $mod+a focus parent
-
-# focus the child container
-#bindsym $mod+d focus child
 
 # Define names for default workspaces for which we configure key bindings later on.
 # We use variables to avoid repeating the names in multiple places.
@@ -186,13 +226,6 @@ bindsym $mod+Shift+8 move container to workspace number $ws8
 bindsym $mod+Shift+9 move container to workspace number $ws9
 bindsym $mod+Shift+0 move container to workspace number $ws10
 
-# reload the configuration file
-bindsym $mod+Shift+c reload
-# restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
-bindsym $mod+Shift+r restart
-# exit i3 (logs you out of your X session)
-bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Do you really want to exit i3? ' -B 'Yes, exit i3' 'i3-msg exit'"
-
 # resize window (you can also use the mouse for that)
 mode "resize" {
         # These bindings trigger as soon as you enter the resize mode
@@ -218,36 +251,6 @@ mode "resize" {
         bindsym $mod+r mode "default"
 }
 
-bindsym $mod+r mode "resize"
-
-################################
-# Keyboard 
-################################
-exec_always setxkbmap -layout us
-# exec_always setxkbmap -model abnt2 -layout br
-
-################################
-# Background
-# Feh
-# Picom
-################################
-#exec_always --no-startup-id picom &
-exec_always feh --bg-scale $HOME/Pictures/mountain.jpg &
-exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
-
-################################
-# screen
-################################
-# exec xrandr --output HDMI-A-0 --mode 2560x1440
-# exec_always xrandr --output HDMI-1 --auto --left-of eDP-1
-# eDP-1 connected primary 1366x768+0+0 (normal left inverted right x axis y axis) 310mm x 174mm
-# VGA-1 connected 1366x768+1366+0 (normal left inverted right x axis y axis) 410mm x 230mm
-exec xrandr --output VGA-1 --auto --left-of eDP-1
-# exec xrandr --output HDMI-A-0 --mode 3840x2160
-
-# Moving workspaces between screens 
-bindsym $mod+p move workspace to output right
-
 ################################
 # i3 Gaps 
 ################################
@@ -259,17 +262,6 @@ gaps horizontal 2
 smart_borders on
 smart_borders no_gaps
 #border_radius 2
-
-################################
-# Polybar
-################################
-exec_always --no-startup-id $HOME/.config/polybar/launch.sh
-# bindsym $mod+Shift+p exec "sh $HOME/dotfiles/configs/polybar/launch.sh &"
-
-################################
-# Custom startup settings 
-################################
-exec --no-startup-id /usr/lib/gsd-xsettings
 
 ################################
 # Start i3bar to display a workspace bar (plus the system information i3status
