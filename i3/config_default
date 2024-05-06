@@ -64,6 +64,9 @@ exec_always setxkbmap -layout us
 # Startup configs
 # this section should be used to set what need startup on login
 ###########################
+# this settings helps to keep 
+exec --no-startup-id /usr/bin/gnome-keyring-daemon --start --components=secrets
+
 # Start XDG autostart .desktop files using dex. See also
 # https://wiki.archlinux.org/index.php/XDG_Autostart
 exec --no-startup-id dex --autostart --environment i3
@@ -100,13 +103,13 @@ exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
 # eDP-1 connected primary 1366x768+0+0 (normal left inverted right x axis y axis) 310mm x 174mm
 # VGA-1 connected 1366x768+1366+0 (normal left inverted right x axis y axis) 410mm x 230mm
 # exec xrandr --output HDMI-A-0 --mode 3840x2160
-exec xrandr --output VGA-1 --auto --left-of eDP-1
+exec xrandr --output VGA-1 --auto --right-of eDP-1
 
 ################################
 # Polybar
 ################################
-exec_always --no-startup-id $HOME/.config/polybar/launch.sh
-# bindsym $mod+Shift+p exec "sh $HOME/dotfiles/configs/polybar/launch.sh &"
+exec_always --no-startup-id polybar $HOME/.config/i3/polybar/config.ini &
+# exec_always --no-startup-id $HOME/.config/polybar/launch.sh
 
 ################################
 # Custom startup settings 
@@ -127,7 +130,7 @@ bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOU
 # tiling_drag modifier titlebar
 
 # start a terminal
-bindsym $mod+Return exec i3-sensible-terminal
+bindsym $mod+Return exec kitty
 
 # screeshot
 bindsym --release Print         exec --no-startup-id gnome-screenshot -i
@@ -272,21 +275,21 @@ smart_borders no_gaps
 # Start i3bar to display a workspace bar (plus the system information i3status
 # finds out, if available)
 
-bar {
-        status_command i3status -c $HOME/.config/i3/i3status/config_top
-        position top
-        output eDP-1
-        tray_output none
-}
+# bar {
+#         status_command i3status -c $HOME/.config/i3/i3status/config_top
+#         position top
+#         output eDP-1
+#         tray_output none
+# }
 
 # bar {
 #         status_command i3blocks
 #         position bottom
 # }
 
-bar {
-        status_command i3status -c $HOME/.config/i3/i3status/config
-        position bottom
-        output eDP-1
-        tray_padding 2
-}
+# bar {
+#         status_command i3status -c $HOME/.config/i3/i3status/config
+#         position bottom
+#         output eDP-1
+#         tray_padding 2
+# }
