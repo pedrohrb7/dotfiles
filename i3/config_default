@@ -130,9 +130,9 @@ bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOU
 bindsym $mod+Return exec i3-sensible-terminal
 
 # screeshot
-bindsym --release Print         exec gnome-screenshot
-bindsym --release Mod1+Sys_Req  exec gnome-screenshot -w
-bindsym --release Shift+Print   exec gnome-screenshot -a
+bindsym --release Print         exec --no-startup-id gnome-screenshot -i
+bindsym --release Mod1+Sys_Req  exec --no-startup-id gnome-screenshot -w
+bindsym --release Shift+Print   exec --no-startup-id gnome-screenshot -a
 
 # change container layout (stacked, tabbed, toggle split)
 bindsym $mod+s layout stacking
