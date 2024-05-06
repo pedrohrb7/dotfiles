@@ -92,6 +92,7 @@ bindsym $mod+Shift+q kill
 
 # start dmenu (a program launcher)
 bindsym $mod+d exec --no-startup-id dmenu_run
+
 # A more modern dmenu replacement is rofi:
 # bindcode $mod+40 exec "rofi -modi drun,run -show drun"
 # There also is i3-dmenu-desktop which only displays applications shipping a
@@ -99,10 +100,10 @@ bindsym $mod+d exec --no-startup-id dmenu_run
 # bindcode $mod+40 exec --no-startup-id i3-dmenu-desktop
 
 # change focus
-# bindsym $mod+j focus left
-# bindsym $mod+k focus down
-# bindsym $mod+l focus up
-# bindsym $mod+semicolon focus right
+bindsym $mod+j focus left
+bindsym $mod+k focus down
+bindsym $mod+l focus up
+bindsym $mod+semicolon focus right
 
 # alternatively, you can use the cursor keys:
 bindsym $mod+Left focus left
@@ -222,12 +223,30 @@ bindsym $mod+r mode "resize"
 ################################
 # Keyboard 
 ################################
-# exec_always setxkbmap -layout us
-exec_always setxkbmap -model abnt2 -layout br
+exec_always setxkbmap -layout us
+# exec_always setxkbmap -model abnt2 -layout br
 
 ################################
 # Background
+# Feh
+# Picom
 ################################
+#exec_always --no-startup-id picom &
+exec_always feh --bg-scale $HOME/Pictures/mountain.jpg &
+exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
+
+################################
+# screen
+################################
+# exec xrandr --output HDMI-A-0 --mode 2560x1440
+# exec_always xrandr --output HDMI-1 --auto --left-of eDP-1
+# eDP-1 connected primary 1366x768+0+0 (normal left inverted right x axis y axis) 310mm x 174mm
+# VGA-1 connected 1366x768+1366+0 (normal left inverted right x axis y axis) 410mm x 230mm
+exec xrandr --output VGA-1 --auto --left-of eDP-1
+# exec xrandr --output HDMI-A-0 --mode 3840x2160
+
+# Moving workspaces between screens 
+bindsym $mod+p move workspace to output right
 
 ################################
 # i3 Gaps 
@@ -242,25 +261,33 @@ smart_borders no_gaps
 #border_radius 2
 
 ################################
-# Picom
+# Polybar
 ################################
-#exec_always --no-startup-id picom &
-exec_always feh --bg-scale $HOME/Pictures/mountain.jpg &
-exec_always picom --config $HOME/.config/picom/picom.conf &
+exec_always --no-startup-id $HOME/.config/polybar/launch.sh
+# bindsym $mod+Shift+p exec "sh $HOME/dotfiles/configs/polybar/launch.sh &"
 
+################################
+# Custom startup settings 
+################################
+exec --no-startup-id /usr/lib/gsd-xsettings
+
+################################
 # Start i3bar to display a workspace bar (plus the system information i3status
 # finds out, if available)
 
 bar {
         status_command i3status -c $HOME/.config/i3/i3status/config_top
         position top
+        output eDP-1
+        tray_output none
 }
 
-bar {
-        status_command i3blocks
-        position bottom
-}
 # bar {
-#         status_command i3status -c $HOME/.config/i3/i3status/config
+#         status_command i3blocks
 #         position bottom
 # }
+bar {
+        status_command i3status -c $HOME/.config/i3/i3status/config
+        position bottom
+        output eDP-1
+}

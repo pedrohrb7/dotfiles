@@ -1,20 +1,22 @@
 general {
         output_format = "i3bar"
         colors = true
-        interval = 5
+        interval = 1
         separator = "  ||  "
 }
 
 order += "wireless wlan0"
-order += "ethernet eth0"
+order += "ethernet enp0s25"
+order += "volume master"
 order += "battery 0"
+order += "tztime local"
 
 wireless wlan0 {
         format_up = "Wifi: (%quality at %essid, %bitrate) | %ip"
         format_down = "Wifi: down"
 }
 
-ethernet eth0 {
+ethernet enp0s25 {
         format_up = "LAN: %ip (%speed)"
         format_down = "LAN: down"
 }
@@ -26,13 +28,12 @@ tztime local {
         locale = "pt_BR.UTF-8"
 }
 
-cpu_usage {
-        format = "all: %usage"
-}
-
-memory {
-        format = "used: %used !== free: %free"
-        threshold_degraded = "10%"
+volume master {
+        format = "♪: %volume"
+        format_muted = "♪: muted (%volume)"
+        device = "default"
+        mixer = "Master"
+        mixer_idx = 0
 }
 
 battery 0 {
