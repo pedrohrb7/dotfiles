@@ -1,1 +1,1 @@
-![Terminator screenshot](https://github.com/pedrohrb7/nvim-config/blob/trunk/terminator.png?raw=true)
+![Terminal screenshot](https://github.com/pedrohrb7/nvim-config/blob/trunk/kitty.png?raw=true)
