@@ -3,7 +3,6 @@
 #
 # Should you change your keyboard layout some time, delete
 # this file and re-run i3-config-wizard(1).
-#
 
 # i3 config file (v4)
 #
@@ -108,8 +107,8 @@ exec xrandr --output VGA-1 --auto --right-of eDP-1
 ################################
 # Polybar
 ################################
-exec polybar &
-# exec_always --no-startup-id $HOME/.config/polybar/launch.sh
+# exec polybar &
+# exec "bash $XDG_CUSTOM_DOTFILES/polybar/launch.sh &"
 
 ################################
 # Custom startup settings 
@@ -275,21 +274,22 @@ smart_borders no_gaps
 # Start i3bar to display a workspace bar (plus the system information i3status
 # finds out, if available)
 
-# bar {
-#         status_command i3status -c $HOME/.config/i3/i3status/config_top
-#         position top
-#         output eDP-1
-#         tray_output none
-# }
+bar {
+        status_command i3status -c $HOME/.config/i3/i3status/config_top
+        position top
+        output eDP-1
+        tray_output none
+}
 
 # bar {
-#         status_command i3blocks
+#         status_command i3blocks -c $HOME/.config/i3/i3blocks/config
 #         position bottom
+#         output VGA-1
 # }
 
-# bar {
-#         status_command i3status -c $HOME/.config/i3/i3status/config
-#         position bottom
-#         output eDP-1
-#         tray_padding 2
-# }
+bar {
+        status_command i3status -c $HOME/.config/i3/i3status/config
+        position bottom
+        output eDP-1
+        tray_padding 2
+}
