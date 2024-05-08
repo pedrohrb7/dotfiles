@@ -5,8 +5,9 @@ interval=once
 color=#91E78B
 
 [time]
-command=date '  %d-%m-%Y %H:%M:%S'
+command=date '+%d-%m-%Y %H:%M:%S'
 interval=1
+color=#91E78B
 
 [weather]
 command=curl -Ss 'https://wttr.in?0&T&Q' | cut -c 16- | head -2 | xargs echo

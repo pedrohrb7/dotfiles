@@ -102,7 +102,7 @@ exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
 # eDP-1 connected primary 1366x768+0+0 (normal left inverted right x axis y axis) 310mm x 174mm
 # VGA-1 connected 1366x768+1366+0 (normal left inverted right x axis y axis) 410mm x 230mm
 # exec xrandr --output HDMI-A-0 --mode 3840x2160
-exec xrandr --output VGA-1 --auto --right-of eDP-1
+# exec xrandr --output VGA-1 --auto --right-of eDP-1
 
 ################################
 # Polybar
@@ -283,8 +283,13 @@ bar {
 
 # bar {
 #         status_command i3blocks -c $HOME/.config/i3/i3blocks/config
+#         # i3bar_command i3bar --transparency
 #         position bottom
-#         output VGA-1
+#         colors {
+#             background #00000000
+#             statusline #00000000
+#         }
+#         # output VGA-1
 # }
 
 bar {
