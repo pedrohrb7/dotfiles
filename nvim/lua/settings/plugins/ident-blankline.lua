@@ -32,8 +32,8 @@ return {
 		hooks.register(hooks.type.SCOPE_HIGHLIGHT, hooks.builtin.scope_highlight_from_extmark)
 		ibl.setup({
 			debounce = 100,
-			indent = { char = "|", highlight = highlight },
-			whitespace = { highlight = { "Whitespace", "NonText" } },
+			indent = { highlight = highlight },
+			-- whitespace = { highlight = { "Whitespace", "NonText" } },
 		})
 	end,
 }
