@@ -5,6 +5,8 @@ general {
         separator = "  ||  "
 }
 
+order += "wireless wlan0"
+order += "ethernet enp0s25"
 order += "cpu_usage"
 order += "memory"
 
@@ -15,5 +17,15 @@ cpu_usage {
 memory {
         format = "used: %used / free: %free || T: %total"
         threshold_degraded = "10%"
+}
+
+wireless wlan0 {
+        format_up = " : (%quality at %essid, %bitrate) | %ip"
+        format_down = " : down"
+}
+
+ethernet enp0s25 {
+        format_up = "LAN: %ip (%speed)"
+        format_down = "LAN: down"
 }
 

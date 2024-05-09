@@ -5,8 +5,7 @@ general {
         separator = "  ||  "
 }
 
-order += "wireless wlan0"
-order += "ethernet enp0s25"
+order += "read_file BRIGHTNESS"
 order += "volume master"
 order += "volume mic" 
 order += "battery 0"
@@ -19,16 +18,6 @@ volume mic {
   mixer = "Rear Mic" 
   mixer_idx = 0 
 }   
-
-wireless wlan0 {
-        format_up = " : (%quality at %essid, %bitrate) | %ip"
-        format_down = " : down"
-}
-
-ethernet enp0s25 {
-        format_up = "LAN: %ip (%speed)"
-        format_down = "LAN: down"
-}
 
 tztime local {
         format = "  %d-%m-%Y %H:%M:%S"
@@ -54,4 +43,9 @@ battery 0 {
         status_full = "☻ FULL"
         path = "/sys/class/power_supply/BAT%d/uevent"
         low_threshold = 20
+}
+
+read_file BRIGHTNESS {
+        format = "BRI %content"
+        path = "/home/pedro/dotfiles-config/i3/i3status_default/brightness"
 }
