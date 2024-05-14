@@ -1,7 +1,7 @@
 #!/bin/sh
 
 BLANK='#00000000'
-CLEAR='#ffffff22'
+CLEAR='#ff00aa'
 DEFAULT='#ff00ffcc'
 TEXT='#ee00eeee'
 WRONG='#880000bb'
