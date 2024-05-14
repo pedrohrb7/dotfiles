@@ -11,11 +11,10 @@ return {
 		local null_ls_utils = require("null-ls.utils")
 		-- local code_actions = null_ls.builtins.code_actions
 
+		print("formatiing -> ", formatting)
 		null_ls.setup({
 			root_dir = null_ls_utils.root_pattern(".null-ls-root", "Makefile", ".git", "package.json"),
 			sources = {
-				formatting.stylua,
-				formatting.prettier,
 				require("none-ls-php.diagnostics.php"),
 				require("none-ls.code_actions.eslint_d").with({
 					condition = function(utils)
@@ -27,6 +26,7 @@ return {
 						return utils.root_has_file({ ".eslint.json", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc" }) -- only enable if root has .eslintrc file
 					end,
 				}),
+				formatting.prettierd,
 				-- diagnostics.eslint_d,
 				-- diagnostics.eslint_d.with({ -- js/ts linter
 				-- 	condition = function(utils)
