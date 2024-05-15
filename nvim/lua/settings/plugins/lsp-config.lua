@@ -51,21 +51,12 @@ return {
 					"prettier", -- prettier formatter
 					"stylua", -- lua formatter
 					"eslint_d", -- js linter
-					"golangci_lint", -- go linter
 					"terraform_fmt", -- terraform formatter
 					"terraform_validate", -- terraform linter
 					"shellcheck", -- shell linter
 					"buf", -- buf formatter
-					"gofumpt", -- go formatter "gofmt",
-					"golines",
-					"goimports_reviser",
 					"yamlfmt", -- yaml formatter
-					"goimports",
 					"spell", -- spell checker
-					"black",
-					"blackd",
-					"pylint",
-					"golangci_lint",
 				},
 			})
 

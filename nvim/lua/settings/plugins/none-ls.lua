@@ -17,12 +17,12 @@ return {
 				formatting.stylua,
 				formatting.prettier,
 				require("none-ls-php.diagnostics.php"),
-				require("none-ls.code_actions.eslint_d").with({
+				require("none-ls.code_actions.eslint").with({
 					condition = function(utils)
 						return utils.root_has_file({ ".eslint.json", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc" }) -- only enable if root has .eslintrc file
 					end,
 				}),
-				require("none-ls.diagnostics.eslint_d").with({
+				require("none-ls.diagnostics.eslint").with({
 					condition = function(utils)
 						return utils.root_has_file({ ".eslint.json", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc" }) -- only enable if root has .eslintrc file
 					end,
