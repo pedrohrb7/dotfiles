@@ -50,7 +50,7 @@ return {
 				ensure_installed = {
 					"prettier", -- prettier formatter
 					"stylua", -- lua formatter
-					"eslint_d", -- js linter
+					"eslint", -- js linter
 					"terraform_fmt", -- terraform formatter
 					"terraform_validate", -- terraform linter
 					"shellcheck", -- shell linter
