@@ -95,25 +95,30 @@ return {
 		local wkmappings = {
 			g = {
 				name = "Git",
-				j = { "<cmd>lua require 'gitsigns'.next_hunk()<cr>", "Next Hunk" },
-				k = { "<cmd>lua require 'gitsigns'.prev_hunk()<cr>", "Prev Hunk" },
-				g = { "<cmd>lua _LAZYGIT_TOGGLE()<CR>", "Lazygit" },
-				l = { "<cmd>lua require 'gitsigns'.blame_line()<cr>", "Blame" },
-				p = { "<cmd>lua require 'gitsigns'.preview_hunk()<cr>", "Preview Hunk" },
-				r = { "<cmd>lua require 'gitsigns'.reset_hunk()<cr>", "Reset Hunk" },
-				R = { "<cmd>lua require 'gitsigns'.reset_buffer()<cr>", "Reset Buffer" },
-				s = { "<cmd>lua require 'gitsigns'.stage_hunk()<cr>", "Stage Hunk" },
+				j = { ":Gitsigns next_hunk<CR>", "Next Hunk" },
+				k = { ":Gitsigns prev_hunk<CR>", "Prev Hunk" },
+				-- g = { "<cmd>lua _LAZYGIT_TOGGLE()<CR>", "Lazygit" },
+				l = { ":Gitsigns blame_line<cr>", "Blame" },
+				p = { ":Gitsigns preview_hunk<cr>", "Preview Hunk" },
+				r = { ":Gitsigns reset_hunk<cr>", "Reset Hunk" },
+				R = { ":Gitsigns reset_buffer<cr>", "Reset Buffer" },
+				s = { ":Gitsigns stage_hunk<cr>", "Stage Hunk" },
 				u = {
-					"<cmd>lua require 'gitsigns'.undo_stage_hunk()<cr>",
+					":Gitsigns undo_stage_hunk<cr>",
 					"Undo Stage Hunk",
 				},
 				o = { "<cmd>Telescope git_status<cr>", "Open changed file" },
 				b = { "<cmd>Telescope git_branches<cr>", "Checkout branch" },
 				c = { "<cmd>Telescope git_commits<cr>", "Checkout commit" },
 				d = {
-					"<cmd>Gitsigns diffthis HEAD<cr>",
+					":Gitsigns diffthis HEAD<cr>",
 					"Diff",
 				},
+				N = { ":Gitsigns toggle_numhl<cr>", "Toggle NumHL" },
+				S = { ":Gitsigns toggle_signs<cr>", "Toggle Signs" },
+				L = { ":Gitsigns toggle_linehl<cr>", "Toggle LineHL" },
+				W = { ":Gitsigns toggle_word_diff<cr>", "Toggle Word Diff" },
+				B = { ":Gitsigns toggle_current_line_blame<cr>", "Current Line Blame" },
 			},
 
 			s = {
@@ -121,6 +126,11 @@ return {
 				c = { "<cmd>Telescope colorscheme<cr>", "Colorscheme" },
 				r = { "<cmd>Telescope oldfiles<cr>", "Open Recent File" },
 				k = { "<cmd>Telescope keymaps<cr>", "Keymaps" },
+			},
+
+			c = {
+				name = "CodeAction",
+				c = { "<leader>cc", "Toggle Comment line" },
 			},
 		}
 		which_key.setup(opts)

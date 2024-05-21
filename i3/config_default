@@ -95,7 +95,7 @@ set $refresh_i3status killall -SIGUSR1 i3status
 # Picom
 ################################
 #exec_always --no-startup-id picom &
-exec_always feh --bg-scale /myhome/lotofwallpapers/0146.jpg &
+exec_always feh --bg-scale /myhome/lotofwallpapers/0064.jpg &
 exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
 
 ################################
