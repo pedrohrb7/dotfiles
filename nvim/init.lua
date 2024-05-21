@@ -1,5 +1,5 @@
 require("settings.core")
 require("settings.lazy")
 
-require("tokyonight")
-vim.cmd([[colorscheme tokyonight]])
+require("solarized")
+vim.cmd([[colorscheme solarized]])
