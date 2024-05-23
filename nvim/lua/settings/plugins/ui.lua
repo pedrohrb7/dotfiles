@@ -54,7 +54,7 @@ return {
 		priority = 1000,
 		config = function()
 			require("solarized").setup({
-				theme = "neo",
+				transparent = false, -- enable transparent background
 				styles = {
 					comments = { italic = false, bold = true },
 					functions = { italic = true },
