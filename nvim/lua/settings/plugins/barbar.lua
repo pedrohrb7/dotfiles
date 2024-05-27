@@ -6,8 +6,8 @@ return {
 			auto_hide = false,
 			insert_at_end = true,
 			icons = {
-				preset = "powerline",
-				alternate = { filetype = { enabled = true } },
+				-- preset = "",
+				-- alternate = { filetype = { enabled = true } },
 			},
 		})
 	end,

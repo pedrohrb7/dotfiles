@@ -7,11 +7,11 @@ return {
 		config = function()
 			local tkn = require("tokyonight")
 			tkn.setup({
-				style = "storm",
-				transparent = true,
-				styles = {
-					sidebars = "transparent",
-				},
+				style = "night",
+				-- transparent = true,
+				-- styles = {
+				-- 	sidebars = "transparent",
+				-- },
 				on_highlights = function(hl, c)
 					hl.CursorLineNr = {
 						bg = "cyan",
@@ -54,7 +54,7 @@ return {
 		priority = 1000,
 		config = function()
 			require("solarized").setup({
-				theme = "neo",
+				transparent = false, -- enable transparent background
 				styles = {
 					comments = { italic = false, bold = true },
 					functions = { italic = true },
