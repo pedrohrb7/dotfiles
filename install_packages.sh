@@ -22,7 +22,6 @@ fi
 # Lista de pacotes a serem instalados com pacman
 pacman_packages=(
   "neovim"
-  "git"
   "htop"
   "curl"
   "wget"
@@ -48,6 +47,7 @@ pacman_packages=(
 aur_packages=(
   "fzf-git"
   "arcolinux-logout"
+  "qtile-exras"
 )
 
 # install pacman packages
