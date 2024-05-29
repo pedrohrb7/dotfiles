@@ -24,6 +24,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import os
+import subprocess
 from libqtile import bar, layout, qtile, widget, hook
 from libqtile.config import Click, Drag, Group, Key, Match, Screen
 from libqtile.lazy import lazy
@@ -221,6 +223,7 @@ wl_input_rules = None
 # We choose LG3D to maximize irony: it is a 3D non-reparenting WM written in
 # java that happens to be on java's whitelist.
 # wmname = "LG3D"
+
 # --------------------------------------------------------
 # Windows Manager Name
 # --------------------------------------------------------
@@ -236,4 +239,4 @@ wmname = "QTILE"
 def autostart():
     autostartscript = "~/.config/qtile/autostart.sh"
     home = os.path.expanduser(autostartscript)
-    subprocess.Popen([home])
+    subprocess.call([home])
