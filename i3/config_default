@@ -68,7 +68,7 @@ exec --no-startup-id gnome-settings-daemon
 exec --no-startup-id /usr/bin/gnome-keyring-daemon --start --components=secrets
 
 #get auth work with polkit-lx
-exec --no-startup-id /usr/lib/lxpolkit
+# exec --no-startup-id /usr/lib/lxpolkit
 
 # Start XDG autostart .desktop files using dex. See also
 # https://wiki.archlinux.org/index.php/XDG_Autostart
@@ -95,8 +95,8 @@ set $refresh_i3status killall -SIGUSR1 i3status
 # Picom
 ################################
 #exec_always --no-startup-id picom &
-exec_always feh --bg-scale /myhome/lotofwallpapers/0064.jpg &
-exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
+# exec_always feh --bg-scale /myhome/lotofwallpapers/0064.jpg &
+# exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
 
 ################################
 # screen
