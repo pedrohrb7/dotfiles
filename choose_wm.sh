@@ -1,7 +1,7 @@
 #!/bin/zsh
 
 # Lista de ambientes de desktop disponíveis
-environments=("i3" "awesome" "qtile" "Exit")
+environments=("i3" "Awesome" "Qtile" "Exit")
 
 # Função para exibir o menu e obter a escolha do usuário
 show_menu() {
@@ -10,11 +10,23 @@ show_menu() {
     select env in "${environments[@]}"; do
         if [[ -n "$env" ]]; then
             echo "Você selecionou $env"
-            if [[ "$env" == "Exit" ]]; then
-                exit 0
-            else
-                startx $HOME/dotfiles-config/$env/.xinitrc &
-            fi
+            case $env in
+                "i3")
+                    exec i3
+                    ;;
+                "Awesome")
+                    exec awesome
+                    ;;
+                "Qtile")
+                    exec qtile
+                    ;;
+                "Exit")
+                    exit 0
+                    ;;
+                *)
+                    echo "Opção inválida. Tente novamente."
+                    ;;
+            esac
         else
             echo "Opção inválida. Tente novamente."
         fi

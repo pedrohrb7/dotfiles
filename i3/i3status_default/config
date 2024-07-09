@@ -5,6 +5,8 @@ general {
         separator = "  ||  "
 }
 
+order += "cpu_usage"
+order += "memory"
 order += "read_file BRIGHTNESS"
 order += "volume master"
 order += "volume mic" 
@@ -48,4 +50,13 @@ battery 0 {
 read_file BRIGHTNESS {
         format = "BRI %content"
         path = "/home/pedro/dotfiles-config/i3/i3status_default/brightness"
+}
+
+cpu_usage {
+        format = "CPU: %usage"
+}
+
+memory {
+        format = "mem: %used"
+        threshold_degraded = "10%"
 }

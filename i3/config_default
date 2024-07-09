@@ -54,8 +54,9 @@ floating_modifier $mod
 focus_follows_mouse yes
 set $mod Mod4
 
-exec_always setxkbmap -layout us
-# exec_always setxkbmap -model abnt2 -layout br
+# exec_always setxkbmap -layout us
+# exec_always setxkbmap -model thinkpad -layout br
+exec_always setxkbmap -model abnt-2 -layout br -variant thinkpad
 
 ###########################
 
@@ -85,6 +86,7 @@ exec --no-startup-id dex --autostart --environment i3
 exec_always --no-startup-id nm-applet
 exec_always --no-startup-id blueman-applet
 exec --no-startup-id pa-applet
+exec --no-startup-id /usr/bin/emacs --daemon
 
 # Use pactl to adjust volume in PulseAudio.
 set $refresh_i3status killall -SIGUSR1 i3status
@@ -94,7 +96,7 @@ set $refresh_i3status killall -SIGUSR1 i3status
 # Feh
 # Picom
 ################################
-#exec_always --no-startup-id picom &
+# exec_always --no-startup-id picom &
 # exec_always feh --bg-scale /myhome/lotofwallpapers/0064.jpg &
 # exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
 
@@ -138,7 +140,7 @@ bindsym XF86MonBrightnessDown exec --no-startup-id brightnessctl s 5%- && echo $
 
 # block my screen
 bindsym $mod+Ctrl+l exec /bin/lock
-exec xautolock -time 10 -locker lock
+# exec xautolock -time 10 -locker lock
 
 # start a terminal
 bindsym $mod+Return exec kitty
@@ -282,12 +284,12 @@ smart_borders no_gaps
 # Start i3bar to display a workspace bar (plus the system information i3status
 # finds out, if available)
 
-bar {
-        status_command i3status -c $HOME/.config/i3/i3status/config_top
-        position top
-        output eDP-1
-        tray_output none
-}
+# bar {
+#         status_command i3status -c $HOME/.config/i3/i3status/config_top
+#         position top
+#         output eDP-1
+#         tray_output none
+# }
 
 # bar {
 #         status_command i3blocks -c $HOME/.config/i3/i3blocks/config
@@ -304,6 +306,6 @@ bar {
         status_command i3status -c $HOME/.config/i3/i3status/config
         font pango:FiraCode Nerd Font 8
         position bottom
-        output eDP-1
+        # output eDP-1
         tray_padding 2
 }

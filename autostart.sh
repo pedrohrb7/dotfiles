@@ -10,4 +10,5 @@ function run {
 run "nitrogen --restore"
 # run "xscreensaver --no-splash"
 run "picom -b -f --config $HOME/.config/picom/picom.conf"
+run "/usr/bin/emacs --daemon"
 run "nm-applet"
