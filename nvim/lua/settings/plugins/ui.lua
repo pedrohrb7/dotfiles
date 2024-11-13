@@ -11,8 +11,11 @@ return {
 				transparent = true,
 				styles = {
 					sidebars = "transparent",
+					comments = { italic = true, bold = true },
+					functions = { italic = true },
+					variables = { italic = true },
 				},
-				on_highlights = function(hl, c)
+				on_highlights = function(hl)
 					hl.CursorLineNr = {
 						bg = "cyan",
 						fg = "black",
@@ -31,9 +34,9 @@ return {
 			require("solarized").setup({
 				transparent = false, -- enable transparent background
 				styles = {
-					comments = { italic = false, bold = true },
+					comments = { italic = true, bold = true },
 					functions = { italic = true },
-					variables = { italic = false },
+					variables = { italic = true },
 				},
 			})
 		end,

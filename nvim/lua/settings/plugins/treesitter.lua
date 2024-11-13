@@ -27,8 +27,8 @@ return {
 				"javascript",
 				"html",
 			},
-			-- auto_install = true,
-			sync_install = false,
+			auto_install = true,
+			sync_install = true,
 			highlight = { enable = true },
 			indent = { enable = true },
 		})

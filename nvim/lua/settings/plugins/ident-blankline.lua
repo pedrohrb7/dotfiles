@@ -26,6 +26,7 @@ return {
 			vm.api.nvim_set_hl(0, "RainbowGreen", { fg = "#98C379" })
 			vm.api.nvim_set_hl(0, "RainbowViolet", { fg = "#C678DD" })
 			vm.api.nvim_set_hl(0, "RainbowCyan", { fg = "#56B6C2" })
+			vm.api.nvim_set_hl(0, "RainbowLavender", { fg = "#45707a" })
 		end)
 
 		vm.g.rainbow_delimiters = { highlight = highlight }
