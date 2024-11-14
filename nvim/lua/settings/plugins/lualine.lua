@@ -7,7 +7,7 @@ return {
 		luaLine.setup({
 			options = {
 				icons_enabled = true,
-				theme = "molokai",
+				theme = "ayu_dark",
 				disabled_filetypes = {
 					statusline = { "neo-tree", "alpha" },
 				},

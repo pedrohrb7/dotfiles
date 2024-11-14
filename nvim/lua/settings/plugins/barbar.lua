@@ -5,6 +5,7 @@ return {
 			animation = true,
 			auto_hide = false,
 			insert_at_end = true,
+			no_name_title = "Empty",
 			icons = {
 				-- preset = "",
 				-- alternate = { filetype = { enabled = true } },
