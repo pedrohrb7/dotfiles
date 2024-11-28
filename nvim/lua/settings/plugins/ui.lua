@@ -22,7 +22,7 @@ return {
 					}
 				end,
 			})
-			vim.cmd([[colorscheme tokyonight]])
+			-- vim.cmd([[colorscheme tokyonight]])
 		end,
 	},
 
@@ -32,12 +32,20 @@ return {
 		priority = 1000,
 		config = function()
 			require("solarized").setup({
-				transparent = false, -- enable transparent background
+				transparent = {
+					enabled = true,
+				},
+				variant = "spring",
+				error_lens = {
+					text = true,
+					symbol = true,
+				},
 				styles = {
 					comments = { italic = true, bold = true },
 					functions = { italic = true },
 					variables = { italic = true },
 				},
+				vim.cmd.colorscheme("solarized"),
 			})
 		end,
 	},

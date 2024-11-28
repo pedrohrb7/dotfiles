@@ -21,6 +21,7 @@ return {
 				"vimdoc",
 				"css",
 				"tsx",
+				"java",
 				"typescript",
 				"dockerfile",
 				"yaml",

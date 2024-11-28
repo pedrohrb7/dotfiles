@@ -52,5 +52,12 @@ return {
 
 		keymap.set("n", "<leader>ee", "<cmd>Neotree toggle<CR>", { desc = "Toggle file explorer" }) -- toggle file explorer
 		keymap.set("n", "<leader>bf", ":Neotree buffers reveal float<CR>", { desc = "Reveal buffers in modal" })
+		keymap.set(
+			"n",
+			"--",
+			":Neotree reveal<CR>",
+			{ noremap = true, silent = true },
+			{ desc = "Reveal file under cursos" }
+		)
 	end,
 }
