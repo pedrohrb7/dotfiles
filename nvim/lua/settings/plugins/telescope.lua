@@ -26,6 +26,14 @@ return {
 		telescope.setup({
 			defaults = {
 				path_display = { "smart" },
+				file_ignore_patterns = {
+					"node_modules",
+					".next",
+					"dist",
+					"bundle",
+					".git",
+					".yarn",
+				},
 				mappings = {
 					i = {
 						["<C-k>"] = actions.move_selection_previous, -- move to prev result
@@ -37,10 +45,18 @@ return {
 			},
 			pickers = {
 				find_files = {
-					theme = "ivy",
+					theme = "dropdown",
+					hidden = true,
 				},
 			},
 			extensions = {
+				media_files = {
+					-- filetypes whitelist
+					-- defaults to {"png", "jpg", "mp4", "webm", "pdf"}
+					filetypes = { "png", "webp", "jpg", "jpeg", "pdf" },
+					-- find command (defaults to `fd`)
+					find_cmd = "rg",
+				},
 				["ui-select"] = {
 					require("telescope.themes").get_dropdown({}),
 				},
@@ -49,6 +65,7 @@ return {
 
 		telescope.load_extension("fzf")
 		telescope.load_extension("ui-select")
+		telescope.load_extension("media_files")
 		-- set keymaps
 		local builtin = require("telescope.builtin")
 		vim.keymap.set("n", "<leader>ff", builtin.find_files, { desc = "Find file" })
