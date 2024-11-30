@@ -9,7 +9,9 @@ return {
 		{
 			"<leader>",
 			function()
-				require("which-key").show({ global = true })
+        local wk = require("which-key") 
+
+				wk.show({ global = true })
 			end,
 			desc = "Buffer Local Keymaps (which-key)",
 		},
