@@ -106,10 +106,9 @@ keymap.set("n", "gd", "<cmd>TSToolsGoToSourceDefinition<CR>", opts, { desc = "Ty
 keymap.set("n", "gr", "<cmd>TSToolsFileReferences<CR>", opts, { desc = "TypescriptTools GoTo References" })
 keymap.set("n", "gf", "<cmd>TSToolsFixAll<CR>", opts, { desc = "TypescriptTools FixAll" })
 
--- LSP-Config Plugin
--- keymap.set("n", "<leader>fc", function()
---   vim.lsp.buf.format()
--- end, { desc = "LSP format document or selected block" })
+-- Substitute Plugin
+--
+--
 
 -- Conform Plugin (formatting.lua)
 keymap.set("n", "<leader>mp", function()

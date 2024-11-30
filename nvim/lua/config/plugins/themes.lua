@@ -6,28 +6,29 @@ return {
     config = function()
       require("onedarkpro").setup({
         colors = {
-          cursorline = "#FF0000" -- This is optional. The default cursorline color is based on the background
+          cursorline = "#FF0000", -- This is optional. The default cursorline color is based on the background
         },
         options = {
-          cursorline = true,
+          cursorline = false,
           transparency = false,
+          lualine_transparency = false,
         },
         highlights = {
           Comment = { italic = true },
           Directory = { bold = true },
-          ErrorMsg = { italic = true, bold = true }
-        }
+          ErrorMsg = { italic = true, bold = true },
+        },
       })
       -- vim.cmd.colorscheme "onedark"
     end,
   },
 
   -- Rose Pine theme
-  { "rose-pine/neovim",          name = "rose-pine" },
+  { "rose-pine/neovim", name = "rose-pine" },
 
   -- Moonfly theme
   -- vim.cmd [[colorscheme moonfly]]
-  { "bluz71/vim-moonfly-colors", name = "moonfly",  lazy = false, priority = 1000 },
+  { "bluz71/vim-moonfly-colors", name = "moonfly", lazy = false, priority = 1000 },
 
   -- cyberdream theme
   {
@@ -47,30 +48,30 @@ return {
 
   -- Fluormachine theme
   {
-    'maxmx03/fluoromachine.nvim',
+    "maxmx03/fluoromachine.nvim",
     lazy = false,
     priority = 1000,
     config = function()
-      local fm = require 'fluoromachine'
+      local fm = require("fluoromachine")
 
-      fm.setup {
+      fm.setup({
         glow = true,
-        theme = 'fluoromachine',
+        theme = "fluoromachine",
         transparent = false,
-      }
+      })
 
       -- vim.cmd.colorscheme 'fluoromachine'
-    end
+    end,
   },
 
   -- Github theme
   {
-    'projekt0n/github-nvim-theme',
-    name = 'github-theme',
-    lazy = false,    -- make sure we load this during startup if it is your main colorscheme
+    "projekt0n/github-nvim-theme",
+    name = "github-theme",
+    lazy = false, -- make sure we load this during startup if it is your main colorscheme
     priority = 1000, -- make sure to load this before all the other start plugins
     config = function()
-      require('github-theme').setup({})
+      require("github-theme").setup({})
 
       -- vim.cmd('colorscheme github_dark')
     end,
@@ -92,6 +93,29 @@ return {
           symbol = true,
         },
         styles = {
+          comments = { italic = true, bold = true },
+          functions = { italic = true },
+          variables = { italic = true },
+        },
+      })
+    end,
+  },
+
+  -- Tokyonight theme
+  {
+    "folke/tokyonight.nvim",
+    lazy = false,
+    priority = 1000,
+    opts = {},
+    config = function()
+      local tkn = require("tokyonight")
+      tkn.setup({
+        style = "night",
+        transparent = true,
+        styles = {
+          -- Background styles. Can be "dark", "transparent" or "normal"
+          sidebars = "transparent", -- style for sidebars, see below
+          floats = "transparent", -- style for floating windows
           comments = { italic = true, bold = true },
           functions = { italic = true },
           variables = { italic = true },
