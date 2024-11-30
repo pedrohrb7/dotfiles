@@ -10,7 +10,7 @@ return {
         },
         options = {
           cursorline = true,
-          transparency = true
+          transparency = false,
         },
         highlights = {
           Comment = { italic = true },
@@ -23,11 +23,11 @@ return {
   },
 
   -- Rose Pine theme
-  { "rose-pine/neovim", name = "rose-pine" },
- 
+  { "rose-pine/neovim",          name = "rose-pine" },
+
   -- Moonfly theme
   -- vim.cmd [[colorscheme moonfly]]
-  { "bluz71/vim-moonfly-colors", name = "moonfly", lazy = false, priority = 1000 },
+  { "bluz71/vim-moonfly-colors", name = "moonfly",  lazy = false, priority = 1000 },
 
   -- cyberdream theme
   {
@@ -41,7 +41,7 @@ return {
         -- Enable italics comments
         italic_comments = true,
       })
-     -- vim.cmd.colorscheme 'cyberdream'
+      -- vim.cmd.colorscheme 'cyberdream'
     end,
   },
 
@@ -50,16 +50,16 @@ return {
     'maxmx03/fluoromachine.nvim',
     lazy = false,
     priority = 1000,
-    config = function ()
-     local fm = require 'fluoromachine'
+    config = function()
+      local fm = require 'fluoromachine'
 
-     fm.setup {
+      fm.setup {
         glow = true,
         theme = 'fluoromachine',
         transparent = false,
-     }
+      }
 
-     -- vim.cmd.colorscheme 'fluoromachine'
+      -- vim.cmd.colorscheme 'fluoromachine'
     end
   },
 
@@ -67,7 +67,7 @@ return {
   {
     'projekt0n/github-nvim-theme',
     name = 'github-theme',
-    lazy = false, -- make sure we load this during startup if it is your main colorscheme
+    lazy = false,    -- make sure we load this during startup if it is your main colorscheme
     priority = 1000, -- make sure to load this before all the other start plugins
     config = function()
       require('github-theme').setup({})
@@ -78,26 +78,25 @@ return {
 
   -- Solarized theme
   {
-		"maxmx03/solarized.nvim",
-		lazy = false,
-		priority = 1000,
-		config = function()
-			require("solarized").setup({
-				transparent = {
-					enabled = true,
-				},
-				variant = "spring",
-				error_lens = {
-					text = true,
-					symbol = true,
-				},
-				styles = {
-					comments = { italic = true, bold = true },
-					functions = { italic = true },
-					variables = { italic = true },
-				},
-			})
-		end,
-	},
+    "maxmx03/solarized.nvim",
+    lazy = false,
+    priority = 1000,
+    config = function()
+      require("solarized").setup({
+        transparent = {
+          enabled = true,
+        },
+        variant = "spring",
+        error_lens = {
+          text = true,
+          symbol = true,
+        },
+        styles = {
+          comments = { italic = true, bold = true },
+          functions = { italic = true },
+          variables = { italic = true },
+        },
+      })
+    end,
+  },
 }
-

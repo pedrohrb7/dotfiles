@@ -45,31 +45,31 @@ keymap.set("n", "<C-Right>", "<cmd>vertical resize +2<cr>", opts, { desc = "Incr
 
 --Neo-tree plugin
 keymap.set("n", "-", function()
-			local reveal_file = vim.fn.expand("%:p")
-			if reveal_file == "" then
-				reveal_file = vim.fn.getcwd()
-			else
-				local f = io.open(reveal_file, "r")
-				if f then
-					f.close(f)
-				else
-					reveal_file = vim.fn.getcwd()
-				end
-			end
-			require("neo-tree.command").execute({
-				reveal_file = reveal_file, -- path to file or folder to reveal
-				reveal_force_cwd = true, -- change cwd without asking if needed
-			})
-		end, { desc = "Open neo-tree at current file or working directory" })
-    keymap.set("n", "<leader>ee", "<cmd>Neotree toggle<CR>", { desc = "Toggle file explorer" }) -- toggle file explorer
-		keymap.set("n", "<leader>bf", ":Neotree buffers reveal float<CR>", { desc = "Reveal buffers in modal" })
-		keymap.set(
-			"n",
-			"--",
-			":Neotree reveal<CR>",
-			{ noremap = true, silent = true },
-			{ desc = "Reveal file under cursos" }
-		)
+  local reveal_file = vim.fn.expand("%:p")
+  if reveal_file == "" then
+    reveal_file = vim.fn.getcwd()
+  else
+    local f = io.open(reveal_file, "r")
+    if f then
+      f.close(f)
+    else
+      reveal_file = vim.fn.getcwd()
+    end
+  end
+  require("neo-tree.command").execute({
+    reveal_file = reveal_file, -- path to file or folder to reveal
+    reveal_force_cwd = true,   -- change cwd without asking if needed
+  })
+end, { desc = "Open neo-tree at current file or working directory" })
+keymap.set("n", "<leader>ee", "<cmd>Neotree toggle<CR>", { desc = "Toggle file explorer" }) -- toggle file explorer
+keymap.set("n", "<leader>bf", ":Neotree buffers reveal float<CR>", { desc = "Reveal buffers in modal" })
+keymap.set(
+  "n",
+  "--",
+  ":Neotree reveal<CR>",
+  { noremap = true, silent = true },
+  { desc = "Reveal file under cursos" }
+)
 -- End Neo-tree plugin
 
 -- Telescope plugin
@@ -81,9 +81,11 @@ keymap.set("n", "<leader>fb", "<cmd>Telescop buffers<CR>", { desc = "Search in o
 
 -- Trouble plugin
 keymap.set("n", "<leader>xx", "<cmd>Trouble diagnostics toggle<cr>", opts, { desc = "Diagnostics (Trouble)" })
-keymap.set("n", "<leader>xX", "<cmd>Trouble diagnostics toggle filter.buf=0<cr>", opts, { desc = "Buffer Diagnostics (Trouble)" })
+keymap.set("n", "<leader>xX", "<cmd>Trouble diagnostics toggle filter.buf=0<cr>", opts,
+  { desc = "Buffer Diagnostics (Trouble)" })
 keymap.set("n", "<leader>cs", "<cmd>Trouble symbols toggle focus=true<cr>", opts, { desc = "Symbols (Trouble)" })
-keymap.set("n", "<leader>cl", "<cmd>Trouble lsp toggle focus=false win.position=right<cr>", opts, { desc = "LSP Definitions / references / ... (Trouble)" })
+keymap.set("n", "<leader>cl", "<cmd>Trouble lsp toggle focus=false win.position=right<cr>", opts,
+  { desc = "LSP Definitions / references / ... (Trouble)" })
 keymap.set("n", "<leader>xL", "<cmd>Trouble loclist toggle<cr>", opts, { desc = "Location List (Trouble)" })
 keymap.set("n", "<leader>xQ", "<cmd>Trouble qflist toggle<cr>", opts, { desc = "Quickfix List (Trouble)" })
 -- End Trouble plugin
@@ -96,6 +98,11 @@ keymap.set("n", "]h", ":Gitsigns next_hunk<CR>", opts, { desc = "GitSigns Next H
 keymap.set("n", "[h", ":Gitsigns prev_hunk<CR>", opts, { desc = "GitSigns Prev Hunk" })
 
 -- Typescript Tools Plugin
-keymap.set("n", "gd", "<cmd>TSToolsGoToSourceDefinition<CR>", opts, { desc = "TypescriptTools GoTo Source Definition"})
+keymap.set("n", "gd", "<cmd>TSToolsGoToSourceDefinition<CR>", opts, { desc = "TypescriptTools GoTo Source Definition" })
 keymap.set("n", "gr", "<cmd>TSToolsFileReferences<CR>", opts, { desc = "TypescriptTools GoTo References" })
 keymap.set("n", "gf", "<cmd>TSToolsFixAll<CR>", opts, { desc = "TypescriptTools FixAll" })
+
+-- LSP-Config Plugin
+-- keymap.set("n", "<leader>fc", function()
+--   vim.lsp.buf.format()
+-- end, { desc = "LSP format document or selected block" })
