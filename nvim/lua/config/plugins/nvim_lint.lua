@@ -1,6 +1,6 @@
 return {
   "mfussenegger/nvim-lint",
-  event = { "BufReadPre", "BufNewFile" },
+  event = "VeryLazy",
   config = function()
     local lint = require("lint")
 
@@ -9,10 +9,8 @@ return {
       typescript = { "eslint_d" },
       javascriptreact = { "eslint_d" },
       typescriptreact = { "eslint_d" },
-      svelte = { "eslint_d" },
-      python = { "pylint" },
+      -- editorconfig = { "editorconfig-checker" },
     }
-
     local lint_augroup = vim.api.nvim_create_augroup("lint", { clear = true })
 
     vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "InsertLeave" }, {
@@ -22,8 +20,9 @@ return {
       end,
     })
 
-    vim.keymap.set("n", "<leader>l", function()
+    -- TODO: need to know how to put this keymap at keymap.lua
+    vim.keymap.set("n", "<leader>ll", function()
       lint.try_lint()
-    end, { desc = "Trigger linting for current file" })
+    end, { desc = "Trigger linting in current buffer" })
   end,
 }

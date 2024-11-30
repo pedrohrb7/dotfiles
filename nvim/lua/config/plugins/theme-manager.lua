@@ -3,7 +3,7 @@ return {
   lazy = false,
   config = function()
     require("themery").setup({
-      themes = { "fluoromachine", "cyberdream", "github_dark", "onedark", "rose-pine", "moonfly" },
+      themes = { "solarized", "fluoromachine", "cyberdream", "github_dark", "onedark", "rose-pine", "moonfly" },
     })
-  end
+  end,
 }

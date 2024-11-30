@@ -30,7 +30,7 @@ keymap.set("n", "<C-q>", "<cmd>:q<CR>", opts, { desc = "Quit nvim" })
 
 -- Visual Block --
 -- Move text up and down
-keymap.set("n", "<A-j>", ":m .+1<CR>==", opts, { desc = "move line up (normal mode)" })  -- move line up(n)
+keymap.set("n", "<A-j>", ":m .+1<CR>==", opts, { desc = "move line up (normal mode)" }) -- move line up(n)
 keymap.set("n", "<A-k>", ":m .-2<CR>==", opts, { desc = "move line down(normal mode)" }) -- move line down(n)
 keymap.set("v", "<A-k>", ":move '<-2<CR>gv-gv", opts, { desc = "move text block up" })
 keymap.set("v", "<A-j>", ":move '>+1<CR>gv-gv", opts, { desc = "move text block down" })
@@ -58,18 +58,12 @@ keymap.set("n", "-", function()
   end
   require("neo-tree.command").execute({
     reveal_file = reveal_file, -- path to file or folder to reveal
-    reveal_force_cwd = true,   -- change cwd without asking if needed
+    reveal_force_cwd = true, -- change cwd without asking if needed
   })
 end, { desc = "Open neo-tree at current file or working directory" })
 keymap.set("n", "<leader>ee", "<cmd>Neotree toggle<CR>", { desc = "Toggle file explorer" }) -- toggle file explorer
 keymap.set("n", "<leader>bf", ":Neotree buffers reveal float<CR>", { desc = "Reveal buffers in modal" })
-keymap.set(
-  "n",
-  "--",
-  ":Neotree reveal<CR>",
-  { noremap = true, silent = true },
-  { desc = "Reveal file under cursos" }
-)
+keymap.set("n", "--", ":Neotree reveal<CR>", { noremap = true, silent = true }, { desc = "Reveal file under cursos" })
 -- End Neo-tree plugin
 
 -- Telescope plugin
@@ -81,11 +75,21 @@ keymap.set("n", "<leader>fb", "<cmd>Telescop buffers<CR>", { desc = "Search in o
 
 -- Trouble plugin
 keymap.set("n", "<leader>xx", "<cmd>Trouble diagnostics toggle<cr>", opts, { desc = "Diagnostics (Trouble)" })
-keymap.set("n", "<leader>xX", "<cmd>Trouble diagnostics toggle filter.buf=0<cr>", opts,
-  { desc = "Buffer Diagnostics (Trouble)" })
+keymap.set(
+  "n",
+  "<leader>xX",
+  "<cmd>Trouble diagnostics toggle filter.buf=0<cr>",
+  opts,
+  { desc = "Buffer Diagnostics (Trouble)" }
+)
 keymap.set("n", "<leader>cs", "<cmd>Trouble symbols toggle focus=true<cr>", opts, { desc = "Symbols (Trouble)" })
-keymap.set("n", "<leader>cl", "<cmd>Trouble lsp toggle focus=false win.position=right<cr>", opts,
-  { desc = "LSP Definitions / references / ... (Trouble)" })
+keymap.set(
+  "n",
+  "<leader>cl",
+  "<cmd>Trouble lsp toggle focus=false win.position=right<cr>",
+  opts,
+  { desc = "LSP Definitions / references / ... (Trouble)" }
+)
 keymap.set("n", "<leader>xL", "<cmd>Trouble loclist toggle<cr>", opts, { desc = "Location List (Trouble)" })
 keymap.set("n", "<leader>xQ", "<cmd>Trouble qflist toggle<cr>", opts, { desc = "Quickfix List (Trouble)" })
 -- End Trouble plugin
@@ -106,3 +110,13 @@ keymap.set("n", "gf", "<cmd>TSToolsFixAll<CR>", opts, { desc = "TypescriptTools 
 -- keymap.set("n", "<leader>fc", function()
 --   vim.lsp.buf.format()
 -- end, { desc = "LSP format document or selected block" })
+
+-- Conform Plugin (formatting.lua)
+keymap.set("n", "<leader>mp", function()
+  local conform = require("conform")
+  conform.format({
+    lsp_fallback = true,
+    async = false,
+    timeout_ms = 500,
+  })
+end, { desc = "Conform Format file or range" })
