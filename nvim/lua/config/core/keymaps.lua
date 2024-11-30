@@ -3,7 +3,6 @@ vim.g.maplocalleader = "\\"
 
 local keymap = vim.keymap -- for conciseness
 local opts = { noremap = true, silent = true }
--- local term_opts = { silent = true }
 
 keymap.set("i", "jk", "<ESC>", opts, { desc = "Exit insert mode with jk" })
 keymap.set("n", "<leader>nh", ":nohl<CR>", opts, { desc = "Clear search highlights" })
@@ -44,34 +43,14 @@ keymap.set("n", "<C-Right>", "<cmd>vertical resize +2<cr>", opts, { desc = "Incr
 -- Plugins keymaps
 
 --Neo-tree plugin
-keymap.set("n", "-", function()
-  local reveal_file = vim.fn.expand("%:p")
-  if reveal_file == "" then
-    reveal_file = vim.fn.getcwd()
-  else
-    local f = io.open(reveal_file, "r")
-    if f then
-      f.close(f)
-    else
-      reveal_file = vim.fn.getcwd()
-    end
-  end
-  require("neo-tree.command").execute({
-    reveal_file = reveal_file, -- path to file or folder to reveal
-    reveal_force_cwd = true, -- change cwd without asking if needed
-  })
-end, { desc = "Open neo-tree at current file or working directory" })
-keymap.set("n", "<leader>ee", "<cmd>Neotree toggle<CR>", { desc = "Toggle file explorer" }) -- toggle file explorer
+keymap.set("n", "<leader>e", ":Neotree toggle<CR>", { desc = "Toggle file explorer" }) -- toggle file explorer
 keymap.set("n", "<leader>bf", ":Neotree buffers reveal float<CR>", { desc = "Reveal buffers in modal" })
 keymap.set("n", "--", ":Neotree reveal<CR>", { noremap = true, silent = true }, { desc = "Reveal file under cursos" })
--- End Neo-tree plugin
 
 -- Telescope plugin
 keymap.set("n", "<leader>ff", "<cmd>Telescop find_files<CR>", opts, { desc = "Telescope Find file" })
 keymap.set("n", "<leader>fg", "<cmd>Telescop live_grep<CR>", { desc = "Telescope Search by word" })
 keymap.set("n", "<leader>fb", "<cmd>Telescop buffers<CR>", { desc = "Search in open buffers" })
--- keymap.set("n", "<leader>fh", builtin.help_tags, {})
--- End Telescope plugin
 
 -- Trouble plugin
 keymap.set("n", "<leader>xx", "<cmd>Trouble diagnostics toggle<cr>", opts, { desc = "Diagnostics (Trouble)" })
@@ -82,17 +61,6 @@ keymap.set(
   opts,
   { desc = "Buffer Diagnostics (Trouble)" }
 )
-keymap.set("n", "<leader>cs", "<cmd>Trouble symbols toggle focus=true<cr>", opts, { desc = "Symbols (Trouble)" })
-keymap.set(
-  "n",
-  "<leader>cl",
-  "<cmd>Trouble lsp toggle focus=false win.position=right<cr>",
-  opts,
-  { desc = "LSP Definitions / references / ... (Trouble)" }
-)
-keymap.set("n", "<leader>xL", "<cmd>Trouble loclist toggle<cr>", opts, { desc = "Location List (Trouble)" })
-keymap.set("n", "<leader>xQ", "<cmd>Trouble qflist toggle<cr>", opts, { desc = "Quickfix List (Trouble)" })
--- End Trouble plugin
 
 -- Theme manager plugin
 keymap.set("n", "<leader>tt", "<cmd>Themery<CR>", opts, { desc = "Themery choose theme" })
@@ -101,14 +69,38 @@ keymap.set("n", "<leader>tt", "<cmd>Themery<CR>", opts, { desc = "Themery choose
 keymap.set("n", "]h", ":Gitsigns next_hunk<CR>", opts, { desc = "GitSigns Next Hunk" })
 keymap.set("n", "[h", ":Gitsigns prev_hunk<CR>", opts, { desc = "GitSigns Prev Hunk" })
 
+keymap.set("n", "<leader>hs", ":Gitsigns stage_hunk<CR>", opts, { desc = "GitSigns Stage hunk in NORMAL mode" })
+keymap.set("v", "<leader>hs", ":Gitsigns stage_hunk<CR>", opts, { desc = "GitSigns Stage hunk in VISUAL mode" })
+
+keymap.set("n", "<leader>hr", ":Gitsigns reset_hunk<CR>", opts, { desc = "GitSigns reset hunk in NORMAL mode" })
+keymap.set("v", "<leader>hr", ":Gitsigns reset_hunk<CR>", opts, { desc = "GitSigns reset hunk in VISUAL mode" })
+
+keymap.set("n", "<leader>hS", "<cmd>Gitsigns stage_buffer<CR>", opts, { desc = "GitSigns Stage Buffer" })
+keymap.set("n", "<leader>hR", "<cmd>Gitsigns reset_buffer<CR>", opts, { desc = "GitSigns RESET Buffer" })
+
+keymap.set("n", "<leader>hd", '<cmd>lua require"gitsigns".diffthis("~")<CR>', opts, { desc = "GitSigns VDiffThis " })
+keymap.set("n", "<leader>hu", "<cmd>Gitsigns undo_stage_hunk<CR>", opts, { desc = "GitSigns Undo Stage Hunk" })
+keymap.set(
+  "n",
+  "<leader>hb",
+  '<cmd>lua require"gitsigns".blame_line{full=true}<CR>',
+  opts,
+  { desc = "GitSigns Blame Full" }
+)
+keymap.set("n", "<leader>hp", "<cmd>Gitsigns preview_hunk<CR>", opts, { desc = "GitSigns Show Hunk Preview" })
+keymap.set("n", "<leader>td", "<cmd>Gitsigns toggle_deleted<CR>", opts, { desc = "GitSigns Toggle Deleted" })
+-- End GitSigns Plugin
+
 -- Typescript Tools Plugin
 keymap.set("n", "gd", "<cmd>TSToolsGoToSourceDefinition<CR>", opts, { desc = "TypescriptTools GoTo Source Definition" })
 keymap.set("n", "gr", "<cmd>TSToolsFileReferences<CR>", opts, { desc = "TypescriptTools GoTo References" })
 keymap.set("n", "gf", "<cmd>TSToolsFixAll<CR>", opts, { desc = "TypescriptTools FixAll" })
 
--- Substitute Plugin
---
---
+-- LazyGit Plugin
+keymap.set("n", "<leader>lg", "<cmd>LazyGitCurrentFile<CR>", opts, { desc = "LazyGit Current File" })
+
+-- LazyDocker Plugin
+keymap.set("n", "<leader>ld", "<cmd>LazyDocker<CR>", opts, { desc = "LazyGit Current File" })
 
 -- Conform Plugin (formatting.lua)
 keymap.set("n", "<leader>mp", function()
