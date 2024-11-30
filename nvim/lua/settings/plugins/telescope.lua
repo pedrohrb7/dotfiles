@@ -66,11 +66,5 @@ return {
 		telescope.load_extension("fzf")
 		telescope.load_extension("ui-select")
 		telescope.load_extension("media_files")
-		-- set keymaps
-		local builtin = require("telescope.builtin")
-		vim.keymap.set("n", "<leader>ff", builtin.find_files, { desc = "Find file" })
-		vim.keymap.set("n", "<leader>fg", builtin.live_grep, { desc = "Search by word" })
-		vim.keymap.set("n", "<leader>fb", builtin.buffers, { desc = "Search in open buffers" })
-		vim.keymap.set("n", "<leader>fh", builtin.help_tags, {})
-	end,
+		end,
 }

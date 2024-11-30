@@ -45,37 +45,73 @@ return {
 			"jay-babu/mason-null-ls.nvim",
 		},
 		config = function()
-			local mason_null_ls = require("mason-null-ls")
-			mason_null_ls.setup({
-				ensure_installed = {
-					"ts_ls", -- ts formatter
-					"prettier", -- prettier formatter
-					"stylua", -- lua formatter
-					"eslint", -- js linter
-					"terraform_fmt", -- terraform formatter
-					"terraform_validate", -- terraform linter
-					"shellcheck", -- shell linter
-					"buf", -- buf formatter
-					"yamlfmt", -- yaml formatter
-					"spell", -- spell checker
+			require("mason").setup({
+				ui = {
+					border = "rounded",
+					icons = {
+						package_installed = "✓",
+						package_pending = "➜",
+						package_uninstalled = "✗",
+					},
 				},
+			})
+			local servers = {
+				"jsonls",
+				"lua_ls",
+				"clangd",
+				"tsserver",
+				"kotlin_language_server",
+				"terraformls",
+				"dockerls",
+				"tailwindcss",
+				"cssls",
+				"sqls",
+				"terraformls",
+				"hcl",
+				"eslint",
+			}
+
+			require("mason-lspconfig").setup({
+				ensure_installed = servers,
 			})
 
 			local capabilities = require("cmp_nvim_lsp").default_capabilities()
 
-			local lspconfig = require("lspconfig")
-			lspconfig.ts_ls.setup({
-				capabilities = capabilities,
+			require("mason-lspconfig").setup_handlers({
+				-- ["tsserver"] = function()
+				-- 	-- require("lspconfig").tsserver.setup()
+				-- end,
+				["lua_ls"] = function()
+					require("lspconfig").lua_ls.setup()
+				end,
+				["eslint"] = function()
+					require("lspconfig").eslint.setup()
+				end,
 			})
-			lspconfig.solargraph.setup({
-				capabilities = capabilities,
+
+			require("typescript-tools").setup({
+				on_attach = function(client, bufnr)
+					client.server_capabilities.document_formatting = false
+					client.server_capabilities.document_range_formatting = false
+				end,
 			})
-			lspconfig.html.setup({
-				capabilities = capabilities,
-			})
-			lspconfig.lua_ls.setup({
-				capabilities = capabilities,
-			})
+
+			-- local lspconfig = require("lspconfig")
+			-- lspconfig.eslint.setup({
+			-- 	capabilities = capabilities,
+			-- })
+			-- lspconfig.ts_ls.setup({
+			-- 	capabilities = capabilities,
+			-- })
+			-- lspconfig.solargraph.setup({
+			-- 	capabilities = capabilities,
+			-- })
+			-- lspconfig.html.setup({
+			-- 	capabilities = capabilities,
+			-- })
+			-- lspconfig.lua_ls.setup({
+			-- 	capabilities = capabilities,
+			-- })
 
 			vim.keymap.set("n", "K", vim.lsp.buf.hover, {})
 			vim.keymap.set("n", "gd", vim.lsp.buf.definition, { desc = "Go to definition" })

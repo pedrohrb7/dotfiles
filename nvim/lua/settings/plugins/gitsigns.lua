@@ -21,10 +21,6 @@ return {
 				word_diff = false, -- Toggle with `:Gitsigns toggle_word_diff`
 				current_line_blame = true,
 			})
-
-			-- Navigation
-			setmap.set("n", "]h", ":Gitsigns next_hunk<CR>", { desc = "Next Hunk" })
-			setmap.set("n", "[h", ":Gitsigns prev_hunk<CR>", { desc = "Prev Hunk" })
 		end,
 	},
 	{
