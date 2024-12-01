@@ -46,6 +46,12 @@ return {
         "stylua", -- lua formatter
         "pylint",
         "eslint_d",
+        "trivy",
+        "kotlin-language-server",
+        "clang-format",
+        "checkstyle",
+        "lua-language-server",
+        "editorconfig-checker",
       },
     })
   end,
