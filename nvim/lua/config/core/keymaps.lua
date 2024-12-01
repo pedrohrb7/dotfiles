@@ -40,6 +40,13 @@ keymap.set("n", "<C-Down>", "<cmd>resize -2<cr>", opts, { desc = "Decrease Windo
 keymap.set("n", "<C-Left>", "<cmd>vertical resize -2<cr>", opts, { desc = "Decrease Window Width" })
 keymap.set("n", "<C-Right>", "<cmd>vertical resize +2<cr>", opts, { desc = "Increase Window Width" })
 
+-- Stay in indent mode
+vim.keymap.set("v", "<", "<gv", opts, { desc = "Indent mode on back" })
+vim.keymap.set("v", ">", ">gv", opts, { desc = "Indent mode on indenting" })
+
+-- Keep last yanked when pasting
+vim.keymap.set("v", "p", '"_dP', opts)
+
 -- Plugins keymaps
 
 --Neo-tree plugin
