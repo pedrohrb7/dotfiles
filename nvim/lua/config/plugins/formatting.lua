@@ -18,8 +18,6 @@ return {
         markdown = { "prettier" },
         graphql = { "prettier" },
         lua = { "stylua" },
-        java = { "clang-format" },
-        kotlin = { "klint" },
       },
       format_on_save = {
         lsp_fallback = true,
