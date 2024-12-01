@@ -97,7 +97,7 @@ keymap.set("n", "gr", "<cmd>TSToolsFileReferences<CR>", opts, { desc = "Typescri
 keymap.set("n", "gf", "<cmd>TSToolsFixAll<CR>", opts, { desc = "TypescriptTools FixAll" })
 
 -- LazyGit Plugin
-keymap.set("n", "<leader>lg", "<cmd>LazyGitCurrentFile<CR>", opts, { desc = "LazyGit Current File" })
+keymap.set("n", "<leader>lg", ":LazyGitCurrentFile<CR>", opts, { desc = "LazyGit Current File" })
 
 -- LazyDocker Plugin
 keymap.set("n", "<leader>ld", "<cmd>LazyDocker<CR>", opts, { desc = "LazyGit Current File" })
@@ -111,3 +111,7 @@ keymap.set("n", "<leader>mp", function()
     timeout_ms = 500,
   })
 end, { desc = "Conform Format file or range" })
+
+-- ToggleTerm Plugin
+keymap.set("n", "<C-t>", ":ToggleTerm<CR>", opts, { desc = "ToggleTerm on float mode" })
+keymap.set("v", "<S-t>", ":ToggleTermSendVisualSelection<CR>", opts, { desc = "ToggleTerm send Visual Selection" })
