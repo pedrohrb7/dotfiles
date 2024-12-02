@@ -47,6 +47,22 @@ vim.keymap.set('v', '>', '>gv', opts, { desc = 'Indent mode on indenting' })
 -- Keep last yanked when pasting
 vim.keymap.set('v', 'p', '"_dP', opts)
 
+-- Autocommands
+vim.api.nvim_create_augroup("custom_buffer", { clear = true })
+-- highlight yanks
+vim.api.nvim_create_autocmd('TextYankPost', {
+  group = 'custom_buffer',
+  pattern = '*',
+  callback = function()
+    vim.highlight.on_yank({ timeout = 200 })
+  end,
+})
+
+-- ****************************
+-- End Global keymaps
+-- ****************************
+
+-- *******************************
 -- Plugins keymaps
 
 --Neo-tree plugin

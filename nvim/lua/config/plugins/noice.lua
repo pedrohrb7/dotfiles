@@ -12,7 +12,7 @@ return {
 
     noice.setup({
       presets = {
-        bottom_search = true,
+        bottom_search = false, -- This apply search word as same style as cmdLine
       },
     })
   end,
