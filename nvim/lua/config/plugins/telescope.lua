@@ -7,6 +7,7 @@ return {
     'nvim-tree/nvim-web-devicons',
     'folke/todo-comments.nvim',
     'nvim-telescope/telescope-ui-select.nvim',
+    'nvim-telescope/telescope-media-files.nvim',
   },
   config = function()
     local telescope = require('telescope')
@@ -50,13 +51,13 @@ return {
         },
       },
       extensions = {
-        -- media_files = {
-        -- 	-- filetypes whitelist
-        -- 	-- defaults to {"png", "jpg", "mp4", "webm", "pdf"}
-        -- 	filetypes = { "png", "webp", "jpg", "jpeg", "pdf" },
-        -- 	-- find command (defaults to `fd`)
-        -- 	find_cmd = "rg",
-        -- },
+        media_files = {
+          -- filetypes whitelist
+          -- defaults to {"png", "jpg", "mp4", "webm", "pdf"}
+          filetypes = { 'png', 'webp', 'jpg', 'jpeg', 'pdf', 'pdf' },
+          -- find command (defaults to `fd`)
+          find_cmd = 'rg',
+        },
         ['ui-select'] = {
           require('telescope.themes').get_dropdown({}),
         },
@@ -66,6 +67,6 @@ return {
     telescope.load_extension('fzf')
     telescope.load_extension('ui-select')
     telescope.load_extension('noice')
-    -- telescope.load_extension("media_files")
+    telescope.load_extension('media_files')
   end,
 }

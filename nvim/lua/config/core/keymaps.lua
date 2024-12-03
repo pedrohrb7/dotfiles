@@ -12,9 +12,8 @@ keymap.set('n', '<leader>+', '<C-a>', opts, { desc = 'Increment number' }) -- in
 keymap.set('n', '<leader>-', '<C-x>', opts, { desc = 'Decrement number' }) -- decrement
 
 -- custom buffer navigation
-keymap.set('n', '<S-l>', '<cmd>bnext<CR>', opts, { desc = 'better way to navigate to next buffer' })
-keymap.set('n', '<S-h>', '<cmd>bprevious<CR>', opts, { desc = 'better way to navigate to previous buffer' })
-keymap.set('n', '<C-n>', '<cmd>tabnew<CR>', opts, { desc = 'better way to create new buffer' })
+keymap.set('n', '<S-l>', '<cmd>BufferNext<CR>', opts, { desc = 'better way to navigate to next buffer' })
+keymap.set('n', '<S-h>', '<cmd>BufferPrevious<CR>', opts, { desc = 'better way to navigate to previous buffer' })
 keymap.set('n', '<C-w>', '<cmd>BufferClose<CR>', opts, { desc = 'Close current tab' }) -- close current tab
 
 -- Navigate vim panes better
@@ -48,7 +47,7 @@ vim.keymap.set('v', '>', '>gv', opts, { desc = 'Indent mode on indenting' })
 vim.keymap.set('v', 'p', '"_dP', opts)
 
 -- Autocommands
-vim.api.nvim_create_augroup("custom_buffer", { clear = true })
+vim.api.nvim_create_augroup('custom_buffer', { clear = true })
 -- highlight yanks
 vim.api.nvim_create_autocmd('TextYankPost', {
   group = 'custom_buffer',
@@ -66,9 +65,9 @@ vim.api.nvim_create_autocmd('TextYankPost', {
 -- Plugins keymaps
 
 --Neo-tree plugin
-keymap.set('n', '<leader>e', ':Neotree toggle<CR>', { desc = 'Toggle file explorer' }) -- toggle file explorer
-keymap.set('n', '<leader>bf', ':Neotree buffers reveal float<CR>', { desc = 'Reveal buffers in modal' })
-keymap.set('n', '--', ':Neotree reveal<CR>', { noremap = true, silent = true }, { desc = 'Reveal file under cursos' })
+keymap.set('n', '<leader>ee', ':Neotree toggle<CR>', opts, { desc = 'Toggle file explorer' }) -- toggle file explorer
+keymap.set('n', '<leader>bf', ':Neotree buffers reveal float<CR>', opts, { desc = 'Reveal buffers in modal' })
+keymap.set('n', '--', ':Neotree reveal<CR>', opts, { desc = 'Reveal file under cursos' })
 
 -- Telescope plugin
 keymap.set('n', '<leader>ff', '<cmd>Telescop find_files<CR>', opts, { desc = 'Telescope Find file' })
@@ -115,9 +114,23 @@ keymap.set('n', '<leader>td', '<cmd>Gitsigns toggle_deleted<CR>', opts, { desc =
 -- End GitSigns Plugin
 
 -- Typescript Tools Plugin
-keymap.set('n', 'gd', '<cmd>TSToolsGoToSourceDefinition<CR>', opts, { desc = 'TypescriptTools GoTo Source Definition' })
-keymap.set('n', 'gr', '<cmd>TSToolsFileReferences<CR>', opts, { desc = 'TypescriptTools GoTo References' })
-keymap.set('n', 'gf', '<cmd>TSToolsFixAll<CR>', opts, { desc = 'TypescriptTools FixAll' })
+keymap.set(
+  'n',
+  '<leader>gd',
+  '<cmd>TSToolsGoToSourceDefinition<CR>',
+  opts,
+  { desc = 'TypescriptTools GoTo Source Definition' }
+)
+keymap.set('n', '<leader>gr', '<cmd>TSToolsFileReferences<CR>', opts, { desc = 'TypescriptTools GoTo References' })
+keymap.set('n', '<leader>gf', '<cmd>TSToolsFixAll<CR>', opts, { desc = 'TypescriptTools FixAll' })
+keymap.set('n', '<leader>mi', ':TSToolsAddMissingImports<CR>', opts, { desc = 'TypescriptTools Add Missing Imports' })
+keymap.set(
+  'n',
+  '<leader>rii',
+  ':TSToolsRemoveUnusedImports<CR>',
+  opts,
+  { desc = 'TypescriptTools Remove Unused Imports' }
+)
 
 -- LazyGit Plugin
 keymap.set('n', '<leader>lg', ':LazyGitCurrentFile<CR>', opts, { desc = 'LazyGit Current File' })
