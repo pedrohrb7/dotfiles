@@ -113,25 +113,6 @@ keymap.set('n', '<leader>hp', '<cmd>Gitsigns preview_hunk<CR>', opts, { desc = '
 keymap.set('n', '<leader>td', '<cmd>Gitsigns toggle_deleted<CR>', opts, { desc = 'GitSigns Toggle Deleted' })
 -- End GitSigns Plugin
 
--- Typescript Tools Plugin
-keymap.set(
-  'n',
-  '<leader>gd',
-  '<cmd>TSToolsGoToSourceDefinition<CR>',
-  opts,
-  { desc = 'TypescriptTools GoTo Source Definition' }
-)
-keymap.set('n', '<leader>gr', '<cmd>TSToolsFileReferences<CR>', opts, { desc = 'TypescriptTools GoTo References' })
-keymap.set('n', '<leader>gf', '<cmd>TSToolsFixAll<CR>', opts, { desc = 'TypescriptTools FixAll' })
-keymap.set('n', '<leader>mi', ':TSToolsAddMissingImports<CR>', opts, { desc = 'TypescriptTools Add Missing Imports' })
-keymap.set(
-  'n',
-  '<leader>rii',
-  ':TSToolsRemoveUnusedImports<CR>',
-  opts,
-  { desc = 'TypescriptTools Remove Unused Imports' }
-)
-
 -- LazyGit Plugin
 keymap.set('n', '<leader>lg', ':LazyGitCurrentFile<CR>', opts, { desc = 'LazyGit Current File' })
 
