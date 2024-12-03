@@ -7,7 +7,7 @@ return {
   lazy = false,
   config = function()
     local mason = require('mason')
-    local mson_lspconfig = require('mason-lspconfig')
+    local mason_lspconfig = require('mason-lspconfig')
     local mason_tool_installer = require('mason-tool-installer')
 
     mason.setup({
@@ -21,19 +21,20 @@ return {
       },
     })
 
-    local servers = mson_lspconfig.setup({
+    local servers = mason_lspconfig.setup({
       ensure_installed = {
         'jsonls',
         'lua_ls',
-        'ts_ls',
         'terraformls',
         'dockerls',
         'tailwindcss',
         'cssls',
         'sqls',
-        'terraformls',
-        'dockerls',
         'eslint',
+        'ts_ls',
+        'graphql',
+        'emmet_ls',
+        'prismals',
         'kotlin_language_server',
       },
 
