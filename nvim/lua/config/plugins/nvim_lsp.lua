@@ -67,11 +67,6 @@ return {
       vim.fn.sign_define(hl, { text = icon, texthl = hl, numhl = '' })
     end
 
-    -- lspconfig['eslint'].setup({
-    --   capabilities = capabilities,
-    --   on_attach = on_attach,
-    -- })
-
     lspconfig['dockerls'].setup({
       capabilities = capabilities,
       on_attach = on_attach,
@@ -92,6 +87,13 @@ return {
       on_attach = on_attach,
     })
 
+    lspconfig['intelephense'].setup({
+      capabilities = capabilities,
+      on_attach = on_attach,
+      cmd = { 'intelephense', '--stdio' },
+      filetypes = { 'php', 'blade' },
+      root_pattern = { 'composer.json', '.git' },
+    })
     -- lspconfig['tailwindcss'].setup({
     --   capabilities = capabilities,
     --   on_attach = on_attach,

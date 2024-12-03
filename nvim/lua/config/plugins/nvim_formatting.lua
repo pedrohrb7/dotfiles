@@ -21,6 +21,8 @@ return {
         lua = { 'stylua' },
         java = { 'google-java-format' },
         kotlin = { 'ktlint' },
+        php = { { 'pint', 'php_cs_fixer' } },
+        blade = { 'blade-formatter' },
       },
       format_on_save = {
         lsp_fallback = true,

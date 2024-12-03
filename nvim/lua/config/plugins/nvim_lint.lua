@@ -10,6 +10,7 @@ return {
       typescriptreact = { 'eslint_d', 'eslint' },
       javascriptreact = { 'eslint_d', 'eslint' },
       kotlin = { 'ktlint' },
+      php = {},
       -- editorconfig = { "editorconfig-checker" },
     }
     local eslint = lint.linters.eslint_d

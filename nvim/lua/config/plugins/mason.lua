@@ -21,7 +21,7 @@ return {
       },
     })
 
-    local servers = mason_lspconfig.setup({
+    mason_lspconfig.setup({
       ensure_installed = {
         'jsonls',
         'lua_ls',
@@ -30,6 +30,10 @@ return {
         'tailwindcss',
         'cssls',
         'sqls',
+        -- 'phpcs',
+        -- 'php-cs-fixer',
+        -- 'phpactor',
+        'intelephense',
         'eslint',
         'ts_ls',
         'graphql',
@@ -48,6 +52,7 @@ return {
         'pylint',
         'cssls',
         'ktlint',
+        'intelephense',
         'lua-language-server',
         'editorconfig-checker',
         { 'eslint_d', version = '13.1.2' },
