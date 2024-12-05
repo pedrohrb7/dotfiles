@@ -1,17 +1,17 @@
 return {
-  "nvim-neo-tree/neo-tree.nvim",
-  branch = "v3.x",
+  'nvim-neo-tree/neo-tree.nvim',
+  branch = 'v3.x',
   dependencies = {
-    "nvim-lua/plenary.nvim",
-    "nvim-tree/nvim-web-devicons", -- not strictly required, but recommended
-    "MunifTanjim/nui.nvim",
+    'nvim-lua/plenary.nvim',
+    'nvim-tree/nvim-web-devicons', -- not strictly required, but recommended
+    'MunifTanjim/nui.nvim',
   },
 
   config = function()
-    local neoTree = require("neo-tree")
+    local neoTree = require('neo-tree')
     neoTree.setup({
       window = {
-        position = "right",
+        position = 'right',
       },
       filesystem = {
         filtered_items = {
@@ -29,35 +29,22 @@ return {
       },
     })
 
-    vim.keymap.set("n", "-", function()
-      local reveal_file = vim.fn.expand("%:p")
-      if reveal_file == "" then
+    vim.keymap.set('n', '-', function()
+      local reveal_file = vim.fn.expand('%:p')
+      if reveal_file == '' then
         reveal_file = vim.fn.getcwd()
       else
-        local f = io.open(reveal_file, "r")
+        local f = io.open(reveal_file, 'r')
         if f then
           f.close(f)
         else
           reveal_file = vim.fn.getcwd()
         end
       end
-      require("neo-tree.command").execute({
+      require('neo-tree.command').execute({
         reveal_file = reveal_file, -- path to file or folder to reveal
         reveal_force_cwd = true, -- change cwd without asking if needed
       })
-    end, { desc = "Open neo-tree at current file or working directory" })
-
-    -- set keymaps
-    local keymap = vim.keymap                                                                 -- for conciseness
-
-    keymap.set("n", "<leader>ee", "<cmd>Neotree toggle<CR>", { desc = "Toggle file explorer" }) -- toggle file explorer
-    keymap.set("n", "<leader>bf", ":Neotree buffers reveal float<CR>", { desc = "Reveal buffers in modal" })
-    keymap.set(
-      "n",
-      "--",
-      ":Neotree reveal<CR>",
-      { noremap = true, silent = true },
-      { desc = "Reveal file under cursos" }
-    )
+    end, { desc = 'Open neo-tree at current file or working directory' })
   end,
 }

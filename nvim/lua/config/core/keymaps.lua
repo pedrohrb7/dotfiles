@@ -117,7 +117,7 @@ keymap.set('n', '<leader>td', '<cmd>Gitsigns toggle_deleted<CR>', opts, { desc =
 keymap.set('n', '<leader>lg', ':LazyGitCurrentFile<CR>', opts, { desc = 'LazyGit Current File' })
 
 -- LazyDocker Plugin
-keymap.set('n', '<leader>ld', '<cmd>LazyDocker<CR>', opts, { desc = 'LazyGit Current File' })
+keymap.set('n', '<leader>ld', ':Lazydocker<CR>', opts, { desc = 'LazyGit Current File' })
 
 -- Conform Plugin (formatting.lua)
 keymap.set('n', '<leader>mp', function()
