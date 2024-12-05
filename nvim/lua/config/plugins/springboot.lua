@@ -3,6 +3,7 @@ return {
   depedencies = {
     'neovim/nvim-lspconfig',
     'mfussenegger/nvim-jdtls',
+    -- 'nvim-java/nvim-java',
   },
   config = function()
     local springboot_nvim = require('springboot-nvim')

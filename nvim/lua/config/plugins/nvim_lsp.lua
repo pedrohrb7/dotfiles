@@ -99,6 +99,14 @@ return {
     --   on_attach = on_attach,
     -- })
 
+    lspconfig['jdtls'].setup({
+      capabilities = capabilities,
+      on_attach = on_attach,
+      init_options = {
+        bundles = require('spring_boot').java_extensions(),
+      },
+    })
+
     lspconfig['cssls'].setup({
       capabilities = capabilities,
       on_attach = on_attach,
