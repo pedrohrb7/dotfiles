@@ -46,6 +46,9 @@ return {
       },
       pickers = {
         find_files = {
+          colorscheme = {
+            enable_preview = true,
+          },
           theme = 'dropdown',
           hidden = true,
         },
@@ -54,7 +57,7 @@ return {
         media_files = {
           -- filetypes whitelist
           -- defaults to {"png", "jpg", "mp4", "webm", "pdf"}
-          filetypes = { 'png', 'webp', 'jpg', 'jpeg', 'pdf', 'pdf' },
+          filetypes = { 'png', 'webp', 'jpg', 'jpeg', 'pdf' },
           -- find command (defaults to `fd`)
           find_cmd = 'rg',
         },

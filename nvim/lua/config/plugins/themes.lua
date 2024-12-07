@@ -1,12 +1,12 @@
 return {
   -- Onedark theme
   {
-    "olimorris/onedarkpro.nvim",
+    'olimorris/onedarkpro.nvim',
     priority = 1000, -- Ensure it loads first
     config = function()
-      require("onedarkpro").setup({
+      require('onedarkpro').setup({
         colors = {
-          cursorline = "#FF0000", -- This is optional. The default cursorline color is based on the background
+          cursorline = '#FF0000', -- This is optional. The default cursorline color is based on the background
         },
         options = {
           cursorline = false,
@@ -24,19 +24,19 @@ return {
   },
 
   -- Rose Pine theme
-  { "rose-pine/neovim", name = "rose-pine" },
+  { 'rose-pine/neovim', name = 'rose-pine' },
 
   -- Moonfly theme
   -- vim.cmd [[colorscheme moonfly]]
-  { "bluz71/vim-moonfly-colors", name = "moonfly", lazy = false, priority = 1000 },
+  { 'bluz71/vim-moonfly-colors', name = 'moonfly', lazy = false, priority = 1000 },
 
   -- cyberdream theme
   {
-    "scottmckendry/cyberdream.nvim",
+    'scottmckendry/cyberdream.nvim',
     lazy = false,
     priority = 1000,
     config = function()
-      require("cyberdream").setup({
+      require('cyberdream').setup({
         -- Enable transparent background
         transparent = false,
         -- Enable italics comments
@@ -48,15 +48,15 @@ return {
 
   -- Fluormachine theme
   {
-    "maxmx03/fluoromachine.nvim",
+    'maxmx03/fluoromachine.nvim',
     lazy = false,
     priority = 1000,
     config = function()
-      local fm = require("fluoromachine")
+      local fm = require('fluoromachine')
 
       fm.setup({
         glow = true,
-        theme = "fluoromachine",
+        theme = 'fluoromachine',
         transparent = false,
       })
 
@@ -66,12 +66,12 @@ return {
 
   -- Github theme
   {
-    "projekt0n/github-nvim-theme",
-    name = "github-theme",
+    'projekt0n/github-nvim-theme',
+    name = 'github-theme',
     lazy = false, -- make sure we load this during startup if it is your main colorscheme
     priority = 1000, -- make sure to load this before all the other start plugins
     config = function()
-      require("github-theme").setup({})
+      require('github-theme').setup({})
 
       -- vim.cmd('colorscheme github_dark')
     end,
@@ -79,15 +79,15 @@ return {
 
   -- Solarized theme
   {
-    "maxmx03/solarized.nvim",
+    'maxmx03/solarized.nvim',
     lazy = false,
     priority = 1000,
     config = function()
-      require("solarized").setup({
+      require('solarized').setup({
         transparent = {
           enabled = true,
         },
-        variant = "spring",
+        variant = 'spring',
         error_lens = {
           text = true,
           symbol = true,
@@ -103,24 +103,34 @@ return {
 
   -- Tokyonight theme
   {
-    "folke/tokyonight.nvim",
+    'folke/tokyonight.nvim',
     lazy = false,
     priority = 1000,
     opts = {},
     config = function()
-      local tkn = require("tokyonight")
+      local tkn = require('tokyonight')
       tkn.setup({
-        style = "night",
+        style = 'night',
         transparent = true,
         styles = {
           -- Background styles. Can be "dark", "transparent" or "normal"
-          sidebars = "transparent", -- style for sidebars, see below
-          floats = "transparent", -- style for floating windows
+          sidebars = 'transparent', -- style for sidebars, see below
+          floats = 'transparent', -- style for floating windows
           comments = { italic = true, bold = true },
           functions = { italic = true },
           variables = { italic = true },
         },
       })
+    end,
+  },
+
+  -- Nord theme
+  {
+    'gbprod/nord.nvim',
+    lazy = false,
+    priority = 1000,
+    config = function()
+      require('nord').setup({})
     end,
   },
 }
