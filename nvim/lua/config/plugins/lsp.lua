@@ -72,10 +72,10 @@ return {
       on_attach = on_attach,
     })
 
-    lspconfig['terraformls'].setup({
-      capabilities = capabilities,
-      on_attach = on_attach,
-    })
+    -- lspconfig['terraformls'].setup({
+    --   capabilities = capabilities,
+    --   on_attach = on_attach,
+    -- })
 
     lspconfig['jsonls'].setup({
       capabilities = capabilities,
@@ -83,8 +83,11 @@ return {
     })
 
     lspconfig['ts_ls'].setup({
+      filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue' },
       capabilities = capabilities,
       on_attach = on_attach,
+      root_dir = lspconfig.util.root_pattern('package.json'),
+      single_file_support = false,
     })
 
     lspconfig['intelephense'].setup({
@@ -99,11 +102,16 @@ return {
     --   on_attach = on_attach,
     -- })
 
-    lspconfig['jdtls'].setup({
+    lspconfig['volar'].setup({
       capabilities = capabilities,
-      on_attach = on_attach,
+      filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue' },
       init_options = {
-        bundles = require('spring_boot').java_extensions(),
+        vue = {
+          hybridMode = false,
+        },
+        typescript = {
+          tsdk = '~/.local/share/lazynvim/mason/packages/vue-language-server/node_modules/typescript/lib/',
+        },
       },
     })
 
@@ -112,10 +120,10 @@ return {
       on_attach = on_attach,
     })
 
-    lspconfig['graphql'].setup({
-      capabilities = capabilities,
-      filetypes = { 'graphql', 'gql', 'typescriptreact', 'javascriptreact' },
-    })
+    -- lspconfig['graphql'].setup({
+    --   capabilities = capabilities,
+    --   filetypes = { 'graphql', 'gql', 'typescriptreact', 'javascriptreact' },
+    -- })
 
     lspconfig['emmet_ls'].setup({
       capabilities = capabilities,
