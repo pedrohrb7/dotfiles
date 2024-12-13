@@ -90,30 +90,30 @@ return {
       single_file_support = false,
     })
 
-    lspconfig['intelephense'].setup({
-      capabilities = capabilities,
-      on_attach = on_attach,
-      cmd = { 'intelephense', '--stdio' },
-      filetypes = { 'php', 'blade' },
-      root_pattern = { 'composer.json', '.git' },
-    })
+    -- lspconfig['intelephense'].setup({
+    --   capabilities = capabilities,
+    --   on_attach = on_attach,
+    --   cmd = { 'intelephense', '--stdio' },
+    --   filetypes = { 'php', 'blade' },
+    --   root_pattern = { 'composer.json', '.git' },
+    -- })
     -- lspconfig['tailwindcss'].setup({
     --   capabilities = capabilities,
     --   on_attach = on_attach,
     -- })
 
-    lspconfig['volar'].setup({
-      capabilities = capabilities,
-      filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue' },
-      init_options = {
-        vue = {
-          hybridMode = false,
-        },
-        typescript = {
-          tsdk = '~/.local/share/lazynvim/mason/packages/vue-language-server/node_modules/typescript/lib/',
-        },
-      },
-    })
+    -- lspconfig['volar'].setup({
+    --   capabilities = capabilities,
+    --   filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue' },
+    --   init_options = {
+    --     vue = {
+    --       hybridMode = false,
+    --     },
+    --     typescript = {
+    --       tsdk = '~/.local/share/lazynvim/mason/packages/vue-language-server/node_modules/typescript/lib/',
+    --     },
+    --   },
+    -- })
 
     lspconfig['cssls'].setup({
       capabilities = capabilities,

@@ -133,4 +133,9 @@ return {
       require('nord').setup({})
     end,
   },
+
+  -- Black metal theme
+  {
+    'metalelf0/base16-black-metal-scheme',
+  },
 }
