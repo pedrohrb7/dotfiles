@@ -110,12 +110,12 @@ return {
     config = function()
       local tkn = require('tokyonight')
       tkn.setup({
-        style = 'night',
-        transparent = true,
+        style = 'storm',
+        transparent = false,
         styles = {
           -- Background styles. Can be "dark", "transparent" or "normal"
-          sidebars = 'transparent', -- style for sidebars, see below
-          floats = 'transparent', -- style for floating windows
+          -- sidebars = 'transparent', -- style for sidebars, see below
+          -- floats = 'transparent', -- style for floating windows
           comments = { italic = true, bold = true },
           functions = { italic = true },
           variables = { italic = true },
