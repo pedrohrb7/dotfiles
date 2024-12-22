@@ -1,4 +1,10 @@
 return {
+  -- ZitchDog theme
+  {
+    'theamallalgi/zitchdog',
+    lazy = false,
+    priority = 1000,
+  },
   -- Onedark theme
   {
     'olimorris/onedarkpro.nvim',

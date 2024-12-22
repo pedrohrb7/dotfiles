@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
 
-# Add this script to your wm startup file.
-
-DIR="$XDG_CUSTOM_DOTFILES/polybar"
-
-# Terminate already running bar instances
-killall -q polybar
-
-# Wait until the processes have been shut down
+killall polybar
 while pgrep -u $UID -x polybar >/dev/null; do sleep 1; done
 
-# Launch the bar
-polybar -q main -c $DIR/config.ini &
+CONFIG_DIR=$HOME/dotfiles-config/window-manager/polybar/custom/config.ini
+polybar -c $CONFIG_DIR &

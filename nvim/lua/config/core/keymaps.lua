@@ -136,3 +136,8 @@ keymap.set('v', '<S-t>', ':ToggleTermSendVisualSelection<CR>', opts, { desc = 'T
 -- Noice Plugin
 -- This will help when a lot of notifications appears
 keymap.set('n', '<leader>nd', ':NoiceDismiss<CR>', opts, { desc = 'Noice Dismiss notification' })
+
+-- LSP Signature Help Plugin
+keymap.set('n', '<leader>k', function()
+  vim.lsp.buf.signature_help()
+end, opts, { desc = 'toggle signature' })

@@ -15,6 +15,7 @@ return {
         'base16-black-metal-nile',
         'base16-black-metal-venom',
         'base16-black-metal',
+        'zitchdog-grape',
         'nord',
         'onedark_dark',
         'tokyonight',

@@ -86,7 +86,6 @@ exec --no-startup-id dex --autostart --environment i3
 exec_always --no-startup-id nm-applet
 exec_always --no-startup-id blueman-applet
 exec --no-startup-id pa-applet
-exec --no-startup-id /usr/bin/emacs --daemon
 
 # Use pactl to adjust volume in PulseAudio.
 set $refresh_i3status killall -SIGUSR1 i3status
@@ -96,9 +95,14 @@ set $refresh_i3status killall -SIGUSR1 i3status
 # Feh
 # Picom
 ################################
-# exec_always --no-startup-id picom &
+exec_always --no-startup-id picom &
 # exec_always feh --bg-scale /myhome/lotofwallpapers/0064.jpg &
 # exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
+
+################################
+# screen
+################################
+# exec_always --no-startup-id conky &
 
 ################################
 # screen
@@ -114,7 +118,8 @@ set $refresh_i3status killall -SIGUSR1 i3status
 # Polybar
 ################################
 # exec polybar &
-# exec "bash $XDG_CUSTOM_DOTFILES/polybar/launch.sh &"
+# exec_always --no-startup-id $HOME/dotfiles-config/window-manager/polybar/launch.sh &
+exec_always $HOME/dotfiles-config/window-manager/polybar/launch.sh
 
 ################################
 # Custom startup settings 
@@ -146,9 +151,7 @@ bindsym $mod+Ctrl+l exec /bin/lock
 bindsym $mod+Return exec kitty
 
 # screeshot
-bindsym --release Print         exec --no-startup-id gnome-screenshot -i
-bindsym --release Mod1+Sys_Req  exec --no-startup-id gnome-screenshot -w
-bindsym --release Shift+Print   exec --no-startup-id gnome-screenshot -a
+bindsym --release Print         exec --no-startup-id flameshot gui
 
 # change container layout (stacked, tabbed, toggle split)
 bindsym $mod+s layout stacking
@@ -156,7 +159,7 @@ bindsym $mod+w layout tabbed
 bindsym $mod+e layout toggle split
 
 # start dmenu (a program launcher)
-bindsym $mod+d exec --no-startup-id dmenu_run
+bindsym $mod+d exec --no-startup-id dmenu_run -b
 # split in horizontal orientation
 bindsym $mod+h split h
 # split in vertical orientation
@@ -295,17 +298,18 @@ smart_borders no_gaps
 #         status_command i3blocks -c $HOME/.config/i3/i3blocks/config
 #         # i3bar_command i3bar --transparency
 #         position bottom
-#         colors {
-#             background #00000000
-#             statusline #00000000
-#         }
-#         # output VGA-1
+#         # colors {
+#         #     background #ffffff
+#         #     statusline #00000000
+#         # }
+#         output eDP-1
+#         tray_padding 2
 # }
 
-bar {
-        status_command i3status -c $HOME/.config/i3/i3status/config
-        font pango:FiraCode Nerd Font 8
-        position bottom
-        # output eDP-1
-        tray_padding 2
-}
+# bar {
+#         status_command i3status -c $HOME/.config/i3/i3status/config
+#         font pango:FiraCode Nerd Font 8
+#         position bottom
+#         output eDP-1
+#         tray_padding 2
+# }

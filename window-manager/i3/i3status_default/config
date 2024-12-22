@@ -7,7 +7,6 @@ general {
 
 order += "cpu_usage"
 order += "memory"
-order += "read_file BRIGHTNESS"
 order += "volume master"
 order += "volume mic" 
 order += "battery 0"
