@@ -119,7 +119,7 @@ exec_always --no-startup-id picom &
 ################################
 # exec polybar &
 # exec_always --no-startup-id $HOME/dotfiles-config/window-manager/polybar/launch.sh &
-exec_always $HOME/dotfiles-config/window-manager/polybar/launch.sh
+# exec_always $HOME/dotfiles-config/window-manager/polybar/launch.sh
 
 ################################
 # Custom startup settings 
@@ -162,7 +162,7 @@ bindsym $mod+e layout toggle split
 bindsym $mod+d exec --no-startup-id dmenu_run
 
 # start rofi (a program launcher)
-bindsym $mod+Shift+d exec --no-startup-id rofi -show drun ~/.config/rofi/config.rasi
+# bindsym $mod+Shift+d exec --no-startup-id rofi -show drun ~/.config/rofi/config.rasi
 
 # split in horizontal orientation
 bindsym $mod+h split h
@@ -310,10 +310,10 @@ smart_borders no_gaps
 #         tray_padding 2
 # }
 
-# bar {
-#         status_command i3status -c $HOME/.config/i3/i3status/config
-#         font pango:FiraCode Nerd Font 8
-#         position bottom
-#         output eDP-1
-#         tray_padding 2
-# }
+bar {
+        font pango:FiraCode Nerd Font 8
+        position bottom
+        output eDP-1
+        tray_padding 2
+        status_command i3status -c $HOME/.config/i3/i3status/config
+}
