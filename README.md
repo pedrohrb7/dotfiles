@@ -5,10 +5,9 @@
 - bat (a better cat)
 - eza (a better ls)
 - kitty
-- rip-grep (this allows find by word on nvim)
+- ripgrep (this allows find by word on nvim)
 - nvim
 - zsh
-- xclipboard (this package make system clipboard and nvim the same)
+- xorg-xclipboard (this package make system clipboard and nvim the same)
 - FiraCode Nerd Font
-- fzf
 - fzf-git (aur package)
