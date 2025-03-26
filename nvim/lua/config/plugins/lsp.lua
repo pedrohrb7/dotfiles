@@ -91,6 +91,33 @@ return {
       on_attach = on_attach,
       root_dir = lspconfig.util.root_pattern('package.json'),
       single_file_support = false,
+      init_options = {
+        plugins = {
+          {
+            name = '@vue/typescript-plugin',
+            location = vim.fn.stdpath('data')
+              .. '/mason/packages/vue-language-server/node_modules/@vue/language-server',
+            languages = { 'vue' },
+          },
+        },
+      },
+      settings = {
+        typescript = {
+          tsserver = {
+            useSyntaxServer = false,
+          },
+          inlayHints = {
+            includeInlayParameterNameHints = 'all',
+            includeInlayParameterNameHintsWhenArgumentMatchesName = true,
+            includeInlayFunctionParameterTypeHints = true,
+            includeInlayVariableTypeHints = true,
+            includeInlayVariableTypeHintsWhenTypeMatchesName = true,
+            includeInlayPropertyDeclarationTypeHints = true,
+            includeInlayFunctionLikeReturnTypeHints = true,
+            includeInlayEnumMemberValueHints = true,
+          },
+        },
+      },
     })
 
     -- lspconfig['intelephense'].setup({
@@ -105,18 +132,40 @@ return {
     --   on_attach = on_attach,
     -- })
 
-    -- lspconfig['volar'].setup({
-    --   capabilities = capabilities,
-    --   filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue' },
-    --   init_options = {
-    --     vue = {
-    --       hybridMode = false,
-    --     },
-    --     typescript = {
-    --       tsdk = '~/.local/share/lazynvim/mason/packages/vue-language-server/node_modules/typescript/lib/',
-    --     },
-    --   },
-    -- })
+    lspconfig['volar'].setup({
+      capabilities = capabilities,
+      filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue' },
+      init_options = {
+        vue = {
+          hybridMode = false,
+        },
+        typescript = {
+          tsdk = '~/.local/share/lazynvim/mason/packages/vue-language-server/node_modules/typescript/lib/',
+        },
+      },
+      settings = {
+        typescript = {
+          inlayHints = {
+            enumMemberValues = {
+              enabled = true,
+            },
+            functionLikeReturnTypes = {
+              enabled = true,
+            },
+            propertyDeclarationTypes = {
+              enabled = true,
+            },
+            parameterTypes = {
+              enabled = true,
+              suppressWhenArgumentMatchesName = true,
+            },
+            variableTypes = {
+              enabled = true,
+            },
+          },
+        },
+      },
+    })
 
     lspconfig['cssls'].setup({
       capabilities = capabilities,
