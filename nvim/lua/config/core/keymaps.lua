@@ -65,7 +65,7 @@ vim.api.nvim_create_autocmd('TextYankPost', {
 -- Plugins keymaps
 
 --Neo-tree plugin
-keymap.set('n', '<leader>ee', ':Neotree toggle<CR>', opts, { desc = 'Toggle file explorer' }) -- toggle file explorer
+keymap.set('n', '<C-b>', ':Neotree toggle<CR>', opts, { desc = 'Toggle file explorer' }) -- toggle file explorer
 keymap.set('n', '<leader>bf', ':Neotree buffers reveal float<CR>', opts, { desc = 'Reveal buffers in modal' })
 keymap.set('n', '--', ':Neotree reveal<CR>', opts, { desc = 'Reveal file under cursos' })
 
