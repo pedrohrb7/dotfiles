@@ -73,6 +73,7 @@ keymap.set('n', '--', ':Neotree reveal<CR>', opts, { desc = 'Reveal file under c
 keymap.set('n', '<leader>ff', '<cmd>Telescop find_files<CR>', opts, { desc = 'Telescope Find file' })
 keymap.set('n', '<leader>fg', '<cmd>Telescop live_grep<CR>', { desc = 'Telescope Search by word' })
 keymap.set('n', '<leader>fb', '<cmd>Telescop buffers<CR>', { desc = 'Search in open buffers' })
+keymap.set('n', '<leader>fs', '<cmd>Telescop aerial<CR>', { desc = 'Search symbols in current buffer' })
 
 -- Trouble plugin
 keymap.set('n', '<leader>xx', '<cmd>Trouble diagnostics toggle<cr>', opts, { desc = 'Diagnostics (Trouble)' })
