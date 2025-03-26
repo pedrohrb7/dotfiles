@@ -36,12 +36,12 @@ volume master {
 }
 
 battery 0 {
-        format = "%status %percentage | remainTime: %remaining | "
+        format = "%status %percentage | remainTime: %remaining "
         format_down = "No battery"
-        status_chr = "⚡ CHR"
-        status_bat = "🔋 BAT"
-        status_unk = "? UNK"
-        status_full = "☻ FULL"
+        status_chr = "⚡CHR"
+        status_bat = "BAT"
+        status_unk = "UNK"
+        status_full = "FULL"
         path = "/sys/class/power_supply/BAT%d/uevent"
         low_threshold = 20
 }
@@ -52,10 +52,10 @@ read_file BRIGHTNESS {
 }
 
 cpu_usage {
-        format = "CPU: %usage"
+        format = " : %usage"
 }
 
 memory {
-        format = "mem: %used"
+        format = " : %used"
         threshold_degraded = "10%"
 }

@@ -147,6 +147,9 @@ bindsym XF86MonBrightnessDown exec --no-startup-id brightnessctl s 5%- && echo $
 bindsym $mod+Ctrl+l exec /bin/lock
 # exec xautolock -time 10 -locker lock
 
+# start brave browser
+bindsym $mod+b exec brave
+
 # start a terminal
 bindsym $mod+Return exec kitty
 
