@@ -45,6 +45,7 @@ return {
       }),
 
       sources = cmp.config.sources({
+        { name = 'copilot' },
         { name = 'nvim_lsp' },
         { name = 'nvim_lsp_signature_help' },
         { name = 'luasnip' }, -- For luasnip users.
@@ -64,6 +65,7 @@ return {
           },
           ellipsis_char = '...', -- when popup menu exceed maxwidth, the truncated part would show ellipsis_char instead (must define maxwidth first)
           show_labelDetails = true, -- show labelDetails in menu. Disabled by default
+          symbol_map = { Copilot = '' },
         }),
       },
     })
