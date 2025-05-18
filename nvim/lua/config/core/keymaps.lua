@@ -12,9 +12,9 @@ keymap.set('n', '<leader>+', '<C-a>', opts, { desc = 'Increment number' }) -- in
 keymap.set('n', '<leader>-', '<C-x>', opts, { desc = 'Decrement number' }) -- decrement
 
 -- custom buffer navigation
-keymap.set('n', '<S-l>', '<cmd>BufferNext<CR>', opts, { desc = 'better way to navigate to next buffer' })
-keymap.set('n', '<S-h>', '<cmd>BufferPrevious<CR>', opts, { desc = 'better way to navigate to previous buffer' })
-keymap.set('n', '<C-w>', '<cmd>BufferClose<CR>', opts, { desc = 'Close current tab' }) -- close current tab
+-- keymap.set('n', '<S-l>', '<cmd>BufferNext<CR>', opts, { desc = 'better way to navigate to next buffer' })
+-- keymap.set('n', '<S-h>', '<cmd>BufferPrevious<CR>', opts, { desc = 'better way to navigate to previous buffer' })
+-- keymap.set('n', '<C-w>', ':bw<CR>', opts, { desc = 'Close current tab' }) -- close current tab
 
 -- Navigate vim panes better
 keymap.set('n', '<c-k>', ':wincmd k<CR>', opts, { desc = 'Go to panel above' })
@@ -65,7 +65,7 @@ vim.api.nvim_create_autocmd('TextYankPost', {
 -- Plugins keymaps
 
 --Neo-tree plugin
-keymap.set('n', '<C-b>', ':Neotree toggle<CR>', opts, { desc = 'Toggle file explorer' }) -- toggle file explorer
+keymap.set('n', '<leader>ee', ':Neotree toggle<CR>', opts, { desc = 'Toggle file explorer' }) -- toggle file explorer
 keymap.set('n', '<leader>bf', ':Neotree buffers reveal float<CR>', opts, { desc = 'Reveal buffers in modal' })
 keymap.set('n', '--', ':Neotree reveal<CR>', opts, { desc = 'Reveal file under cursos' })
 
