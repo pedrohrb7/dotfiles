@@ -1,16 +1,15 @@
 return {
   {
-    "lewis6991/gitsigns.nvim",
+    'lewis6991/gitsigns.nvim',
     config = function()
-      local setmap = vim.keymap
-      require("gitsigns").setup({
+      require('gitsigns').setup({
         signs = {
-          add = { text = "┃" },
-          change = { text = "┃" },
-          delete = { text = "_" },
-          topdelete = { text = "‾" },
-          changedelete = { text = "~" },
-          untracked = { text = "┆" },
+          add = { text = '┃' },
+          change = { text = '┃' },
+          delete = { text = '_' },
+          topdelete = { text = '‾' },
+          changedelete = { text = '~' },
+          untracked = { text = '┆' },
         },
         watch_gitdir = {
           follow_files = true,
@@ -24,6 +23,6 @@ return {
     end,
   },
   {
-    "tpope/vim-fugitive",
+    'tpope/vim-fugitive',
   },
 }

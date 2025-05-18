@@ -25,18 +25,14 @@ return {
       ensure_installed = {
         'jsonls',
         'lua_ls',
-        'terraformls',
         'dockerls',
         'tailwindcss',
         'cssls',
         'sqls',
-        'intelephense',
         'eslint',
         'ts_ls',
-        'graphql',
         'emmet_ls',
         'prismals',
-        'volar',
       },
 
       automatic_installation = true,
@@ -46,10 +42,7 @@ return {
       ensure_installed = {
         'prettier', -- prettier formatter
         'stylua', -- lua formatter
-        'pylint',
         'cssls',
-        'intelephense',
-        'volar',
         'lua-language-server',
         'editorconfig-checker',
         { 'eslint_d', version = '13.1.2' },

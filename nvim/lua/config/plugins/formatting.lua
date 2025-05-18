@@ -39,6 +39,9 @@ return {
           args = { '--fix-to-stdout', '--stdin', '--stdin-filename', '$FILENAME' },
           cwd = util.root_file({
             'package.json',
+            'eslintrc.json',
+            'eslintrc.js',
+            'eslintrc',
           }),
         },
       },

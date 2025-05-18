@@ -38,7 +38,16 @@ opt.clipboard:append('unnamedplus') -- use system clipboard as default register
 -- split windows
 opt.splitright = true -- split vertical window to the right
 opt.splitbelow = true -- split horizontal window to the bottom
-opt.splitkeep = 'cursor'
+
+-- opt.splitkeep = 'cursor'
+-- n-v-c:block,i-ci-ve:ver25
+
+-- Configuração do cursor (modificado para fino em todos os modos)
+opt.guicursor = ''
+  .. 'n-v-c-sm:ver25-lCursor/lCursor,' -- Normal (fino)
+  .. 'i-ci-ve:ver25-lCursor/lCursor,' -- Insert (fino)
+  .. 'r-cr-o:hor20-vCursor/vCursor,' -- Replace (horizontal)
+  .. 'a:blinkon100-blinkoff100' -- Piscar (opcional)
 
 -- turn off swapfile
 opt.swapfile = false
