@@ -12,9 +12,9 @@ keymap.set('n', '<leader>+', '<C-a>', opts, { desc = 'Increment number' }) -- in
 keymap.set('n', '<leader>-', '<C-x>', opts, { desc = 'Decrement number' }) -- decrement
 
 -- custom buffer navigation
--- keymap.set('n', '<S-l>', '<cmd>BufferNext<CR>', opts, { desc = 'better way to navigate to next buffer' })
--- keymap.set('n', '<S-h>', '<cmd>BufferPrevious<CR>', opts, { desc = 'better way to navigate to previous buffer' })
--- keymap.set('n', '<C-w>', ':bw<CR>', opts, { desc = 'Close current tab' }) -- close current tab
+keymap.set('n', '<S-l>', '<cmd>BufferNext<CR>', opts, { desc = 'better way to navigate to next buffer' })
+keymap.set('n', '<S-h>', '<cmd>BufferPrevious<CR>', opts, { desc = 'better way to navigate to previous buffer' })
+keymap.set('n', '<C-w>', ':bw<CR>', opts, { desc = 'Close current tab' }) -- close current tab
 
 -- Navigate vim panes better
 keymap.set('n', '<c-k>', ':wincmd k<CR>', opts, { desc = 'Go to panel above' })
@@ -137,6 +137,51 @@ keymap.set('v', '<S-t>', ':ToggleTermSendVisualSelection<CR>', opts, { desc = 'T
 -- Noice Plugin
 -- This will help when a lot of notifications appears
 keymap.set('n', '<leader>nd', ':NoiceDismiss<CR>', opts, { desc = 'Noice Dismiss notification' })
+
+-- LSP Maps
+opts.desc = 'Show LSP definitions'
+keymap.set('n', 'gd', '<cmd>Telescope lsp_definitions<CR>', opts) -- show lsp definitions
+
+opts.desc = 'Show LSP references'
+keymap.set('n', 'gR', '<cmd>Telescope lsp_references<CR>', opts) -- show definition, references
+
+opts.desc = 'Smart rename'
+keymap.set('n', '<leader>rn', vim.lsp.buf.rename, opts) -- smart rename
+
+opts.desc = 'See available code actions'
+keymap.set({ 'n', 'v' }, '<leader>ca', vim.lsp.buf.code_action, opts) -- see available code actions, in visual mode will apply to selection
+
+opts.desc = 'Go to declaration'
+keymap.set('n', 'gD', vim.lsp.buf.declaration, opts) -- go to declaration
+
+opts.desc = 'Show LSP implementations'
+keymap.set('n', 'gi', '<cmd>Telescope lsp_implementations<CR>', opts) -- show lsp implementations
+
+opts.desc = 'Show LSP type definitions'
+keymap.set('n', 'gt', '<cmd>Telescope lsp_type_definitions<CR>', opts) -- show lsp type definitions
+
+opts.desc = 'Show buffer diagnostics'
+keymap.set('n', '<leader>D', '<cmd>Telescope diagnostics bufnr=0<CR>', opts) -- show  diagnostics for file
+
+opts.desc = 'Show line diagnostics'
+keymap.set('n', '<leader>d', vim.diagnostic.open_float, opts) -- show diagnostics for line
+
+opts.desc = 'Go to previous diagnostic'
+keymap.set('n', '[d', vim.diagnostic.goto_prev, opts) -- jump to previous diagnostic in buffer
+
+opts.desc = 'Go to next diagnostic'
+keymap.set('n', ']d', vim.diagnostic.goto_next, opts) -- jump to next diagnostic in buffer
+
+opts.desc = 'Show documentation for what is under cursor'
+keymap.set('n', 'K', vim.lsp.buf.hover, opts) -- show documentation for what is under cursor
+
+-- opts.desc = 'Show Signature Help for what is under cursor'
+-- keymap.set('n', '<C-K>', vim.lsp.buf.signature_help, opts)
+
+opts.desc = 'Restart LSP'
+keymap.set('n', '<leader>rs', ':LspRestart<CR>', opts) -- mapping to restart lsp if necessary
+
+-- End LSP Maps
 
 -- LSP Signature Help Plugin
 keymap.set('n', '<leader>k', function()
