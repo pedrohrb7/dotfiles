@@ -14,7 +14,7 @@ keymap.set('n', '<leader>-', '<C-x>', opts, { desc = 'Decrement number' }) -- de
 -- custom buffer navigation
 keymap.set('n', '<S-l>', '<cmd>BufferNext<CR>', opts, { desc = 'better way to navigate to next buffer' })
 keymap.set('n', '<S-h>', '<cmd>BufferPrevious<CR>', opts, { desc = 'better way to navigate to previous buffer' })
-keymap.set('n', '<C-w>', ':bw<CR>', opts, { desc = 'Close current tab' }) -- close current tab
+keymap.set('n', '<C-w>', '<cmd>BufferClose<CR>', opts, { desc = 'Close current tab' }) -- close current tab
 
 -- Navigate vim panes better
 keymap.set('n', '<c-k>', ':wincmd k<CR>', opts, { desc = 'Go to panel above' })
