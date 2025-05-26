@@ -18,10 +18,10 @@ return {
         yaml = { 'prettier' },
         markdown = { 'prettier' },
         lua = { 'stylua' },
-        php = { { 'pint', 'php_cs_fixer' } },
-        blade = { 'blade-formatter' },
+        -- java = { 'clang-format' },
+        -- php = { { 'pint', 'php_cs_fixer' } },
+        -- blade = { 'blade-formatter' },
         -- graphql = { 'prettier' },
-        -- java = { 'google-java-format' },
         -- kotlin = { 'ktlint' },
       },
       format_on_save = {
