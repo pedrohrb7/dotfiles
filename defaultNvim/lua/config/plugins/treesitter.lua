@@ -5,11 +5,7 @@ return {
   config = function()
     local configs = require('nvim-treesitter.configs')
     local ensure_installed = {
-      'angular',
       'jsonc',
-      'php',
-      'pug',
-      'vue',
       'scss',
       'c',
       'lua',
@@ -22,9 +18,9 @@ return {
       'typescript',
       'javascript',
       'dockerfile',
+      'java',
       'yaml',
       'html',
-      'php_only',
     }
     configs.setup({
       ensure_installed = ensure_installed,
