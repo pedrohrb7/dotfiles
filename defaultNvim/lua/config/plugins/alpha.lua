@@ -1,12 +1,12 @@
 return {
-  "goolord/alpha-nvim",
+  'goolord/alpha-nvim',
   dependencies = {
-    "nvim-tree/nvim-web-devicons",
+    'nvim-tree/nvim-web-devicons',
   },
 
   config = function()
-    local alpha = require("alpha")
-    local dashboard = require("alpha.themes.startify")
+    local alpha = require('alpha')
+    local dashboard = require('alpha.themes.startify')
 
     local hannya = {
       [[                  ⠰⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⠆                     ]],
@@ -44,11 +44,11 @@ return {
     }
 
     local opts = {
-      position = "center",
-      hl = "Type",
+      position = 'center',
+      hl = 'Type',
     }
 
-    dashboard.leader = "\\"
+    dashboard.leader = '\\'
     dashboard.section.header.val = hannya
     dashboard.section.header.opts = opts
     dashboard.section.opts = opts

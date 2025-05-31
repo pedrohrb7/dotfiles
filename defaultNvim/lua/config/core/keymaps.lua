@@ -187,3 +187,29 @@ keymap.set('n', '<leader>rs', ':LspRestart<CR>', opts) -- mapping to restart lsp
 keymap.set('n', '<leader>k', function()
   vim.lsp.buf.signature_help()
 end, opts, { desc = 'toggle signature' })
+
+-- Java keymaps
+-- Spring boot
+-- keymap.set('n', '<leader>Jr', springboot_nvim.boot_run, { desc = 'Spring Boot Run Project' })
+-- keymap.set('n', '<leader>Jc', springboot_nvim.generate_class, { desc = 'Java Create Class' })
+-- keymap.set('n', '<leader>Ji', springboot_nvim.generate_interface, { desc = 'Java Create Interface' })
+-- keymap.set('n', '<leader>Je', springboot_nvim.generate_enum, { desc = 'Java Create Enum' })
+
+-- JDTLS
+keymap.set('n', '<leader>co', "<Cmd>lua require'jdtls'.organize_imports()<CR>", { desc = 'Organize Imports' })
+keymap.set('n', '<leader>crv', "<Cmd>lua require('jdtls').extract_variable()<CR>", { desc = 'Extract Variable' })
+keymap.set(
+  'v',
+  '<leader>crv',
+  "<Esc><Cmd>lua require('jdtls').extract_variable(true)<CR>",
+  { desc = 'Extract Variable' }
+)
+keymap.set('n', '<leader>crc', "<Cmd>lua require('jdtls').extract_constant()<CR>", { desc = 'Extract Constant' })
+keymap.set(
+  'v',
+  '<leader>crc',
+  "<Esc><Cmd>lua require('jdtls').extract_constant(true)<CR>",
+  { desc = 'Extract Constant' }
+)
+keymap.set('v', '<leader>crm', "<Esc><Cmd>lua require('jdtls').extract_method(true)<CR>", { desc = 'Extract Method' })
+-- End Java Keymaps

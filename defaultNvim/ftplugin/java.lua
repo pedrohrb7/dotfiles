@@ -6,7 +6,7 @@
 vim.opt.tabstop = 4
 vim.opt.shiftwidth = 4
 
-local workspace_path = '~/.local/share/defaultNvim/jdtls_workspace'
+local workspace_path = vim.fn.expand('~/.local/share/defaultNvim/jdtls_workspace')
 local project_name = vim.fn.fnamemodify(vim.fn.getcwd(), ':p:h:t')
 local workspace_dir = workspace_path .. project_name
 
@@ -17,9 +17,7 @@ end
 
 local extendedClientCapabilities = jdtls.extendedClientCapabilities
 
--- local jdtls_install = require('mason-registry').get_package('jdtls'):get_install_path()
--- local java_agent = jdtls_install .. '/lombok.jar'
-local lombokPath = '~/.local/share/defaultNvim/mason/share/jdtls/lombok.jar'
+local lombokPath = vim.fn.expand('~/.local/share/defaultNvim/mason/share/jdtls/lombok.jar')
 local config = {
   -- The command that starts the language server
   -- See: https://github.com/eclipse/eclipse.jdt.ls#running-from-the-command-line
@@ -38,9 +36,11 @@ local config = {
     'java.base/java.lang=ALL-UNNAMED',
     '-javaagent:' .. lombokPath,
     '-jar',
-    '~/.local/share/defaultNvim/mason/packages/jdtls/plugins/org.eclipse.equinox.launcher_1.7.0.v20250331-1702.jar',
+    vim.fn.expand(
+      '~/.local/share/defaultNvim/mason/packages/jdtls/plugins/org.eclipse.equinox.launcher_1.7.0.v20250331-1702.jar'
+    ),
     '-configuration',
-    '~/.local/share/defaultNvim/mason/packages/jdtls/config_linux',
+    vim.fn.expand('~/.local/share/defaultNvim/mason/packages/jdtls/config_linux'),
     '-data',
     workspace_dir,
   },
@@ -121,20 +121,3 @@ local config = {
 }
 
 require('jdtls').start_or_attach(config)
-
-vim.keymap.set('n', '<leader>co', "<Cmd>lua require'jdtls'.organize_imports()<CR>", { desc = 'Organize Imports' })
-vim.keymap.set('n', '<leader>crv', "<Cmd>lua require('jdtls').extract_variable()<CR>", { desc = 'Extract Variable' })
-vim.keymap.set(
-  'v',
-  '<leader>crv',
-  "<Esc><Cmd>lua require('jdtls').extract_variable(true)<CR>",
-  { desc = 'Extract Variable' }
-)
-vim.keymap.set('n', '<leader>crc', "<Cmd>lua require('jdtls').extract_constant()<CR>", { desc = 'Extract Constant' })
-vim.keymap.set(
-  'v',
-  '<leader>crc',
-  "<Esc><Cmd>lua require('jdtls').extract_constant(true)<CR>",
-  { desc = 'Extract Constant' }
-)
--- vim.keymap.set('v', '<leader>crm', "<Esc><Cmd>lua require('jdtls').extract_method(true)<CR>", { desc = 'Extract Method' })
