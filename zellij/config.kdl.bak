@@ -279,7 +279,139 @@ plugins {
 // Choose the theme that is specified in the themes section.
 // Default: default
 //
-theme "dracula"
+// Author: Evan Lauer <evthestrike@gmail.com>
+// Based on the AYU theme colors from https://github.com/dempfi/ayu
+
+themes {
+  ayu_mirage {
+    fg "#CCCAC2"
+    bg "#1F2430"
+    black "#1A1F29"
+    red "#F28779"
+    green "#D5FF80"
+    yellow "#FFCC77"
+    blue "#73D0FF"
+    magenta "#DFBFFF"
+    cyan "#444B55"
+    white "#C7C7C7"
+    orange "#FFAD66"
+	}
+
+	ayu_light {
+		fg "#5C6166"
+		bg "#FAFAFA"
+		black "#E7EAED"
+		red "#F07171"
+		green "#86B300"
+		yellow "#FFAA33"
+		blue "#399EE6"
+		magenta "#A37ACC"
+		cyan "#478ACC"
+		white "#FCFCFC"
+		orange "#FA8D3E"
+	}
+
+	ayu_dark {
+		fg "#BFBDB6"
+		bg "#0F1419" 
+		black "#131721"
+		red "#F07178"
+		green "#AAD94C"
+		yellow "#E6B450"
+		blue "#59C2FF"
+		magenta "#D2A6FF"
+		cyan "#73B8FF"
+		white "#CCCAC2"
+		orange "#FF8F40"
+	}
+
+// Cyberpunk inspired themes
+
+  cyber-noir {
+    bg "#0b0e1a" // Dark Blue
+    fg "#91f3e4" // Teal
+    red "#ff578d" // Hot Pink
+    green "#00ff00" // Neon Green
+    blue "#3377ff" // Electric Blue
+    yellow "#ffd700" // Cyber Yellow
+    magenta "#ff00ff" // Neon Purple
+    orange "#ff7f50" // Cyber Orange
+    cyan "#00e5e5" // Cyan
+    black "#000000" // Black
+    white "#91f3e4" // Teal
+  }
+
+  blade-runner {
+    bg "#1a1a1a" // Dark Gray
+    fg "#2bbff4" // Neon Blue
+    red "#ff355e" // Neon Pink
+    green "#00ff00" // Neon Green
+    blue "#00d9e3" // Electric Blue
+    yellow "#ffe600" // Neon Yellow
+    magenta "#ff00ff" // Neon Purple
+    orange "#ff8c0d" // Cyber Orange
+    cyan "#00e5e5" // Cyan
+    black "#000000" // Black
+    white "#ffffff" // White
+  }
+
+  retro-wave {
+    bg "#1a1a1a" // Dark Gray
+    fg "#ff9900" // Retro Orange
+    red "#ff355e" // Neon Pink
+    green "#00ff00" // Neon Green
+    blue "#00d9e3" // Electric Blue
+    yellow "#ffe600" // Neon Yellow
+    magenta "#ff00ff" // Neon Purple
+    orange "#ff6611" // Retro Red
+    cyan "#00e5e5" // Cyan
+    black "#000000" // Black
+    white "#ffffff" // White
+  }
+  
+  tokyo-night-storm {
+    fg 169 177 214
+    bg 36 40 59
+    black 56 62 90
+    red 249 51 87
+    green 158 206 106
+    yellow 224 175 104
+    blue 122 162 247
+    magenta 187 154 247
+    cyan 42 195 222
+    white 192 202 245
+    orange 255 158 100
+  }
+
+  nord {
+    fg 216 222 233 // #D8DEE9
+    bg 46 52 64 // #2E3440
+    black 59 66 82 // #3B4252
+    red 191 97 106 // #BF616A
+    green 163 190 140 // #A3BE8C
+    yellow 235 203 139 // #EBCB8B
+    blue 129 161 193 // #81A1C1
+    magenta 180 142 173 // #B48EAD
+    cyan 136 192 208 // #88C0D0
+    white 229 233 240 // #E5E9F0
+    orange 208 135 112 // #D08770
+  }
+
+  night-owl {
+    bg "#051525" // Surface2
+    fg "#d7dde9"
+    red "#dd5e56"
+    green "#67d679"
+    blue "#8aa8f8"
+    yellow "#b6d976"
+    magenta "#be94e4" // Pink
+    orange "#fab387" // Peach
+    cyan "#5ec4a9" // Sky
+    black "#051525" // Mantle
+    white "#feffff"
+  }
+}
+theme "retro-wave"
 
 // The name of the default layout to load on startup
 // Default: "default"
