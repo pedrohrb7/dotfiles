@@ -13,7 +13,7 @@ local beautiful = require("beautiful")
 local wibox = require("wibox")
 local gears = require("gears")
 local naughty = require("naughty")
-local color = require("themes.colors")
+local color = require("configs.color")
 
 local calendar_widget = {}
 
@@ -189,7 +189,7 @@ local function worker(user_args)
 
 	local cal = wibox.widget({
 		date = os.date("*t"),
-		font = "Ubuntu Nerd Font 14",
+		font = "FiraCode Nerd Font 10",
 		fn_embed = decorate_cell,
 		long_weekdays = true,
 		start_sunday = start_sunday,
@@ -201,7 +201,7 @@ local function worker(user_args)
 		visible = false,
 		shape = rounded_shape(radius),
 		offset = { y = 15 },
-		border_width = 9,
+		border_width = 4,
 		border_color = calendar_themes[theme].border,
 		widget = cal,
 	})
