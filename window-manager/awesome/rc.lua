@@ -22,8 +22,14 @@ local beautiful = require("beautiful")
 -- Notification library
 local menubar = require("menubar")
 local hotkeys_popup = require("awful.hotkeys_popup")
+
+-- Import custom widgets
 local calendar_widget = require("configs.widgets.calendar")
 local volume_widget = require("configs.widgets.audio.volume")
+local docker_widget = require("configs.widgets.docker")
+local cpu_widget = require("configs.widgets.cpu")
+local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
+local batteryarc_widget = require("configs.widgets.battery")
 
 modkey = "Mod4"
 local terminal = "kitty"
@@ -240,12 +246,30 @@ awful.screen.connect_for_each_screen(function(s)
 		s.mytasklist, -- Middle widget
 		{ -- Right widgets
 			layout = wibox.layout.fixed.horizontal,
+			docker_widget({
+				number_of_containers = 5,
+			}),
 			mykeyboardlayout,
 			volume_widget({
 				widget_type = "arc",
 			}),
+			brightness_widget({
+				type = "icon_and_text",
+				program = "xbacklight",
+				step = 2,
+			}),
+			cpu_widget({
+				width = 70,
+				step_width = 2,
+				step_spacing = 0,
+				color = "#434c5e",
+			}),
 			wibox.widget.systray(),
 			mytextclock,
+			batteryarc_widget({
+				show_current_level = true,
+				arc_thickness = 1,
+			}),
 			s.mylayoutbox,
 		},
 	})
@@ -264,6 +288,15 @@ root.buttons(gears.table.join(
 
 -- {{{ Key bindings
 local globalkeys = gears.table.join(
+	-- Brightness widget
+	awful.key({ modkey }, ";", function()
+		brightness_widget:inc()
+	end, { description = "increase brightness", group = "custom" }),
+
+	awful.key({ modkey, "Shift" }, ";", function()
+		brightness_widget:dec()
+	end, { description = "decrease brightness", group = "custom" }),
+
 	-- Volume keys
 	awful.key({}, "XF86AudioRaiseVolume", function()
 		volume_widget.inc(2)
