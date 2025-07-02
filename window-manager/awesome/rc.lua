@@ -683,4 +683,6 @@ end)
 --Gaps
 beautiful.useless_gap = 8
 
+awful.util.spawn("picom")
+awful.util.spawn("nitrogen --restore")
 awful.util.spawn("nm-applet")
