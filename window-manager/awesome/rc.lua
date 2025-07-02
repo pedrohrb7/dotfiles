@@ -31,7 +31,7 @@ local cpu_widget = require("configs.widgets.cpu")
 local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
 local batteryarc_widget = require("configs.widgets.battery")
 
-modkey = "Mod4"
+local modkey = "Mod4"
 local terminal = "kitty"
 local editor = os.getenv("EDITOR") or "svim"
 local editor_cmd = terminal .. " -e " .. editor
@@ -40,8 +40,8 @@ beautiful.init("~/.config/awesome/themes/default/theme.lua")
 
 -- Table of layouts to cover with awful.layout.inc, order matters.
 awful.layout.layouts = {
-	awful.layout.suit.floating,
 	awful.layout.suit.tile,
+	awful.layout.suit.floating,
 	awful.layout.suit.tile.left,
 	awful.layout.suit.tile.bottom,
 	awful.layout.suit.tile.top,
@@ -107,8 +107,6 @@ local mykeyboardlayout = awful.widget.keyboardlayout()
 -- {{{ Wibar
 -- Create a textclock widget
 -- local mytextclock = wibox.widget.textclock()
--- ...
--- Create a textclock widge
 local mytextclock = wibox.widget.textclock()
 
 -- or customized
@@ -133,20 +131,25 @@ local taglist_buttons = gears.table.join(
 	awful.button({}, 1, function(t)
 		t:view_only()
 	end),
+
 	awful.button({ modkey }, 1, function(t)
 		if client.focus then
 			client.focus:move_to_tag(t)
 		end
 	end),
+
 	awful.button({}, 3, awful.tag.viewtoggle),
+
 	awful.button({ modkey }, 3, function(t)
 		if client.focus then
 			client.focus:toggle_tag(t)
 		end
 	end),
+
 	awful.button({}, 4, function(t)
 		awful.tag.viewnext(t.screen)
 	end),
+
 	awful.button({}, 5, function(t)
 		awful.tag.viewprev(t.screen)
 	end)
@@ -160,12 +163,15 @@ local tasklist_buttons = gears.table.join(
 			c:emit_signal("request::activate", "tasklist", { raise = true })
 		end
 	end),
+
 	awful.button({}, 3, function()
 		awful.menu.client_list({ theme = { width = 250 } })
 	end),
+
 	awful.button({}, 4, function()
 		awful.client.focus.byidx(1)
 	end),
+
 	awful.button({}, 5, function()
 		awful.client.focus.byidx(-1)
 	end)
@@ -181,19 +187,24 @@ awful.screen.connect_for_each_screen(function(s)
 
 	-- Create a promptbox for each screen
 	s.mypromptbox = awful.widget.prompt()
+
 	-- Create an imagebox widget which will contain an icon indicating which layout we're using.
 	-- We need one layoutbox per screen.
 	s.mylayoutbox = awful.widget.layoutbox(s)
+
 	s.mylayoutbox:buttons(gears.table.join(
 		awful.button({}, 1, function()
 			awful.layout.inc(1)
 		end),
+
 		awful.button({}, 3, function()
 			awful.layout.inc(-1)
 		end),
+
 		awful.button({}, 4, function()
 			awful.layout.inc(1)
 		end),
+
 		awful.button({}, 5, function()
 			awful.layout.inc(-1)
 		end)
@@ -212,11 +223,11 @@ awful.screen.connect_for_each_screen(function(s)
 		buttons = tasklist_buttons,
 		style = {
 			shape_border_width = 1,
-			shape_border_color = "#777777",
+			shape_border_color = "#ff77f7",
 			shape = gears.shape.rounded_bar,
 		},
 		layout = {
-			spacing = 10,
+			spacing = 12,
 			spacing_widget = {
 				{
 					forced_width = 5,
@@ -301,9 +312,11 @@ local globalkeys = gears.table.join(
 	awful.key({}, "XF86AudioRaiseVolume", function()
 		volume_widget.inc(2)
 	end),
+
 	awful.key({}, "XF86AudioLowerVolume", function()
 		volume_widget.dec(-2)
 	end),
+
 	awful.key({}, "XF86AudioMute", function()
 		volume_widget.toggle()
 	end),
@@ -312,6 +325,10 @@ local globalkeys = gears.table.join(
 	awful.key({ modkey }, "Left", awful.tag.viewprev, { description = "view previous", group = "tag" }),
 	awful.key({ modkey }, "Right", awful.tag.viewnext, { description = "view next", group = "tag" }),
 	awful.key({ modkey }, "Escape", awful.tag.history.restore, { description = "go back", group = "tag" }),
+
+	awful.key({ modkey }, "d", function()
+		awful.util.spawn("rofi -show drun -show-icons")
+	end, { description = "run rofi", group = "menu" }),
 
 	awful.key({ modkey }, "j", function()
 		awful.client.focus.byidx(1)
@@ -589,7 +606,7 @@ awful.rules.rules = {
 	},
 
 	-- Add titlebars to normal clients and dialogs
-	{ rule_any = { type = { "normal", "dialog" } }, properties = { titlebars_enabled = true } },
+	{ rule_any = { type = { "normal", "dialog" } }, properties = { titlebars_enabled = false } },
 
 	-- Set Firefox to always map on the tag named "2" on screen 1.
 	-- { rule = { class = "Firefox" },
@@ -664,6 +681,6 @@ end)
 -- }}}
 
 --Gaps
-beautiful.useless_gap = 4
+beautiful.useless_gap = 8
 
 awful.util.spawn("nm-applet")
