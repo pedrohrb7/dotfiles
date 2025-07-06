@@ -686,3 +686,4 @@ beautiful.useless_gap = 8
 awful.util.spawn("picom")
 awful.util.spawn("nitrogen --restore")
 awful.util.spawn("nm-applet")
+awful.util.spawn("/usr/lib/mate-polkit/polkit-mate-authentication-agent-1")
