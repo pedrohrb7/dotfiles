@@ -190,7 +190,7 @@ end
 local function worker(user_args)
 	local args = user_args or {}
 
-	local mixer_cmd = args.mixer_cmd or "pavucontrol"
+	local mixer_cmd = args.mixer_cmd or "pamixer"
 	local widget_type = args.widget_type
 	local refresh_rate = args.refresh_rate or 1
 	local step = args.step or 5
