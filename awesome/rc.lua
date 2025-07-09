@@ -33,7 +33,7 @@ local batteryarc_widget = require("configs.widgets.battery")
 
 local modkey = "Mod4"
 local terminal = "kitty"
-local editor = os.getenv("EDITOR") or "svim"
+local editor = os.getenv("EDITOR") or "nvim"
 local editor_cmd = terminal .. " -e " .. editor
 
 beautiful.init("~/.config/awesome/themes/default/theme.lua")
@@ -61,39 +61,38 @@ awful.layout.layouts = {
 
 -- {{{ Menu
 -- Create a launcher widget and a main menu
-local awesomemenu = {
-	{
-		"hotkeys",
-		function()
-			hotkeys_popup.show_help(nil, awful.screen.focused())
-		end,
-	},
-	{ "manual", terminal .. " -e man awesome" },
-	{ "edit config", editor_cmd .. " " .. awesome.conffile },
-	{ "restart", awesome.restart },
-	{
-		"quit",
-		function()
-			awesome.quit()
-		end,
-	},
-}
-
-local mainmenu = awful.menu({
-	items = {
-		{ "awesome", awesomemenu, beautiful.awesome_icon },
-		{ "terminal", terminal },
-	},
-	theme = {
-		width = 250,
-		height = 30,
-		font = "FiraCode Nerd Font 10",
-		bg_normal = "#00000080",
-		bg_focus = "#729fcf",
-		border_width = 3,
-		border_color = "#000000",
-	},
-})
+-- local awesomemenu = {
+-- 	{
+-- 		"hotkeys",
+-- 		function()
+-- 			hotkeys_popup.show_help(nil, awful.screen.focused())
+-- 		end,
+-- 	},
+-- 	{ "manual", terminal .. " -e man awesome" },
+-- 	{ "edit config", editor_cmd .. " " .. awesome.conffile },
+-- 	{ "restart", awesome.restart },
+-- 	{
+-- 		"quit",
+-- 		function()
+-- 			awesome.quit()
+-- 		end,
+-- 	},
+-- }
+--
+-- local mainmenu = awful.menu({
+-- 	items = {
+-- 		{ "terminal", terminal },
+-- 	},
+-- 	theme = {
+-- 		width = 250,
+-- 		height = 30,
+-- 		font = "FiraCode Nerd Font 10",
+-- 		bg_normal = "#00000080",
+-- 		bg_focus = "#729fcf",
+-- 		border_width = 3,
+-- 		border_color = "#000000",
+-- 	},
+-- })
 
 local mylauncher = awful.widget.launcher({ image = beautiful.awesome_icon })
 
@@ -289,9 +288,9 @@ end)
 
 -- {{{ Mouse bindings
 root.buttons(gears.table.join(
-	awful.button({}, 3, function()
-		mainmenu:toggle()
-	end),
+	-- awful.button({}, 3, function()
+	-- 	mainmenu:toggle()
+	-- end),
 	awful.button({}, 4, awful.tag.viewnext),
 	awful.button({}, 5, awful.tag.viewprev)
 ))
@@ -309,15 +308,15 @@ local globalkeys = gears.table.join(
 	end, { description = "decrease brightness", group = "custom" }),
 
 	-- Volume keys
-	awful.key({}, "XF86AudioRaiseVolume", function()
+	awful.key({}, "pamixer", function()
 		volume_widget.inc(2)
 	end),
 
-	awful.key({}, "XF86AudioLowerVolume", function()
+	awful.key({}, "pamixer", function()
 		volume_widget.dec(-2)
 	end),
 
-	awful.key({}, "XF86AudioMute", function()
+	awful.key({}, "pamixer", function()
 		volume_widget.toggle()
 	end),
 
@@ -338,9 +337,9 @@ local globalkeys = gears.table.join(
 		awful.client.focus.byidx(-1)
 	end, { description = "focus previous by index", group = "client" }),
 
-	awful.key({ modkey }, "w", function()
-		mainmenu:show()
-	end, { description = "show main menu", group = "awesome" }),
+	-- awful.key({ modkey }, "w", function()
+	-- 	mainmenu:show()
+	-- end, { description = "show main menu", group = "awesome" }),
 
 	-- Layout manipulation
 	awful.key({ modkey, "Shift" }, "j", function()
