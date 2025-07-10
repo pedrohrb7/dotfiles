@@ -26,6 +26,7 @@ local hotkeys_popup = require("awful.hotkeys_popup")
 -- Import custom widgets
 local calendar_widget = require("configs.widgets.calendar")
 local volume_widget = require("configs.widgets.audio.volume")
+-- local pulseaudio_widget = require("configs.widgets.pulseaudio.pulseaudio")
 local docker_widget = require("configs.widgets.docker")
 local cpu_widget = require("configs.widgets.cpu")
 local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
@@ -33,8 +34,8 @@ local batteryarc_widget = require("configs.widgets.battery")
 
 local modkey = "Mod4"
 local terminal = "kitty"
-local editor = os.getenv("EDITOR") or "nvim"
-local editor_cmd = terminal .. " -e " .. editor
+-- local editor = os.getenv("EDITOR") or "nvim"
+-- local pulseaudio = pulseaudio_widget()
 
 beautiful.init("~/.config/awesome/themes/default/theme.lua")
 
@@ -260,6 +261,7 @@ awful.screen.connect_for_each_screen(function(s)
 				number_of_containers = 5,
 			}),
 			mykeyboardlayout,
+			-- pulseaudio,
 			volume_widget({
 				widget_type = "arc",
 			}),
@@ -276,10 +278,10 @@ awful.screen.connect_for_each_screen(function(s)
 			}),
 			wibox.widget.systray(),
 			mytextclock,
-			batteryarc_widget({
-				show_current_level = true,
-				arc_thickness = 1,
-			}),
+			-- batteryarc_widget({
+			-- 	main_color = "#e53935",
+			-- 	show_current_level = true,
+			-- }),
 			s.mylayoutbox,
 		},
 	})
@@ -308,16 +310,25 @@ local globalkeys = gears.table.join(
 	end, { description = "decrease brightness", group = "custom" }),
 
 	-- Volume keys
-	awful.key({}, "pamixer", function()
-		volume_widget.inc(2)
+	-- awful.key({}, "XF86AudioRaiseVolume", function()
+	-- 	volume_widget.inc(2)
+	-- end),
+	--
+	-- awful.key({}, "XF86AudioLowerVolume", function()
+	-- 	volume_widget.dec(-2)
+	-- end),
+	--
+	-- awful.key({}, "XF86AudioMute", function()
+	-- 	volume_widget.toggle()
+	-- end),
+	awful.key({}, "XF86AudioLowerVolume", function()
+		awful.util.spawn("pactl set-sink-volume @DEFAULT_SINK@ 5%-", false)
 	end),
-
-	awful.key({}, "pamixer", function()
-		volume_widget.dec(-2)
+	awful.key({}, "XF86AudioRaiseVolume", function()
+		awful.util.spawn("pactl set-sink-volume @DEFAULT_SINK@ 5%+", false)
 	end),
-
-	awful.key({}, "pamixer", function()
-		volume_widget.toggle()
+	awful.key({}, "XF86AudioMute", function()
+		awful.util.spawn("pactl -c 0 set Master toggle", false)
 	end),
 
 	awful.key({ modkey }, "s", hotkeys_popup.show_help, { description = "show help", group = "awesome" }),
@@ -683,6 +694,7 @@ end)
 beautiful.useless_gap = 8
 
 awful.util.spawn("picom")
+awful.util.spawn("/sbin/start-pulseaudio-x11")
 awful.util.spawn("nitrogen --restore")
 awful.util.spawn("nm-applet")
 awful.util.spawn("/usr/lib/mate-polkit/polkit-mate-authentication-agent-1")
