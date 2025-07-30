@@ -693,6 +693,7 @@ end)
 --Gaps
 beautiful.useless_gap = 8
 
+awful.util.spawn("xinput set-prop 12 366 1")
 awful.util.spawn("picom")
 awful.util.spawn("/sbin/start-pulseaudio-x11")
 awful.util.spawn("nitrogen --restore")

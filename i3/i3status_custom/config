@@ -31,13 +31,13 @@ disk "/" {
 }
 
 run_watch DHCP {
-        pidfile = "/var/run/dhclient*.pid"
+  pidfile = "/var/run/dhclient*.pid"
 	format = "%title: "
 	format_down = "%title: "
 }
 
 run_watch VPN {
-        pidfile = "/sys/class/net/tun0"
+  pidfile = "/sys/class/net/tun0"
 	format = "%title: "
 	format_down = "%title: "
 }
@@ -54,7 +54,7 @@ ethernet _first_ {
 }
 
 battery 0 {
-        format = "%status %remaining (%consumption)"
+  format = "%status %remaining (%consumption)"
 	status_chr = ""
 	status_bat = " "
 	status_full = " "
