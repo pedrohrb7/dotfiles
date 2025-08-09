@@ -25,12 +25,12 @@ local hotkeys_popup = require("awful.hotkeys_popup")
 
 -- Import custom widgets
 local calendar_widget = require("configs.widgets.calendar")
-local volume_widget = require("configs.widgets.audio.volume")
+-- local volume_widget = require("configs.widgets.audio.volume")
 -- local pulseaudio_widget = require("configs.widgets.pulseaudio.pulseaudio")
-local docker_widget = require("configs.widgets.docker")
+-- local docker_widget = require("configs.widgets.docker")
 local cpu_widget = require("configs.widgets.cpu")
-local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
-local batteryarc_widget = require("configs.widgets.battery")
+-- local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
+-- local batteryarc_widget = require("configs.widgets.battery")
 
 local modkey = "Mod4"
 local terminal = "kitty"
@@ -46,17 +46,10 @@ awful.layout.layouts = {
 	awful.layout.suit.tile.left,
 	awful.layout.suit.tile.bottom,
 	awful.layout.suit.tile.top,
-	-- awful.layout.suit.fair,
-	-- awful.layout.suit.fair.horizontal,
 	awful.layout.suit.spiral,
 	awful.layout.suit.spiral.dwindle,
 	awful.layout.suit.max,
 	awful.layout.suit.max.fullscreen,
-	-- awful.layout.suit.magnifier,
-	-- awful.layout.suit.corner.nw,
-	-- awful.layout.suit.corner.ne,
-	-- awful.layout.suit.corner.sw,
-	-- awful.layout.suit.corner.se,
 }
 -- }}}
 
@@ -111,7 +104,7 @@ local mytextclock = wibox.widget.textclock()
 
 -- or customized
 local cw = calendar_widget({
-	theme = "outrun",
+	theme = "naughty",
 	placement = "top_center",
 	start_sunday = true,
 	radius = 8,
@@ -223,7 +216,7 @@ awful.screen.connect_for_each_screen(function(s)
 		buttons = tasklist_buttons,
 		style = {
 			shape_border_width = 1,
-			shape_border_color = "#ff77f7",
+			-- shape_border_color = "#ff77f7",
 			shape = gears.shape.rounded_bar,
 		},
 		layout = {
@@ -257,19 +250,19 @@ awful.screen.connect_for_each_screen(function(s)
 		s.mytasklist, -- Middle widget
 		{ -- Right widgets
 			layout = wibox.layout.fixed.horizontal,
-			docker_widget({
-				number_of_containers = 5,
-			}),
+			-- docker_widget({
+			-- 	number_of_containers = 5,
+			-- }),
 			mykeyboardlayout,
 			-- pulseaudio,
-			volume_widget({
-				widget_type = "arc",
-			}),
-			brightness_widget({
-				type = "icon_and_text",
-				program = "xbacklight",
-				step = 2,
-			}),
+			-- volume_widget({
+			-- 	widget_type = "arc",
+			-- }),
+			-- brightness_widget({
+			-- 	type = "icon_and_text",
+			-- 	program = "xbacklight",
+			-- 	step = 2,
+			-- }),
 			cpu_widget({
 				width = 70,
 				step_width = 2,
@@ -301,13 +294,13 @@ root.buttons(gears.table.join(
 -- {{{ Key bindings
 local globalkeys = gears.table.join(
 	-- Brightness widget
-	awful.key({ modkey }, ";", function()
-		brightness_widget:inc()
-	end, { description = "increase brightness", group = "custom" }),
-
-	awful.key({ modkey, "Shift" }, ";", function()
-		brightness_widget:dec()
-	end, { description = "decrease brightness", group = "custom" }),
+	-- awful.key({ modkey }, ";", function()
+	-- 	brightness_widget:inc()
+	-- end, { description = "increase brightness", group = "custom" }),
+	--
+	-- awful.key({ modkey, "Shift" }, ";", function()
+	-- 	brightness_widget:dec()
+	-- end, { description = "decrease brightness", group = "custom" }),
 
 	-- Volume keys
 	-- awful.key({}, "XF86AudioRaiseVolume", function()
@@ -328,17 +321,13 @@ local globalkeys = gears.table.join(
 		awful.util.spawn("pactl set-sink-volume @DEFAULT_SINK@ 5%+", false)
 	end),
 	awful.key({}, "XF86AudioMute", function()
-		awful.util.spawn("pactl -c 0 set Master toggle", false)
+		awful.util.spawn("pactl set-sink-mute @DEFAULT_SINK@ toggle", false)
 	end),
 
 	awful.key({ modkey }, "s", hotkeys_popup.show_help, { description = "show help", group = "awesome" }),
 	awful.key({ modkey }, "Left", awful.tag.viewprev, { description = "view previous", group = "tag" }),
 	awful.key({ modkey }, "Right", awful.tag.viewnext, { description = "view next", group = "tag" }),
 	awful.key({ modkey }, "Escape", awful.tag.history.restore, { description = "go back", group = "tag" }),
-
-	awful.key({ modkey }, "d", function()
-		awful.util.spawn("rofi -show drun -show-icons")
-	end, { description = "run rofi", group = "menu" }),
 
 	awful.key({ modkey }, "j", function()
 		awful.client.focus.byidx(1)
@@ -692,10 +681,3 @@ end)
 
 --Gaps
 beautiful.useless_gap = 8
-
-awful.util.spawn("xinput set-prop 12 366 1")
-awful.util.spawn("picom")
-awful.util.spawn("/sbin/start-pulseaudio-x11")
-awful.util.spawn("nitrogen --restore")
-awful.util.spawn("nm-applet")
-awful.util.spawn("/usr/lib/mate-polkit/polkit-mate-authentication-agent-1")
