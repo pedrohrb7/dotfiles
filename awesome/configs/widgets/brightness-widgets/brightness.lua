@@ -15,6 +15,7 @@ local spawn = require("awful.spawn")
 local gfs = require("gears.filesystem")
 local naughty = require("naughty")
 local beautiful = require("beautiful")
+local dpi = require("beautiful").xresources.apply_dpi
 
 local ICON_DIR = gfs.get_configuration_dir() .. "configs/widgets/brightness_widget/"
 local get_brightness_cmd
@@ -49,12 +50,10 @@ local function worker(user_args)
 	local tooltip = args.tooltip or false
 	local percentage = args.percentage or false
 	local rmb_set_max = args.rmb_set_max or false
-	if program == "light" then
-		get_brightness_cmd = "light -G"
-		set_brightness_cmd = "light -S %d" -- <level>
-		inc_brightness_cmd = "light -A " .. step
-		dec_brightness_cmd = "light -U " .. step
-	elseif program == "xbacklight" then
+	local margin_left = args.margin_left or 5
+	local margin_right = args.margin_right or 5
+
+	if program == "xbacklight" then
 		get_brightness_cmd = "xbacklight -get"
 		set_brightness_cmd = "xbacklight -set %d" -- <level>
 		inc_brightness_cmd = "xbacklight -inc " .. step
@@ -197,7 +196,7 @@ local function worker(user_args)
 		})
 	end
 
-	return brightness_widget.widget
+	return wibox.container.margin(brightness_widget.widget, margin_left, margin_right)
 end
 
 return setmetatable(brightness_widget, {

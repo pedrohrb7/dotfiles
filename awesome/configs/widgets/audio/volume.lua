@@ -12,49 +12,63 @@
 
 local awful = require("awful")
 local wibox = require("wibox")
-local watch = require("awful.widget.watch")
-local spawn = require("awful.spawn")
-local gfs = require("gears.filesystem")
-local naughty = require("naughty")
-local beautiful = require("beautiful")
+local naughty = require("naughty") -- For notifications
+local gears = require("gears")
+local dpi = require("beautiful").xresources.apply_dpi
 
-local get_volume_cmd
-local dec_volume_cmd
-local inc_volume_cmd
-local tog_volume_cmd
+local volume_widget = wibox.widget({
+	{
+		id = "icon",
+		widget = wibox.widget.imagebox,
+		image = " ", -- Replace with an actual path to an icon
+	},
+	{
+		id = "text",
+		widget = wibox.widget.textbox,
+		font = "FiraCode Nerd Font 8",
+		align = "right",
+	},
+	layout = wibox.layout.fixed.horizontal,
+})
 
-local volume_widget = {}
-
-local function show_warning(message)
-	naughty.notify({
-		preset = naughty.config.presets.critical,
-		title = "Volume Widget",
-		text = message,
-	})
+-- Update the volume widget
+local update_volume_widget = function()
+	awful.spawn.easy_async_with_shell("pamixer --get-volume-human", function(stdout)
+		-- local volume_percentage = tonumber(stdout)
+		local volume_percentage = stdout
+		if volume_percentage then
+			volume_widget.text.text = volume_percentage
+			-- Optional: Change icon based on mute status or volume level
+			-- For example, check mute status using `amixer get Master | grep -oP '\\[(on|off)\\]'`
+		end
+	end)
 end
 
-local function worker(user_args)
-	local args = user_args or {}
-
-	local widget_text = args.text or " 󰖀 "
-	local font = args.font or beautiful.font
-	local timeout = args.timeout or 100
-	local size = args.size or 18
-
-	local step = args.step or 5
-	local base = args.base or 20
-	local current_level = 0
-
-	local program = args.program or "pamixer"
-
-	if program == "pactl" then
-		get_volume_cmd = "pactl get-sink-volume @DEFAULT_SINK@"
-	elseif program == "pamixer" then
-		get_volume_cmd = "pamixer --get-volume-human"
-		inc_volume_cmd = "pamixer -i" .. step
-		dec_volume_cmd = "pamixer -d" .. step
-	else
-		show_warning(program .. " command is not supported by the widget")
-		return
+-- Initial update and periodic updates
+update_volume_widget()
+awful.widget.watch(
+	"pamixer --get-volume-human",
+	1, -- Update every 1 second
+	function(widget, stdout)
+		update_volume_widget()
 	end
+)
+
+-- Add click event to toggle mute (optional)
+volume_widget:buttons(awful.util.table.join(awful.button({}, 1, function()
+	awful.spawn("pamixer -t")
+	naughty.notify({ text = "Volume Toggled" }) -- Optional notification
+end)))
+
+local styled_widget = wibox.container.background(wibox.container.margin(
+	volume_widget,
+	dpi(1), -- Margem interna
+	"#2E3440" -- Cor de fundo (azul escuro)
+))
+
+-- Formato arredondado
+styled_widget.shape = function(cr, width, height)
+	gears.shape.rounded_rect(cr, width, height, dpi(4)) -- 4px de raio
 end
+
+return wibox.container.margin(styled_widget, 10, 10)

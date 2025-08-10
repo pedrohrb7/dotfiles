@@ -13,8 +13,8 @@ local theme = {}
 
 theme.font = "FiraCode Nerd Font 11"
 
-theme.bg_normal = ""
-theme.bg_focus = "#3d898d"
+theme.bg_normal = "#2f404d00"
+theme.bg_focus = "#005687"
 theme.bg_urgent = "#ff577d"
 theme.bg_minimize = "#e2dddf"
 theme.bg_systray = theme.bg_normal
@@ -117,7 +117,8 @@ theme.awesome_icon = theme_assets.awesome_icon(theme.menu_height, theme.bg_focus
 -- Define the icon theme for application icons. If not set then the icons
 -- from /usr/share/icons and /usr/share/icons/hicolor will be used.
 theme.icon_theme = nil
-theme.wallpaper = themes_path .. "default/background.png"
+-- theme.wallpaper = themes_path .. "default/background.png"
+theme.wallpaper = "/mnt/data/lotofwallpapers/clouds.jpg"
 
 return theme
 
