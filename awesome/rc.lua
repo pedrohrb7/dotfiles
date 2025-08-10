@@ -26,11 +26,9 @@ local hotkeys_popup = require("awful.hotkeys_popup")
 -- Import custom widgets
 local calendar_widget = require("configs.widgets.calendar")
 -- local volume_widget = require("configs.widgets.audio.volume")
--- local pulseaudio_widget = require("configs.widgets.pulseaudio.pulseaudio")
--- local docker_widget = require("configs.widgets.docker")
 local cpu_widget = require("configs.widgets.cpu")
--- local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
--- local batteryarc_widget = require("configs.widgets.battery")
+local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
+-- local battery_widget = require("configs.widgets.battery")
 
 local modkey = "Mod4"
 local terminal = "kitty"
@@ -38,6 +36,8 @@ local terminal = "kitty"
 -- local pulseaudio = pulseaudio_widget()
 
 beautiful.init("~/.config/awesome/themes/default/theme.lua")
+beautiful.bg_systray = ""
+beautiful.systray_icon_spacing = 4
 
 -- Table of layouts to cover with awful.layout.inc, order matters.
 awful.layout.layouts = {
@@ -51,42 +51,6 @@ awful.layout.layouts = {
 	awful.layout.suit.max,
 	awful.layout.suit.max.fullscreen,
 }
--- }}}
-
--- {{{ Menu
--- Create a launcher widget and a main menu
--- local awesomemenu = {
--- 	{
--- 		"hotkeys",
--- 		function()
--- 			hotkeys_popup.show_help(nil, awful.screen.focused())
--- 		end,
--- 	},
--- 	{ "manual", terminal .. " -e man awesome" },
--- 	{ "edit config", editor_cmd .. " " .. awesome.conffile },
--- 	{ "restart", awesome.restart },
--- 	{
--- 		"quit",
--- 		function()
--- 			awesome.quit()
--- 		end,
--- 	},
--- }
---
--- local mainmenu = awful.menu({
--- 	items = {
--- 		{ "terminal", terminal },
--- 	},
--- 	theme = {
--- 		width = 250,
--- 		height = 30,
--- 		font = "FiraCode Nerd Font 10",
--- 		bg_normal = "#00000080",
--- 		bg_focus = "#729fcf",
--- 		border_width = 3,
--- 		border_color = "#000000",
--- 	},
--- })
 
 local mylauncher = awful.widget.launcher({ image = beautiful.awesome_icon })
 
@@ -236,7 +200,7 @@ awful.screen.connect_for_each_screen(function(s)
 	})
 
 	-- Create the wibox
-	s.mywibox = awful.wibar({ height = 24, position = "top", screen = s })
+	s.mywibox = awful.wibar({ height = 28, position = "top", screen = s })
 
 	-- Add widgets to the wibox
 	s.mywibox:setup({
@@ -258,23 +222,21 @@ awful.screen.connect_for_each_screen(function(s)
 			-- volume_widget({
 			-- 	widget_type = "arc",
 			-- }),
-			-- brightness_widget({
-			-- 	type = "icon_and_text",
-			-- 	program = "xbacklight",
-			-- 	step = 2,
-			-- }),
+			brightness_widget({
+				type = "icon_and_text",
+				program = "brightnessctl",
+				step = 2,
+				percentage = true,
+			}),
 			cpu_widget({
 				width = 70,
 				step_width = 2,
 				step_spacing = 0,
 				color = "#434c5e",
 			}),
-			wibox.widget.systray(),
+			-- battery_widget({}),
 			mytextclock,
-			-- batteryarc_widget({
-			-- 	main_color = "#e53935",
-			-- 	show_current_level = true,
-			-- }),
+			wibox.widget.systray(),
 			s.mylayoutbox,
 		},
 	})
@@ -294,35 +256,28 @@ root.buttons(gears.table.join(
 -- {{{ Key bindings
 local globalkeys = gears.table.join(
 	-- Brightness widget
-	-- awful.key({ modkey }, ";", function()
-	-- 	brightness_widget:inc()
-	-- end, { description = "increase brightness", group = "custom" }),
-	--
-	-- awful.key({ modkey, "Shift" }, ";", function()
-	-- 	brightness_widget:dec()
-	-- end, { description = "decrease brightness", group = "custom" }),
+	awful.key({}, "XF86MonBrightnessUp", function()
+		brightness_widget:inc()
+	end, { description = "increase brightness", group = "custom" }),
+
+	awful.key({}, "XF86MonBrightnessDown", function()
+		brightness_widget:dec()
+	end, { description = "decrease brightness", group = "custom" }),
 
 	-- Volume keys
-	-- awful.key({}, "XF86AudioRaiseVolume", function()
-	-- 	volume_widget.inc(2)
-	-- end),
-	--
-	-- awful.key({}, "XF86AudioLowerVolume", function()
-	-- 	volume_widget.dec(-2)
-	-- end),
-	--
-	-- awful.key({}, "XF86AudioMute", function()
-	-- 	volume_widget.toggle()
-	-- end),
 	awful.key({}, "XF86AudioLowerVolume", function()
-		awful.util.spawn("pactl set-sink-volume @DEFAULT_SINK@ 5%-", false)
+		awful.util.spawn("pamixer -d 5", false)
 	end),
 	awful.key({}, "XF86AudioRaiseVolume", function()
-		awful.util.spawn("pactl set-sink-volume @DEFAULT_SINK@ 5%+", false)
+		awful.util.spawn("pamixer -i 5", false)
 	end),
 	awful.key({}, "XF86AudioMute", function()
-		awful.util.spawn("pactl set-sink-mute @DEFAULT_SINK@ toggle", false)
+		awful.util.spawn("pamixer -t", false)
 	end),
+
+	awful.key({}, "Print", function()
+		awful.spawn("flameshot gui")
+	end, { description = "take screenshot", group = "hotkeys" }),
 
 	awful.key({ modkey }, "s", hotkeys_popup.show_help, { description = "show help", group = "awesome" }),
 	awful.key({ modkey }, "Left", awful.tag.viewprev, { description = "view previous", group = "tag" }),
@@ -337,10 +292,6 @@ local globalkeys = gears.table.join(
 		awful.client.focus.byidx(-1)
 	end, { description = "focus previous by index", group = "client" }),
 
-	-- awful.key({ modkey }, "w", function()
-	-- 	mainmenu:show()
-	-- end, { description = "show main menu", group = "awesome" }),
-
 	-- Layout manipulation
 	awful.key({ modkey, "Shift" }, "j", function()
 		awful.client.swap.byidx(1)
@@ -349,14 +300,6 @@ local globalkeys = gears.table.join(
 	awful.key({ modkey, "Shift" }, "k", function()
 		awful.client.swap.byidx(-1)
 	end, { description = "swap with previous client by index", group = "client" }),
-
-	-- awful.key({ modkey, "Control" }, "j", function()
-	-- 	awful.screen.focus_relative(1)
-	-- end, { description = "focus the next screen", group = "screen" }),
-	--
-	-- awful.key({ modkey, "Control" }, "k", function()
-	-- 	awful.screen.focus_relative(-1)
-	-- end, { description = "focus the previous screen", group = "screen" }),
 
 	awful.key({ modkey }, "u", awful.client.urgent.jumpto, { description = "jump to urgent client", group = "client" }),
 
