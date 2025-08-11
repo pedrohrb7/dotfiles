@@ -19,7 +19,6 @@ local wibox = require("wibox")
 -- Theme handling library
 local beautiful = require("beautiful")
 
--- Notification library
 local menubar = require("menubar")
 local hotkeys_popup = require("awful.hotkeys_popup")
 
@@ -33,8 +32,6 @@ local theme = require("themes.default.theme")
 
 local modkey = "Mod4"
 local terminal = "kitty"
--- local editor = os.getenv("EDITOR") or "nvim"
--- local pulseaudio = pulseaudio_widget()
 
 beautiful.init("~/.config/awesome/themes/default/theme.lua")
 beautiful.bg_systray = theme.bg_focus
@@ -220,18 +217,20 @@ awful.screen.connect_for_each_screen(function(s)
 	-- Create the wibox
 	s.mywibox = awful.wibar({ height = 28, position = "top", screen = s })
 
-	local rounded_widget = function(widget, left, right, bottom, top, bg, shape)
+	local rounded_widget = function(widget_args)
+		local args = widget_args or {}
+
 		return wibox.widget({
 			{
-				widget,
-				left = left or 10,
-				top = top or 2,
-				bottom = bottom or 2,
-				right = right or 10,
+				args.widget,
+				left = args.left or 10,
+				top = args.top or 2,
+				bottom = args.bottom or 2,
+				right = args.right or 10,
 				widget = wibox.container.margin,
 			},
-			bg = bg or theme.bg_focus,
-			shape = shape or gears.shape.rounded_bar,
+			bg = args.bg or theme.bg_focus,
+			shape = args.shape or gears.shape.rounded_bar,
 			shape_clip = true,
 			widget = wibox.container.background,
 		})
@@ -249,24 +248,28 @@ awful.screen.connect_for_each_screen(function(s)
 		s.mytasklist, -- Middle widget
 		{ -- Right widgets
 			layout = wibox.layout.fixed.horizontal,
-			rounded_widget(mykeyboardlayout),
-			rounded_widget(volume_widget),
-			rounded_widget(cpu_widget()),
-			rounded_widget(brightness_widget({
-				type = "icon_and_text",
-				program = "brightnessctl",
-				step = 2,
-				percentage = true,
-				margin_left = 10,
-				margin_right = 10,
-			})),
-			rounded_widget(battery_widget({
-				show_current_level = true,
-				margin_left = 10,
-				margin_right = 10,
-			})),
-			rounded_widget(mytextclock),
-			rounded_widget(wibox.widget.systray({ visible = true, opacity = 0.89 })),
+			rounded_widget({ widget = mykeyboardlayout }),
+			rounded_widget({ widget = volume_widget }),
+			rounded_widget({ widget = cpu_widget() }),
+			rounded_widget({
+				widget = brightness_widget({
+					type = "icon_and_text",
+					program = "brightnessctl",
+					step = 2,
+					percentage = true,
+					margin_left = 10,
+					margin_right = 10,
+				}),
+			}),
+			rounded_widget({
+				widget = battery_widget({
+					show_current_level = true,
+					margin_left = 10,
+					margin_right = 10,
+				}),
+			}),
+			rounded_widget({ widget = mytextclock }),
+			rounded_widget({ widget = wibox.widget.systray({ visible = true, opacity = 0.89 }) }),
 			-- wibox.widget.systray(),
 			s.mylayoutbox,
 		},

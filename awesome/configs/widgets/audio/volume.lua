@@ -12,9 +12,6 @@
 
 local awful = require("awful")
 local wibox = require("wibox")
-local naughty = require("naughty") -- For notifications
-local gears = require("gears")
-local dpi = require("beautiful").xresources.apply_dpi
 
 local volume_widget = wibox.widget({
 	{
@@ -34,10 +31,9 @@ local volume_widget = wibox.widget({
 -- Update the volume widget
 local update_volume_widget = function()
 	awful.spawn.easy_async_with_shell("pamixer --get-volume-human", function(stdout)
-		-- local volume_percentage = tonumber(stdout)
 		local volume_percentage = stdout
 		if volume_percentage then
-			volume_widget.text.text = volume_percentage
+			volume_widget.text.text = " " .. volume_percentage
 			-- Optional: Change icon based on mute status or volume level
 			-- For example, check mute status using `amixer get Master | grep -oP '\\[(on|off)\\]'`
 		end
@@ -49,26 +45,9 @@ update_volume_widget()
 awful.widget.watch(
 	"pamixer --get-volume-human",
 	1, -- Update every 1 second
-	function(widget, stdout)
+	function()
 		update_volume_widget()
 	end
 )
 
--- Add click event to toggle mute (optional)
-volume_widget:buttons(awful.util.table.join(awful.button({}, 1, function()
-	awful.spawn("pamixer -t")
-	naughty.notify({ text = "Volume Toggled" }) -- Optional notification
-end)))
-
-local styled_widget = wibox.container.background(wibox.container.margin(
-	volume_widget,
-	dpi(1), -- Margem interna
-	"#2E3440" -- Cor de fundo (azul escuro)
-))
-
--- Formato arredondado
-styled_widget.shape = function(cr, width, height)
-	gears.shape.rounded_rect(cr, width, height, dpi(4)) -- 4px de raio
-end
-
-return wibox.container.margin(styled_widget, 10, 10)
+return wibox.container.margin(volume_widget, 10, 10)

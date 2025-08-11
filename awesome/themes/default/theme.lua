@@ -8,27 +8,28 @@ local dpi = xresources.apply_dpi
 
 local gfs = require("gears.filesystem")
 local themes_path = gfs.get_themes_dir()
+local color = require("configs.color")
 
 local theme = {}
 
 theme.font = "FiraCode Nerd Font 11"
 
-theme.bg_normal = "#2f404d00"
-theme.bg_focus = "#005687"
-theme.bg_urgent = "#ff577d"
-theme.bg_minimize = "#e2dddf"
+theme.bg_normal = color.transparent
+theme.bg_focus = color.magenta
+theme.bg_urgent = color.red
+theme.bg_minimize = color.white
 theme.bg_systray = theme.bg_normal
 
-theme.fg_normal = "#ffffff"
-theme.fg_focus = "#ffffff"
-theme.fg_urgent = "#ffffff"
-theme.fg_minimize = "#ffffff"
+theme.fg_normal = color.black
+theme.fg_focus = color.white
+theme.fg_urgent = color.white
+theme.fg_minimize = color.white
 
 theme.useless_gap = dpi(4)
 theme.border_width = dpi(2)
-theme.border_normal = "#2f404d"
-theme.border_focus = "#85ebd9"
-theme.border_marked = "#91231c"
+theme.border_normal = color.border_normal
+theme.border_focus = color.magenta
+theme.border_marked = color.border_marked
 
 -- There are other variable sets
 -- overriding the default one when
@@ -44,7 +45,16 @@ theme.border_marked = "#91231c"
 -- theme.taglist_bg_focus = "#ff0000"
 
 -- Generate taglist squares:
+-- theme.taglist_fg_focus: Foreground color of the currently focused tag.
+-- theme.taglist_fg_occupied: Foreground color of occupied tags (tags with clients).
+-- theme.taglist_fg_urgent: Foreground color of urgent tags.
+-- theme.taglist_bg_occupied = color.yellow
 local taglist_square_size = dpi(4)
+theme.taglist_fg_focus = color.yellow
+theme.taglist_bg_focus = color.transparent
+theme.taglist_fg_occupied = color.magenta
+theme.taglist_fg_empty = color.white
+
 theme.taglist_squares_sel = theme_assets.taglist_squares_sel(taglist_square_size, theme.fg_normal)
 theme.taglist_squares_unsel = theme_assets.taglist_squares_unsel(taglist_square_size, theme.fg_normal)
 
@@ -53,6 +63,9 @@ theme.taglist_squares_unsel = theme_assets.taglist_squares_unsel(taglist_square_
 -- notification_[bg|fg]
 -- notification_[width|height|margin]
 -- notification_[border_color|border_width|shape|opacity]
+theme.notification_font = "FiraCode Nerd Font 8"
+theme.notification_bg = color.magenta
+theme.notification_fg = color.black
 
 -- Variables set for theming the menu:
 -- menu_[bg|fg]_[normal|focus]

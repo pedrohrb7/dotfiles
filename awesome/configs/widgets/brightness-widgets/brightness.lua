@@ -15,7 +15,6 @@ local spawn = require("awful.spawn")
 local gfs = require("gears.filesystem")
 local naughty = require("naughty")
 local beautiful = require("beautiful")
-local dpi = require("beautiful").xresources.apply_dpi
 
 local ICON_DIR = gfs.get_configuration_dir() .. "configs/widgets/brightness_widget/"
 local get_brightness_cmd
@@ -68,58 +67,31 @@ local function worker(user_args)
 		return
 	end
 
-	if type == "icon_and_text" then
-		brightness_widget.widget = wibox.widget({
+	brightness_widget.widget = wibox.widget({
+		{
 			{
-				{
-					image = path_to_icon,
-					resize = false,
-					widget = wibox.widget.imagebox,
-				},
-				valign = "center",
-				layout = wibox.container.place,
+				image = "󰃟 ",
+				resize = false,
+				widget = wibox.widget.imagebox,
 			},
-			{
-				id = "txt",
-				font = font,
-				widget = wibox.widget.textbox,
-			},
-			spacing = 4,
-			layout = wibox.layout.fixed.horizontal,
-			set_value = function(self, level)
-				local display_level = level
-				if percentage then
-					display_level = display_level .. "%"
-				end
-				self:get_children_by_id("txt")[1]:set_text(display_level)
-			end,
-		})
-	elseif type == "arc" then
-		brightness_widget.widget = wibox.widget({
-			{
-				{
-					image = path_to_icon,
-					resize = true,
-					widget = wibox.widget.imagebox,
-				},
-				valign = "center",
-				layout = wibox.container.place,
-			},
-			max_value = 100,
-			thickness = arc_thickness,
-			start_angle = 4.71238898, -- 2pi*3/4
-			forced_height = size,
-			forced_width = size,
-			paddings = 2,
-			widget = wibox.container.arcchart,
-			set_value = function(self, level)
-				self:set_value(level)
-			end,
-		})
-	else
-		show_warning(type .. " type is not supported by the widget")
-		return
-	end
+			valign = "center",
+			layout = wibox.container.place,
+		},
+		{
+			id = "txt",
+			font = font,
+			widget = wibox.widget.textbox,
+		},
+		spacing = 4,
+		layout = wibox.layout.fixed.horizontal,
+		set_value = function(self, level)
+			local display_level = level
+			if percentage then
+				display_level = "󰃟 " .. display_level .. "%"
+			end
+			self:get_children_by_id("txt")[1]:set_text(display_level)
+		end,
+	})
 
 	local update_widget = function(widget, stdout, _, _, _)
 		local brightness_level = tonumber(string.format("%.0f", stdout))
