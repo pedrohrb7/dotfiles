@@ -266,6 +266,7 @@ awful.screen.connect_for_each_screen(function(s)
 					show_current_level = true,
 					margin_left = 10,
 					margin_right = 10,
+					display_notification = true,
 				}),
 			}),
 			rounded_widget({ widget = mytextclock }),
