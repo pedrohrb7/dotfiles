@@ -34,7 +34,7 @@ local brightness_widget = require("configs.widgets.brightness-widgets.brightness
 local battery_widget = require("configs.widgets.battery")
 local theme = require("themes.default.theme")
 local color = require("configs.color")
-local gpu_widget = require("configs.widgets.gpu")
+-- local gpu_widget = require("configs.widgets.gpu")
 local mem_widget = require("configs.widgets.mem")
 
 local modkey = "Mod4"
@@ -294,7 +294,7 @@ awful.screen.connect_for_each_screen(function(s)
 			rounded_widget({ widget = mykeyboardlayout }),
 			rounded_widget({ widget = volume_widget }),
 			rounded_widget({ widget = cpu_widget() }),
-			rounded_widget({ widget = gpu_widget }),
+			-- rounded_widget({ widget = gpu_widget }),
 			rounded_widget({
 				widget = mem_widget({
 					timeout = 5,
