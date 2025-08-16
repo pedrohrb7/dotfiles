@@ -1,10 +1,11 @@
-![Home screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/try/awesome/screen_3.png)
-![Nvim screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/try/awesome/screen_1.png)
-![Terminal screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/try/awesome/screen_2.png)
+![Home screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/screen_3.png)
+![Nvim screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/screen_1.png)
+![Terminal screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/screen_2.png)
 
 ## Packages
 
 ArchLinux base system
+
 - Awesome WM
 - kitty
 - Brave
