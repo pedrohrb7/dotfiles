@@ -13,6 +13,10 @@ require("awful.autofocus")
 local gears = require("gears")
 local awful = require("awful")
 
+local cairo = require("lgi").cairo
+local surface = cairo.ImageSurface(cairo.Format.ARGB32, 200, 50)
+local cr = cairo.Context(surface)
+
 -- Widget and layout library
 local wibox = require("wibox")
 
@@ -29,6 +33,9 @@ local cpu_widget = require("configs.widgets.cpu")
 local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
 local battery_widget = require("configs.widgets.battery")
 local theme = require("themes.default.theme")
+local color = require("configs.color")
+local gpu_widget = require("configs.widgets.gpu")
+local mem_widget = require("configs.widgets.mem")
 
 local modkey = "Mod4"
 local terminal = "kitty"
@@ -36,6 +43,8 @@ local terminal = "kitty"
 beautiful.init("~/.config/awesome/themes/default/theme.lua")
 beautiful.bg_systray = theme.bg_focus
 beautiful.systray_icon_spacing = 8
+beautiful.menubar_bg_normal = color.magenta
+beautiful.menubar_fg_normal = color.black
 
 -- Table of layouts to cover with awful.layout.inc, order matters.
 awful.layout.layouts = {
@@ -62,7 +71,8 @@ local mykeyboardlayout = awful.widget.keyboardlayout()
 -- {{{ Wibar
 -- Create a textclock widget
 -- local mytextclock = wibox.widget.textclock()
-local mytextclock = wibox.widget.textclock()
+-- local mytextclock = wibox.widget.textclock()
+local mytextclock = wibox.widget.textclock("   %l:%M:%S %p  %a, %b %e, %Y ", 1, "America/Sao_Paulo")
 
 -- or customized
 local cw = calendar_widget({
@@ -158,7 +168,11 @@ awful.screen.connect_for_each_screen(function(s)
 	awful.tag(tagPacman, s, awful.layout.layouts[1])
 
 	-- Create a promptbox for each screen
-	s.mypromptbox = awful.widget.prompt()
+	s.mypromptbox = awful.widget.prompt({
+		bg = color.background_lighter,
+		fg = color.green,
+		font = "FiraCode Nerd Font 10",
+	})
 
 	-- Create an imagebox widget which will contain an icon indicating which layout we're using.
 	-- We need one layoutbox per screen.
@@ -193,25 +207,48 @@ awful.screen.connect_for_each_screen(function(s)
 		screen = s,
 		filter = awful.widget.tasklist.filter.currenttags,
 		buttons = tasklist_buttons,
-		style = {
-			shape_border_width = 1,
-			-- shape_border_color = "#ff77f7",
-			shape = gears.shape.rounded_bar,
-		},
 		layout = {
-			spacing = 12,
 			spacing_widget = {
 				{
-					forced_width = 5,
-					shape = gears.shape.circle,
+					forced_width = 8,
+					forced_height = 24,
+					thickness = 1,
+					color = "#777777",
 					widget = wibox.widget.separator,
 				},
 				valign = "center",
 				halign = "center",
 				widget = wibox.container.place,
 			},
-			layout = wibox.layout.flex.horizontal,
+			spacing = 2,
+			layout = wibox.layout.fixed.horizontal,
 		},
+		-- widget_template = {
+		-- 	{
+		-- 		wibox.widget.base.make_widget(),
+		-- 		forced_height = 2,
+		-- 		id = "background_role",
+		-- 		widget = wibox.container.background,
+		-- 	},
+		-- 	{
+		-- 		{
+		-- 			id = "clienticon",
+		-- 			widget = awful.widget.clienticon,
+		-- 		},
+		-- 		margins = 2,
+		-- 		widget = wibox.container.margin,
+		-- 	},
+		-- 	nil,
+		-- 	create_callback = function(self, c, index, objects) --luacheck: no unused args
+		-- 		self:get_children_by_id("clienticon")[1].client = c
+		-- 	end,
+		-- 	layout = wibox.layout.align.vertical,
+		-- },
+		-- style = {
+		-- 	shape_border_width = 1,
+		-- 	shape_border_color = "#ff77f7",
+		-- 	shape = gears.shape.rounded,
+		-- },
 	})
 
 	-- Create the wibox
@@ -223,16 +260,21 @@ awful.screen.connect_for_each_screen(function(s)
 		return wibox.widget({
 			{
 				args.widget,
-				left = args.left or 10,
+				-- left = args.left or 10,
 				top = args.top or 2,
 				bottom = args.bottom or 2,
-				right = args.right or 10,
+				-- right = args.right or 10,
 				widget = wibox.container.margin,
 			},
 			bg = args.bg or theme.bg_focus,
-			shape = args.shape or gears.shape.rounded_bar,
+			-- shape = args.shape or gears.shape.rounded_bar,
 			shape_clip = true,
 			widget = wibox.container.background,
+
+			right = args.right or 10,
+			left = args.left or 10,
+			top = args.top or 2,
+			bottom = args.bottom or 2,
 		})
 	end
 
@@ -247,10 +289,19 @@ awful.screen.connect_for_each_screen(function(s)
 		},
 		s.mytasklist, -- Middle widget
 		{ -- Right widgets
-			layout = wibox.layout.fixed.horizontal,
+			layout = wibox.layout.fixed.horizontal(),
+			spacing = 5,
 			rounded_widget({ widget = mykeyboardlayout }),
 			rounded_widget({ widget = volume_widget }),
 			rounded_widget({ widget = cpu_widget() }),
+			rounded_widget({ widget = gpu_widget }),
+			rounded_widget({
+				widget = mem_widget({
+					timeout = 5,
+					font = "FiraCode Nerd Font 10",
+					widget_width = 100,
+				}),
+			}),
 			rounded_widget({
 				widget = brightness_widget({
 					type = "icon_and_text",
@@ -270,8 +321,8 @@ awful.screen.connect_for_each_screen(function(s)
 				}),
 			}),
 			rounded_widget({ widget = mytextclock }),
-			rounded_widget({ widget = wibox.widget.systray({ visible = true, opacity = 0.89 }) }),
-			-- wibox.widget.systray(),
+			-- rounded_widget({ widget = wibox.widget.systray({ visible = true, opacity = 0.89 }) }),
+			wibox.widget.systray(),
 			s.mylayoutbox,
 		},
 	})
