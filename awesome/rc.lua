@@ -72,7 +72,7 @@ local mykeyboardlayout = awful.widget.keyboardlayout()
 -- Create a textclock widget
 -- local mytextclock = wibox.widget.textclock()
 -- local mytextclock = wibox.widget.textclock()
-local mytextclock = wibox.widget.textclock("   %l:%M:%S %p  %a, %b %e, %Y ", 1, "America/Sao_Paulo")
+local mytextclock = wibox.widget.textclock("   %H:%M:%S %p  %a, %d %b, %Y ", 1, "America/Sao_Paulo")
 
 -- or customized
 local cw = calendar_widget({
