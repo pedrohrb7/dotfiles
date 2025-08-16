@@ -1,4 +1,6 @@
-![Terminal screenshot](https://github.com/pedrohrb7/nvim-config/blob/trunk/kitty.png?raw=true)
+![Home screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/try/awesome/screen_3.png)
+![Nvim screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/try/awesome/screen_1.png)
+![Terminal screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/try/awesome/screen_2.png)
 
 ## Packages
 
