@@ -13,31 +13,38 @@ require("awful.autofocus")
 local gears = require("gears")
 local awful = require("awful")
 
+local cairo = require("lgi").cairo
+local surface = cairo.ImageSurface(cairo.Format.ARGB32, 200, 50)
+local cr = cairo.Context(surface)
+
 -- Widget and layout library
 local wibox = require("wibox")
 
 -- Theme handling library
 local beautiful = require("beautiful")
 
--- Notification library
 local menubar = require("menubar")
 local hotkeys_popup = require("awful.hotkeys_popup")
 
 -- Import custom widgets
 local calendar_widget = require("configs.widgets.calendar")
 local volume_widget = require("configs.widgets.audio.volume")
--- local pulseaudio_widget = require("configs.widgets.pulseaudio.pulseaudio")
-local docker_widget = require("configs.widgets.docker")
 local cpu_widget = require("configs.widgets.cpu")
 local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
-local batteryarc_widget = require("configs.widgets.battery")
+local battery_widget = require("configs.widgets.battery")
+local theme = require("themes.default.theme")
+local color = require("configs.color")
+local gpu_widget = require("configs.widgets.gpu")
+local mem_widget = require("configs.widgets.mem")
 
 local modkey = "Mod4"
 local terminal = "kitty"
--- local editor = os.getenv("EDITOR") or "nvim"
--- local pulseaudio = pulseaudio_widget()
 
 beautiful.init("~/.config/awesome/themes/default/theme.lua")
+beautiful.bg_systray = theme.bg_focus
+beautiful.systray_icon_spacing = 8
+beautiful.menubar_bg_normal = color.magenta
+beautiful.menubar_fg_normal = color.black
 
 -- Table of layouts to cover with awful.layout.inc, order matters.
 awful.layout.layouts = {
@@ -46,54 +53,11 @@ awful.layout.layouts = {
 	awful.layout.suit.tile.left,
 	awful.layout.suit.tile.bottom,
 	awful.layout.suit.tile.top,
-	-- awful.layout.suit.fair,
-	-- awful.layout.suit.fair.horizontal,
 	awful.layout.suit.spiral,
 	awful.layout.suit.spiral.dwindle,
 	awful.layout.suit.max,
 	awful.layout.suit.max.fullscreen,
-	-- awful.layout.suit.magnifier,
-	-- awful.layout.suit.corner.nw,
-	-- awful.layout.suit.corner.ne,
-	-- awful.layout.suit.corner.sw,
-	-- awful.layout.suit.corner.se,
 }
--- }}}
-
--- {{{ Menu
--- Create a launcher widget and a main menu
--- local awesomemenu = {
--- 	{
--- 		"hotkeys",
--- 		function()
--- 			hotkeys_popup.show_help(nil, awful.screen.focused())
--- 		end,
--- 	},
--- 	{ "manual", terminal .. " -e man awesome" },
--- 	{ "edit config", editor_cmd .. " " .. awesome.conffile },
--- 	{ "restart", awesome.restart },
--- 	{
--- 		"quit",
--- 		function()
--- 			awesome.quit()
--- 		end,
--- 	},
--- }
---
--- local mainmenu = awful.menu({
--- 	items = {
--- 		{ "terminal", terminal },
--- 	},
--- 	theme = {
--- 		width = 250,
--- 		height = 30,
--- 		font = "FiraCode Nerd Font 10",
--- 		bg_normal = "#00000080",
--- 		bg_focus = "#729fcf",
--- 		border_width = 3,
--- 		border_color = "#000000",
--- 	},
--- })
 
 local mylauncher = awful.widget.launcher({ image = beautiful.awesome_icon })
 
@@ -107,12 +71,13 @@ local mykeyboardlayout = awful.widget.keyboardlayout()
 -- {{{ Wibar
 -- Create a textclock widget
 -- local mytextclock = wibox.widget.textclock()
-local mytextclock = wibox.widget.textclock()
+-- local mytextclock = wibox.widget.textclock()
+local mytextclock = wibox.widget.textclock("   %l:%M:%S %p  %a, %b %e, %Y ", 1, "America/Sao_Paulo")
 
 -- or customized
 local cw = calendar_widget({
-	theme = "outrun",
-	placement = "top_center",
+	theme = "naughty",
+	placement = "top_right",
 	start_sunday = true,
 	radius = 8,
 	-- with customized next/previous (see table above)
@@ -177,16 +142,37 @@ local tasklist_buttons = gears.table.join(
 	end)
 )
 
+local function set_wallpaper(s)
+	-- Wallpaper
+	if beautiful.wallpaper then
+		local wallpaper = beautiful.wallpaper
+		-- If wallpaper is a function, call it with the screen
+		if type(wallpaper) == "function" then
+			wallpaper = wallpaper(s)
+		end
+		gears.wallpaper.maximized(wallpaper, s, true)
+	end
+end
+
+-- Re-set wallpaper when a screen's geometry changes (e.g. different resolution)
+-- awful.screen.connect_signal("property::geometry", set_wallpaper)
+
 awful.screen.connect_for_each_screen(function(s)
 	-- Wallpaper
-	-- set_wallpaper(s)
+	set_wallpaper(s)
 
 	-- Each screen has its own tag table.
-	local tagNames = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
-	awful.tag(tagNames, s, awful.layout.layouts[1])
+	-- local tagNames = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
+	-- awful.tag(tagNames, s, awful.layout.layouts[1])
+	local tagPacman = { " 󰮯 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 " }
+	awful.tag(tagPacman, s, awful.layout.layouts[1])
 
 	-- Create a promptbox for each screen
-	s.mypromptbox = awful.widget.prompt()
+	s.mypromptbox = awful.widget.prompt({
+		bg = color.background_lighter,
+		fg = color.green,
+		font = "FiraCode Nerd Font 10",
+	})
 
 	-- Create an imagebox widget which will contain an icon indicating which layout we're using.
 	-- We need one layoutbox per screen.
@@ -221,29 +207,76 @@ awful.screen.connect_for_each_screen(function(s)
 		screen = s,
 		filter = awful.widget.tasklist.filter.currenttags,
 		buttons = tasklist_buttons,
-		style = {
-			shape_border_width = 1,
-			shape_border_color = "#ff77f7",
-			shape = gears.shape.rounded_bar,
-		},
 		layout = {
-			spacing = 12,
 			spacing_widget = {
 				{
-					forced_width = 5,
-					shape = gears.shape.circle,
+					forced_width = 8,
+					forced_height = 24,
+					thickness = 1,
+					color = "#777777",
 					widget = wibox.widget.separator,
 				},
 				valign = "center",
 				halign = "center",
 				widget = wibox.container.place,
 			},
-			layout = wibox.layout.flex.horizontal,
+			spacing = 2,
+			layout = wibox.layout.fixed.horizontal,
 		},
+		-- widget_template = {
+		-- 	{
+		-- 		wibox.widget.base.make_widget(),
+		-- 		forced_height = 2,
+		-- 		id = "background_role",
+		-- 		widget = wibox.container.background,
+		-- 	},
+		-- 	{
+		-- 		{
+		-- 			id = "clienticon",
+		-- 			widget = awful.widget.clienticon,
+		-- 		},
+		-- 		margins = 2,
+		-- 		widget = wibox.container.margin,
+		-- 	},
+		-- 	nil,
+		-- 	create_callback = function(self, c, index, objects) --luacheck: no unused args
+		-- 		self:get_children_by_id("clienticon")[1].client = c
+		-- 	end,
+		-- 	layout = wibox.layout.align.vertical,
+		-- },
+		-- style = {
+		-- 	shape_border_width = 1,
+		-- 	shape_border_color = "#ff77f7",
+		-- 	shape = gears.shape.rounded,
+		-- },
 	})
 
 	-- Create the wibox
-	s.mywibox = awful.wibar({ height = 24, position = "top", screen = s })
+	s.mywibox = awful.wibar({ height = 28, position = "top", screen = s })
+
+	local rounded_widget = function(widget_args)
+		local args = widget_args or {}
+
+		return wibox.widget({
+			{
+				args.widget,
+				-- left = args.left or 10,
+				top = args.top or 2,
+				bottom = args.bottom or 2,
+				-- right = args.right or 10,
+				widget = wibox.container.margin,
+			},
+			bg = args.bg or theme.bg_focus,
+			-- shape = args.shape or gears.shape.rounded_bar,
+			shape_clip = true,
+			widget = wibox.container.background,
+
+			right = args.right or 10,
+			left = args.left or 10,
+			top = args.top or 2,
+			bottom = args.bottom or 2,
+		})
+	end
 
 	-- Add widgets to the wibox
 	s.mywibox:setup({
@@ -256,32 +289,40 @@ awful.screen.connect_for_each_screen(function(s)
 		},
 		s.mytasklist, -- Middle widget
 		{ -- Right widgets
-			layout = wibox.layout.fixed.horizontal,
-			docker_widget({
-				number_of_containers = 5,
+			layout = wibox.layout.fixed.horizontal(),
+			spacing = 5,
+			rounded_widget({ widget = mykeyboardlayout }),
+			rounded_widget({ widget = volume_widget }),
+			rounded_widget({ widget = cpu_widget() }),
+			rounded_widget({ widget = gpu_widget }),
+			rounded_widget({
+				widget = mem_widget({
+					timeout = 5,
+					font = "FiraCode Nerd Font 10",
+					widget_width = 100,
+				}),
 			}),
-			mykeyboardlayout,
-			-- pulseaudio,
-			volume_widget({
-				widget_type = "arc",
+			rounded_widget({
+				widget = brightness_widget({
+					type = "icon_and_text",
+					program = "brightnessctl",
+					step = 2,
+					percentage = true,
+					margin_left = 10,
+					margin_right = 10,
+				}),
 			}),
-			brightness_widget({
-				type = "icon_and_text",
-				program = "xbacklight",
-				step = 2,
+			rounded_widget({
+				widget = battery_widget({
+					show_current_level = true,
+					margin_left = 10,
+					margin_right = 10,
+					display_notification = true,
+				}),
 			}),
-			cpu_widget({
-				width = 70,
-				step_width = 2,
-				step_spacing = 0,
-				color = "#434c5e",
-			}),
+			rounded_widget({ widget = mytextclock }),
+			-- rounded_widget({ widget = wibox.widget.systray({ visible = true, opacity = 0.89 }) }),
 			wibox.widget.systray(),
-			mytextclock,
-			-- batteryarc_widget({
-			-- 	main_color = "#e53935",
-			-- 	show_current_level = true,
-			-- }),
 			s.mylayoutbox,
 		},
 	})
@@ -301,44 +342,33 @@ root.buttons(gears.table.join(
 -- {{{ Key bindings
 local globalkeys = gears.table.join(
 	-- Brightness widget
-	awful.key({ modkey }, ";", function()
+	awful.key({}, "XF86MonBrightnessUp", function()
 		brightness_widget:inc()
 	end, { description = "increase brightness", group = "custom" }),
 
-	awful.key({ modkey, "Shift" }, ";", function()
+	awful.key({}, "XF86MonBrightnessDown", function()
 		brightness_widget:dec()
 	end, { description = "decrease brightness", group = "custom" }),
 
 	-- Volume keys
-	-- awful.key({}, "XF86AudioRaiseVolume", function()
-	-- 	volume_widget.inc(2)
-	-- end),
-	--
-	-- awful.key({}, "XF86AudioLowerVolume", function()
-	-- 	volume_widget.dec(-2)
-	-- end),
-	--
-	-- awful.key({}, "XF86AudioMute", function()
-	-- 	volume_widget.toggle()
-	-- end),
 	awful.key({}, "XF86AudioLowerVolume", function()
-		awful.util.spawn("pactl set-sink-volume @DEFAULT_SINK@ 5%-", false)
+		awful.util.spawn("pamixer -d 5", false)
 	end),
 	awful.key({}, "XF86AudioRaiseVolume", function()
-		awful.util.spawn("pactl set-sink-volume @DEFAULT_SINK@ 5%+", false)
+		awful.util.spawn("pamixer -i 5", false)
 	end),
 	awful.key({}, "XF86AudioMute", function()
-		awful.util.spawn("pactl -c 0 set Master toggle", false)
+		awful.util.spawn("pamixer -t", false)
 	end),
+
+	awful.key({}, "Print", function()
+		awful.spawn("flameshot gui")
+	end, { description = "take screenshot", group = "hotkeys" }),
 
 	awful.key({ modkey }, "s", hotkeys_popup.show_help, { description = "show help", group = "awesome" }),
 	awful.key({ modkey }, "Left", awful.tag.viewprev, { description = "view previous", group = "tag" }),
 	awful.key({ modkey }, "Right", awful.tag.viewnext, { description = "view next", group = "tag" }),
 	awful.key({ modkey }, "Escape", awful.tag.history.restore, { description = "go back", group = "tag" }),
-
-	awful.key({ modkey }, "d", function()
-		awful.util.spawn("rofi -show drun -show-icons")
-	end, { description = "run rofi", group = "menu" }),
 
 	awful.key({ modkey }, "j", function()
 		awful.client.focus.byidx(1)
@@ -348,10 +378,6 @@ local globalkeys = gears.table.join(
 		awful.client.focus.byidx(-1)
 	end, { description = "focus previous by index", group = "client" }),
 
-	-- awful.key({ modkey }, "w", function()
-	-- 	mainmenu:show()
-	-- end, { description = "show main menu", group = "awesome" }),
-
 	-- Layout manipulation
 	awful.key({ modkey, "Shift" }, "j", function()
 		awful.client.swap.byidx(1)
@@ -360,14 +386,6 @@ local globalkeys = gears.table.join(
 	awful.key({ modkey, "Shift" }, "k", function()
 		awful.client.swap.byidx(-1)
 	end, { description = "swap with previous client by index", group = "client" }),
-
-	-- awful.key({ modkey, "Control" }, "j", function()
-	-- 	awful.screen.focus_relative(1)
-	-- end, { description = "focus the next screen", group = "screen" }),
-	--
-	-- awful.key({ modkey, "Control" }, "k", function()
-	-- 	awful.screen.focus_relative(-1)
-	-- end, { description = "focus the previous screen", group = "screen" }),
 
 	awful.key({ modkey }, "u", awful.client.urgent.jumpto, { description = "jump to urgent client", group = "client" }),
 
@@ -692,10 +710,3 @@ end)
 
 --Gaps
 beautiful.useless_gap = 8
-
-awful.util.spawn("xinput set-prop 12 366 1")
-awful.util.spawn("picom")
-awful.util.spawn("/sbin/start-pulseaudio-x11")
-awful.util.spawn("nitrogen --restore")
-awful.util.spawn("nm-applet")
-awful.util.spawn("/usr/lib/mate-polkit/polkit-mate-authentication-agent-1")

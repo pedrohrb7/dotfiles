@@ -8,27 +8,28 @@ local dpi = xresources.apply_dpi
 
 local gfs = require("gears.filesystem")
 local themes_path = gfs.get_themes_dir()
+local color = require("configs.color")
 
 local theme = {}
 
 theme.font = "FiraCode Nerd Font 11"
 
-theme.bg_normal = "#222222"
-theme.bg_focus = "#535d6c"
-theme.bg_urgent = "#ff0000"
-theme.bg_minimize = "#444444"
+theme.bg_normal = color.transparent
+theme.bg_focus = color.magenta
+theme.bg_urgent = color.red
+theme.bg_minimize = color.white
 theme.bg_systray = theme.bg_normal
 
-theme.fg_normal = "#aaaaaa"
-theme.fg_focus = "#ffffff"
-theme.fg_urgent = "#ffffff"
-theme.fg_minimize = "#ffffff"
+theme.fg_normal = color.black
+theme.fg_focus = color.white
+theme.fg_urgent = color.white
+theme.fg_minimize = color.white
 
-theme.useless_gap = dpi(0)
-theme.border_width = dpi(1)
-theme.border_normal = "#000000"
-theme.border_focus = "#535d6c"
-theme.border_marked = "#91231c"
+theme.useless_gap = dpi(4)
+theme.border_width = dpi(2)
+theme.border_normal = color.border_normal
+theme.border_focus = color.magenta
+theme.border_marked = color.border_marked
 
 -- There are other variable sets
 -- overriding the default one when
@@ -41,10 +42,19 @@ theme.border_marked = "#91231c"
 -- prompt_[fg|bg|fg_cursor|bg_cursor|font]
 -- hotkeys_[bg|fg|border_width|border_color|shape|opacity|modifiers_fg|label_bg|label_fg|group_margin|font|description_font]
 -- Example:
---theme.taglist_bg_focus = "#ff0000"
+-- theme.taglist_bg_focus = "#ff0000"
 
 -- Generate taglist squares:
+-- theme.taglist_fg_focus: Foreground color of the currently focused tag.
+-- theme.taglist_fg_occupied: Foreground color of occupied tags (tags with clients).
+-- theme.taglist_fg_urgent: Foreground color of urgent tags.
+-- theme.taglist_bg_occupied = color.yellow
 local taglist_square_size = dpi(4)
+theme.taglist_fg_focus = color.yellow
+theme.taglist_bg_focus = color.transparent
+theme.taglist_fg_occupied = color.magenta
+theme.taglist_fg_empty = color.white
+
 theme.taglist_squares_sel = theme_assets.taglist_squares_sel(taglist_square_size, theme.fg_normal)
 theme.taglist_squares_unsel = theme_assets.taglist_squares_unsel(taglist_square_size, theme.fg_normal)
 
@@ -53,13 +63,16 @@ theme.taglist_squares_unsel = theme_assets.taglist_squares_unsel(taglist_square_
 -- notification_[bg|fg]
 -- notification_[width|height|margin]
 -- notification_[border_color|border_width|shape|opacity]
+theme.notification_font = "FiraCode Nerd Font 8"
+theme.notification_bg = color.magenta
+theme.notification_fg = color.black
 
 -- Variables set for theming the menu:
 -- menu_[bg|fg]_[normal|focus]
 -- menu_[border_color|border_width]
 theme.menu_submenu_icon = themes_path .. "default/submenu.png"
-theme.menu_height = dpi(15)
-theme.menu_width = dpi(100)
+theme.menu_height = dpi(30)
+theme.menu_width = dpi(200)
 
 -- You can add as many variables as
 -- you wish and access them by using
@@ -93,8 +106,6 @@ theme.titlebar_maximized_button_focus_inactive = themes_path .. "default/titleba
 theme.titlebar_maximized_button_normal_active = themes_path .. "default/titlebar/maximized_normal_active.png"
 theme.titlebar_maximized_button_focus_active = themes_path .. "default/titlebar/maximized_focus_active.png"
 
-theme.wallpaper = themes_path .. "default/background.png"
-
 -- You can use your own layout icons like this:
 theme.layout_fairh = themes_path .. "default/layouts/fairhw.png"
 theme.layout_fairv = themes_path .. "default/layouts/fairvw.png"
@@ -119,6 +130,8 @@ theme.awesome_icon = theme_assets.awesome_icon(theme.menu_height, theme.bg_focus
 -- Define the icon theme for application icons. If not set then the icons
 -- from /usr/share/icons and /usr/share/icons/hicolor will be used.
 theme.icon_theme = nil
+-- theme.wallpaper = themes_path .. "default/background.png"
+theme.wallpaper = "/mnt/data/lotofwallpapers/clouds.jpg"
 
 return theme
 

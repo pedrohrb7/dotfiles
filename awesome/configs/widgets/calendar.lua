@@ -32,7 +32,7 @@ local function worker(user_args)
 		outrun = {
 			bg = "#0d0221",
 			fg = "#D8DEE9",
-			focus_date_bg = "#650d89",
+			focus_date_bg = "#f6019d",
 			focus_date_fg = "#2de6e2",
 			weekend_day_bg = "#261447",
 			weekday_fg = "#2de6e2",
