@@ -212,7 +212,7 @@ awful.screen.connect_for_each_screen(function(s)
 	-- Create the wibox
 	s.mywibox = awful.wibar({ height = 28, position = "top", screen = s })
 
-	local rounded_widget = function(widget_args)
+	local widget_container = function(widget_args)
 		local args = widget_args or {}
 
 		return wibox.widget({
@@ -239,49 +239,46 @@ awful.screen.connect_for_each_screen(function(s)
 	-- Add widgets to the wibox
 	s.mywibox:setup({
 		layout = wibox.layout.align.horizontal,
+		spacing = 5,
 		{ -- Left widgets
 			layout = wibox.layout.fixed.horizontal,
-			mylauncher,
-			s.mytaglist,
-			s.mypromptbox,
-		},
-		s.mytasklist, -- Middle widget
-		{ -- Right widgets
-			layout = wibox.layout.fixed.horizontal(),
 			spacing = 5,
-			rounded_widget({ widget = mykeyboardlayout }),
-			rounded_widget({ widget = volume_widget }),
-			rounded_widget({ widget = cpu_widget() }),
-			-- rounded_widget({ widget = gpu_widget }),
-			rounded_widget({
-				widget = mem_widget({
-					timeout = 5,
-					font = "FiraCode Nerd Font 10",
-					widget_width = 100,
+			{ -- Left widgets
+				layout = wibox.layout.fixed.horizontal,
+				mylauncher,
+				s.mytaglist,
+				s.mypromptbox,
+			},
+			s.mytasklist, -- Middle widget
+			{ -- Right widgets
+				layout = wibox.layout.fixed.horizontal(),
+				spacing = 5,
+				widget_container({ widget = mykeyboardlayout }),
+				widget_container({ widget = volume_widget }),
+				widget_container({ widget = cpu_widget() }),
+				-- rounded_widget({ widget = gpu_widget }),
+				widget_container({
+					widget = brightness_widget({
+						type = "icon_and_text",
+						program = "brightnessctl",
+						step = 2,
+						percentage = true,
+						margin_left = 10,
+						margin_right = 10,
+					}),
 				}),
-			}),
-			rounded_widget({
-				widget = brightness_widget({
-					type = "icon_and_text",
-					program = "brightnessctl",
-					step = 2,
-					percentage = true,
-					margin_left = 10,
-					margin_right = 10,
+				widget_container({
+					widget = battery_widget({
+						show_current_level = true,
+						margin_left = 10,
+						margin_right = 10,
+						display_notification = true,
+					}),
 				}),
-			}),
-			rounded_widget({
-				widget = battery_widget({
-					show_current_level = true,
-					margin_left = 10,
-					margin_right = 10,
-					display_notification = true,
-				}),
-			}),
-			rounded_widget({ widget = mytextclock }),
-			-- rounded_widget({ widget = wibox.widget.systray({ visible = true, opacity = 0.89 }) }),
-			wibox.widget.systray(),
-			s.mylayoutbox,
+				widget_container({ widget = mytextclock }),
+				wibox.widget.systray(),
+				s.mylayoutbox,
+			},
 		},
 	})
 end)

@@ -27,7 +27,7 @@ local function worker(user_args)
 	local args = user_args or {}
 
 	local font = args.font or "FiraCode Nerd Font 10"
-	local path_to_icons = args.path_to_icons or "/usr/share/icons/Arc/status/symbolic/"
+	local path_to_icons = args.path_to_icons or "/home/pedro/dotfiles/awesome/icons/battery/"
 	local show_current_level = args.show_current_level or false
 	local margin_left = args.margin_left or 0
 	local margin_right = args.margin_right or 0
@@ -166,25 +166,25 @@ local function worker(user_args)
 		end
 
 		if charge >= 1 and charge < 15 then
-			batteryType = "battery-empty%s-symbolic"
+			batteryType = "battery-empty"
 			if enable_battery_warning and status ~= "Charging" and os.difftime(os.time(), last_battery_check) > 300 then
 				-- if 5 minutes have elapsed since the last warning
 				last_battery_check = os.time()
 
 				show_battery_warning()
 			end
-		elseif charge >= 15 and charge < 40 then
-			batteryType = "battery-caution%s-symbolic"
-		elseif charge >= 40 and charge < 60 then
-			batteryType = "battery-low%s-symbolic"
+		elseif charge >= 10 and charge < 30 then
+			batteryType = "battery-caution"
+		elseif charge >= 30 and charge < 60 then
+			batteryType = "battery-low"
 		elseif charge >= 60 and charge < 80 then
-			batteryType = "battery-good%s-symbolic"
+			batteryType = "battery-good"
 		elseif charge >= 80 and charge <= 100 then
-			batteryType = "battery-full%s-symbolic"
+			batteryType = "battery-full"
 		end
 
 		if status == "Charging" then
-			batteryType = string.format(batteryType, "-charging")
+			batteryType = string.format("battery-good-charging")
 		else
 			batteryType = string.format(batteryType, "")
 		end

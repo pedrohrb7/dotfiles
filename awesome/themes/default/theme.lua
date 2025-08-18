@@ -131,7 +131,8 @@ theme.awesome_icon = theme_assets.awesome_icon(theme.menu_height, theme.bg_focus
 -- from /usr/share/icons and /usr/share/icons/hicolor will be used.
 theme.icon_theme = nil
 -- theme.wallpaper = themes_path .. "default/background.png"
-theme.wallpaper = "/mnt/data/lotofwallpapers/clouds.jpg"
+theme.wallpaper = "/mnt/data/lotofwallpapers/pink-land.jpg"
+-- theme.wallpaper = "/mnt/data/lotofwallpapers/manhattan.jpg"
 
 return theme
 
