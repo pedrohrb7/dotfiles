@@ -1,14 +1,23 @@
-![Terminal screenshot](https://github.com/pedrohrb7/nvim-config/blob/trunk/kitty.png?raw=true)
+![Home screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/screen_3.png)
+![Nvim screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/screen_1.png)
+![Terminal screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/screen_2.png)
 
 ## Packages
 
+ArchLinux base system
+
+- Awesome WM
+- kitty
+- Brave
 - bat (a better cat)
 - eza (a better ls)
-- kitty
-- rip-grep (this allows find by word on nvim)
-- nvim
+- ripgrep (this allows find by word on nvim)
 - zsh
-- xclipboard (this package make system clipboard and nvim the same)
+- xclip (this package make system clipboard and nvim the same)
+- xorg-xclipboard
+- xorg-xbacklight
 - FiraCode Nerd Font
-- fzf
-- fzf-git (aur package)
+- fzf-git (aur)
+- lazygit
+- lazydocker (aur)
+- yay

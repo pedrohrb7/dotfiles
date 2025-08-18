@@ -237,6 +237,6 @@ wmname = "QTILE"
 # HOOK startup
 @hook.subscribe.startup_once
 def autostart():
-    autostartscript = "~/.config/qtile/autostart.sh"
+    autostartscript = "$HOME/dotfiles-config/autostart.sh"
     home = os.path.expanduser(autostartscript)
     subprocess.call([home])

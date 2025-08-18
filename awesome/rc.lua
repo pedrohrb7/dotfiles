@@ -243,47 +243,42 @@ awful.screen.connect_for_each_screen(function(s)
 		{ -- Left widgets
 			layout = wibox.layout.fixed.horizontal,
 			spacing = 5,
-			mylauncher,
-			s.mytaglist,
-			s.mypromptbox,
-		},
-		s.mytasklist, -- Middle widget
-		{ -- Right widgets
-			layout = wibox.layout.fixed.horizontal(),
-			spacing = 5,
-			widget_container({ widget = mykeyboardlayout }),
-			widget_container({ widget = volume_widget }),
-			widget_container({ widget = cpu_widget() }),
-			-- rounded_widget({ widget = gpu_widget }),
-			widget_container({
-				widget = mem_widget({
-					timeout = 5,
-					font = "FiraCode Nerd Font 10",
-					widget_width = 100,
+			{ -- Left widgets
+				layout = wibox.layout.fixed.horizontal,
+				mylauncher,
+				s.mytaglist,
+				s.mypromptbox,
+			},
+			s.mytasklist, -- Middle widget
+			{ -- Right widgets
+				layout = wibox.layout.fixed.horizontal(),
+				spacing = 5,
+				widget_container({ widget = mykeyboardlayout }),
+				widget_container({ widget = volume_widget }),
+				widget_container({ widget = cpu_widget() }),
+				-- rounded_widget({ widget = gpu_widget }),
+				widget_container({
+					widget = brightness_widget({
+						type = "icon_and_text",
+						program = "brightnessctl",
+						step = 2,
+						percentage = true,
+						margin_left = 10,
+						margin_right = 10,
+					}),
 				}),
-			}),
-			widget_container({
-				widget = brightness_widget({
-					type = "icon_and_text",
-					program = "brightnessctl",
-					step = 2,
-					percentage = true,
-					margin_left = 10,
-					margin_right = 10,
+				widget_container({
+					widget = battery_widget({
+						show_current_level = true,
+						margin_left = 10,
+						margin_right = 10,
+						display_notification = true,
+					}),
 				}),
-			}),
-			widget_container({
-				widget = battery_widget({
-					show_current_level = true,
-					margin_left = 10,
-					margin_right = 10,
-					display_notification = true,
-				}),
-			}),
-			widget_container({ widget = mytextclock }),
-			-- rounded_widget({ widget = wibox.widget.systray({ visible = true, opacity = 0.89 }) }),
-			wibox.widget.systray(),
-			s.mylayoutbox,
+				widget_container({ widget = mytextclock }),
+				wibox.widget.systray(),
+				s.mylayoutbox,
+			},
 		},
 	})
 end)

@@ -38,7 +38,7 @@ client.background       $bg-color
 
 # Font for window titles. Will also be used by the bar unless a different font
 # is used in the bar {} block below.
-font pango:FiraCode Nerd Font 8
+font pango:FiraCode Nerd Font 9
 
 #
 #
@@ -54,8 +54,9 @@ floating_modifier $mod
 focus_follows_mouse yes
 set $mod Mod4
 
-exec_always setxkbmap -layout us
-# exec_always setxkbmap -model abnt2 -layout br
+# exec_always setxkbmap -layout us
+# exec_always setxkbmap -model thinkpad -layout br
+exec_always setxkbmap -model abnt-2 -layout br
 
 ###########################
 
@@ -63,12 +64,13 @@ exec_always setxkbmap -layout us
 # Startup configs
 # this section should be used to set what need startup on login
 ###########################
-exec --no-startup-id gnome-settings-daemon
+# exec --no-startup-id gnome-settings-daemon
 # this settings helps to keep 
-exec --no-startup-id /usr/bin/gnome-keyring-daemon --start --components=secrets
+# exec --no-startup-id /usr/bin/gnome-keyring-daemon --start --components=secrets
 
-#get auth work with polkit-lx
-exec --no-startup-id /usr/lib/lxpolkit
+# get auth work with polkit-lx
+# exec --no-startup-id /usr/lib/lxpolkit
+exec --no-startup-id /usr/lib/mate-polkit/polkit-mate-authentication-agent-1
 
 # Start XDG autostart .desktop files using dex. See also
 # https://wiki.archlinux.org/index.php/XDG_Autostart
@@ -94,9 +96,15 @@ set $refresh_i3status killall -SIGUSR1 i3status
 # Feh
 # Picom
 ################################
-#exec_always --no-startup-id picom &
-exec_always feh --bg-scale /myhome/lotofwallpapers/0064.jpg &
-exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
+exec_always --no-startup-id picom &
+# exec_always feh --bg-scale /myhome/lotofwallpapers/0064.jpg &
+exec_always nitrogen --restore &
+exec_always picom -b -f --config $HOME/dotfiles/picom/picom.conf &
+
+################################
+# screen
+################################
+# exec_always --no-startup-id conky &
 
 ################################
 # screen
@@ -112,7 +120,8 @@ exec_always picom -b -f --config $HOME/.config/picom/picom.conf &
 # Polybar
 ################################
 # exec polybar &
-# exec "bash $XDG_CUSTOM_DOTFILES/polybar/launch.sh &"
+# exec_always --no-startup-id $HOME/dotfiles-config/window-manager/polybar/launch.sh &
+# exec_always $HOME/dotfiles-config/window-manager/polybar/launch.sh
 
 ################################
 # Custom startup settings 
@@ -138,15 +147,16 @@ bindsym XF86MonBrightnessDown exec --no-startup-id brightnessctl s 5%- && echo $
 
 # block my screen
 bindsym $mod+Ctrl+l exec /bin/lock
-exec xautolock -time 10 -locker lock
+# exec xautolock -time 10 -locker lock
+
+# start brave browser
+bindsym $mod+b exec brave
 
 # start a terminal
 bindsym $mod+Return exec kitty
 
 # screeshot
-bindsym --release Print         exec --no-startup-id gnome-screenshot -i
-bindsym --release Mod1+Sys_Req  exec --no-startup-id gnome-screenshot -w
-bindsym --release Shift+Print   exec --no-startup-id gnome-screenshot -a
+bindsym --release Print         exec --no-startup-id flameshot gui
 
 # change container layout (stacked, tabbed, toggle split)
 bindsym $mod+s layout stacking
@@ -155,6 +165,10 @@ bindsym $mod+e layout toggle split
 
 # start dmenu (a program launcher)
 bindsym $mod+d exec --no-startup-id dmenu_run
+
+# start rofi (a program launcher)
+# bindsym $mod+Shift+d exec --no-startup-id rofi -show drun ~/.config/rofi/config.rasi
+
 # split in horizontal orientation
 bindsym $mod+h split h
 # split in vertical orientation
@@ -270,8 +284,8 @@ mode "resize" {
 # i3 Gaps 
 ################################
 for_window [class=".*"] border pixel 2
-gaps inner 5
-gaps outer 1
+gaps inner 8
+gaps outer 8
 gaps horizontal 2
 ################# i3-radius #######################
 smart_borders on
@@ -282,28 +296,29 @@ smart_borders no_gaps
 # Start i3bar to display a workspace bar (plus the system information i3status
 # finds out, if available)
 
-bar {
-        status_command i3status -c $HOME/.config/i3/i3status/config_top
-        position top
-        output eDP-1
-        tray_output none
-}
+# bar {
+#         status_command i3status -c $HOME/.config/i3/i3status/config_top
+#         position top
+#         output eDP-1
+#         tray_output none
+# }
 
 # bar {
 #         status_command i3blocks -c $HOME/.config/i3/i3blocks/config
 #         # i3bar_command i3bar --transparency
 #         position bottom
-#         colors {
-#             background #00000000
-#             statusline #00000000
-#         }
-#         # output VGA-1
+#         # colors {
+#         #     background #ffffff
+#         #     statusline #00000000
+#         # }
+#         output eDP-1
+#         tray_padding 2
 # }
 
 bar {
-        status_command i3status -c $HOME/.config/i3/i3status/config
-        font pango:FiraCode Nerd Font 8
+        font pango:FiraCode Nerd Font 9
         position bottom
         output eDP-1
         tray_padding 2
+        status_command i3status -c $HOME/.config/i3/i3status/config
 }
