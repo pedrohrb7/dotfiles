@@ -1,16 +1,19 @@
 # If you come from bash you might have to change your $PATH.
 export PATH=$HOME/bin:/usr/local/bin:$PATH
-export PATH=/home/phrb/.local/bin:$PATH
+export PATH=$HOME/.local/bin:$PATH
+
 export PATH=$HOME/.cargo/bin:$PATH
 
 export PATH="${ASDF_DATA_DIR:-$HOME/.asdf}/shims:$PATH"
+
+. /etc/profile.d/fzf.zsh
+export FZF_DEFAULT_OPTS='--ansi --preview="bat --style=numbers --color=always {}" --preview-window=right:50%:wrap'
+source <(fzf --zsh)
 
 export EDITOR='/usr/bin/nvim'
 export XDG_CONFIG_HOME=$HOME/.config
 export XDG_CUSTOM_DOTFILES=$HOME/dotfiles
 export NVM_SYMLINK_CURRENT=true
-
-export AIDER_EDITOR=/usr/bin/nvim
 
 alias svim='NVIM_APPNAME=smoothvim nvim'
 
@@ -26,20 +29,20 @@ export ZSH=$HOME/.oh-my-zsh
 
 ZSH_THEME="half-life"
 
-# Which plugins would you like to load?
-# Standard plugins can be found in $ZSH/plugins/
-# Custom plugins may be added to $ZSH_CUSTOM/plugins/
-# Example format: plugins=(rails git textmate ruby lighthouse)
-# Add wisely, as too many plugins slow down shell startup.
 plugins=(git sdk zsh-autosuggestions zsh-syntax-highlighting)
 
 source $ZSH/oh-my-zsh.sh
 
 # User configuration
+## Custom config
+alias cdir='mkdir -p'
+alias rm='rm -I --preserve-root=all'
+alias mv='mv -i'
 
 # omz
 alias zshrestart="source ~/.zshrc"
 alias zshconfig="nvim ~/.zshrc"
+alias ohmyzsh="nvim ~/.oh-my-zsh"
 
 # ls
 alias l='ls -lh'
@@ -80,6 +83,7 @@ alias errors="journalctl -b -p err | less"
 alias projects='cd /mnt/data/projects'
 alias ldocker='lazydocker'
 alias lgit='lazygit'
+alias ldkr='lazydocker'
 
 # end of personal settings and shortcuts
 
@@ -199,3 +203,7 @@ alias cat="bat"
 # ---- Eza (better ls) -----
 alias ls="eza --color=always --long --git --icons=always"
 
+fd() {
+  preview="git diff $@ --color=always -- {-1}"
+  git diff $@ --name-only | fzf -m --ansi --preview $preview
+}
