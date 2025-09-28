@@ -9,8 +9,6 @@ local function worker(user_args)
 	local args = user_args or {}
 	local timeout = args.timeout or 1
 	local font = args.font or beautiful.font
-	-- local widget_height = args.widget_height or 30
-	-- local widget_width = args.widget_width or 70
 
 	local ram_widget = wibox.widget({
 		font = font,
@@ -18,7 +16,6 @@ local function worker(user_args)
 	})
 
 	watch('bash -c "LANGUAGE=en_US.UTF-8 free -h | grep Mem"', timeout, function(widget, stdout)
-		-- local total, used, free = stdout:match("Mem:%s*(%S+)%s+%S+%s+(%S+)%s+%S+%s+(%S+)")
 		local total, used = stdout:match("Mem:%s*(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
 		widget:set_text("   " .. used .. " / " .. total .. " ")
 	end, ram_widget)
