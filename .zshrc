@@ -29,7 +29,7 @@ export ZSH=$HOME/.oh-my-zsh
 
 ZSH_THEME="half-life"
 
-plugins=(git sdk zsh-autosuggestions zsh-syntax-highlighting)
+plugins=(git sdk asdf zsh-autosuggestions zsh-syntax-highlighting)
 
 source $ZSH/oh-my-zsh.sh
 
