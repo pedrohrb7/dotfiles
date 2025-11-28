@@ -4,7 +4,8 @@ export PATH=$HOME/.local/bin:$PATH
 
 export PATH=$HOME/.cargo/bin:$PATH
 
-export PATH="${ASDF_DATA_DIR:-$HOME/.asdf}/shims:$PATH"
+export ASDF_DATA_DIR="/home/phrb/.asdf"
+export PATH="$ASDF_DATA_DIR/shims:$PATH"
 
 . /etc/profile.d/fzf.zsh
 export FZF_DEFAULT_OPTS='--ansi --preview="bat --style=numbers --color=always {}" --preview-window=right:50%:wrap'
@@ -21,13 +22,13 @@ alias svim='NVIM_APPNAME=smoothvim nvim'
 source ~/private.zsh
 source ~/dmk3.zsh
 
-source ~/.config/fzf-git.sh/fzf-git.sh
-. "$HOME/.cargo/env"
+# source ~/.config/fzf-git.sh/fzf-git.sh
+# . "$HOME/.cargo/env"
 
 # Path to your oh-my-zsh installation.
 export ZSH=$HOME/.oh-my-zsh
 
-ZSH_THEME="half-life"
+ZSH_THEME="jaischeema"
 
 plugins=(git sdk asdf zsh-autosuggestions zsh-syntax-highlighting)
 
@@ -207,3 +208,7 @@ fd() {
   preview="git diff $@ --color=always -- {-1}"
   git diff $@ --name-only | fzf -m --ansi --preview $preview
 }
+
+#THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
+export SDKMAN_DIR="$HOME/.sdkman"
+[[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && source "$HOME/.sdkman/bin/sdkman-init.sh"

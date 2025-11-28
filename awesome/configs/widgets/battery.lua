@@ -27,7 +27,7 @@ local function worker(user_args)
 	local args = user_args or {}
 
 	local font = args.font or "FiraCode Nerd Font 10"
-	local path_to_icons = args.path_to_icons or "/home/pedro/dotfiles/awesome/icons/battery/"
+	local path_to_icons = args.path_to_icons or os.getenv("HOME") .. "/dotfiles/awesome/icons/battery/"
 	local show_current_level = args.show_current_level or false
 	local margin_left = args.margin_left or 0
 	local margin_right = args.margin_right or 0

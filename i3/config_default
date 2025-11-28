@@ -38,7 +38,7 @@ client.background       $bg-color
 
 # Font for window titles. Will also be used by the bar unless a different font
 # is used in the bar {} block below.
-font pango:FiraCode Nerd Font 9
+font pango:FiraCode Nerd Font 10
 
 #
 #
@@ -70,7 +70,8 @@ exec_always setxkbmap -model abnt-2 -layout br
 
 # get auth work with polkit-lx
 # exec --no-startup-id /usr/lib/lxpolkit
-exec --no-startup-id /usr/lib/mate-polkit/polkit-mate-authentication-agent-1
+# exec --no-startup-id /usr/lib/mate-polkit/polkit-mate-authentication-agent-1
+exec --no-startup-id /usr/lib/polkit-1/polkit-agent-helper-1
 
 # Start XDG autostart .desktop files using dex. See also
 # https://wiki.archlinux.org/index.php/XDG_Autostart
