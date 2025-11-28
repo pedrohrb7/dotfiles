@@ -1,22 +1,20 @@
 // -*- mode: jsonc -*-
 {
-  // "layer": "top", // Waybar at top layer
-  // "position": "bottom", // Waybar position (top|bottom|left|right)
-  // "height": 30, // Waybar height (to be removed for auto height)
-  "reload_style_on_change": true,
-  // "width": 1180, // Waybar width
+  "layer": "top", // Waybar at top layer
   "spacing": 12,
-  "modules-left": [],
+  "reload_style_on_change": true,
+  "modules-left": [
+    "hyprland/workspaces"
+  ],
   "modules-center": [],
   "modules-right": [
     // "mpd",
     "idle_inhibitor",
     "pulseaudio",
-    "network",
     // "power-profiles-daemon",
     "cpu",
     "memory",
-    "temperature",
+    // "temperature",
     "backlight",
     // "keyboard-state",
     // "sway/language",
@@ -25,6 +23,7 @@
     "clock",
     "clock#date",
     "tray",
+    "network",
     "custom/power"
   ],
   "idle_inhibitor": {
@@ -144,8 +143,8 @@
     },
     "format": "{capacity}% {icon}",
     "format-full": "{capacity}% {icon}",
-    "format-charging": "{capacity}% ",
-    "format-plugged": "{capacity}% ",
+    "format-charging": "{capacity}%  ",
+    "format-plugged": "{capacity}%  ",
     "format-alt": "{time} {icon}",
     // "format-good": "", // An empty format will hide the module
     // "format-full": "",
@@ -165,40 +164,40 @@
     "tooltip-format": "Power profile: {profile}\nDriver: {driver}",
     "tooltip": true,
     "format-icons": {
-      "default": "",
-      "performance": "",
-      "balanced": "",
-      "power-saver": ""
+      "default": " ",
+      "performance": " ",
+      "balanced": " ",
+      "power-saver": " "
     }
   },
   "network": {
     // "interface": "wlp2*", // (Optional) To force the use of this interface
-    "format-wifi": "{essid} ({signalStrength}%) ",
+    "format-wifi": "{essid} ({signalStrength}%)", //  
     "format-ethernet": "{ipaddr}/{cidr} ",
-    "tooltip-format": "{ifname} via {gwaddr} ",
-    "format-linked": "{ifname} (No IP) ",
-    "format-disconnected": "Disconnected ⚠",
+    "tooltip-format": "{ifname} via {gwaddr}",
+    "format-linked": "{ifname} (No IP)",
+    "format-disconnected": "Disconnected",
     "format-alt": "{ifname}: {ipaddr}/{cidr}"
   },
   "pulseaudio": {
     // "scroll-step": 1, // %, can be a float
     "format": "{volume}% {icon} {format_source}",
     "format-bluetooth": "{volume}% {icon} {format_source}",
-    "format-bluetooth-muted": " {icon} {format_source}",
+    "format-bluetooth-muted": " {icon}  {format_source}",
     "format-muted": " {format_source}",
     "format-source": "{volume}% ",
-    "format-source-muted": "",
+    "format-source-muted": " ",
     "format-icons": {
-      "headphone": "",
-      "hands-free": "",
-      "headset": "",
-      "phone": "",
-      "portable": "",
-      "car": "",
+      "headphone": " ",
+      "hands-free": " ",
+      "headset": " ",
+      "phone": " ",
+      "portable": " ",
+      "car": " ",
       "default": [
-        "",
-        "",
-        ""
+        " ",
+        " ",
+        " "
       ]
     },
     "on-click": "pavucontrol"
@@ -226,5 +225,41 @@
       "suspend": "systemctl suspend",
       "hibernate": "systemctl hibernate"
     }
+  },
+  "hyprland/workspaces": {
+    // "active-only":
+    // "hide-active":
+    // "all-outputs":
+    "format": "{icon}",
+    "format-icons": {
+      "active": "",
+      "default": ""
+    },
+    "persistent-workspaces": {
+      "*": 6
+    },
+    // "persistent-only":
+    // "show-special":
+    // "special-visible-only":
+    // "sort-by":
+    // "window-rewrite":
+    // "window-rewrite-default":
+    // "format-window-separator":
+    "workspace-taskbar": {
+      // "enable":
+      // "update-active-window":
+      // "format":
+      // "icon-size":
+      // "icon-theme":
+      // "orientation":
+      // "ignore-list":
+      // "on-click-window":
+    },
+    // "move-to-monitor":
+    // "ignore-workspaces":
+    "on-scroll-up": "hyprctl dispatch workspace +1",
+    "on-scroll-down": "hyprctl dispatch workspace -1",
+    // "expand":
+    "cursor": true
   }
 }

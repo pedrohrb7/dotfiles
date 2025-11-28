@@ -6,7 +6,6 @@
 
 window#waybar {
   background-color: rgba(43, 48, 59, 0.0);
-  /* border-bottom: 3px solid rgba(100, 114, 125, 0.5); */
   color: #ffffff;
   transition-property: background-color;
   transition-duration: .5s;
@@ -27,11 +26,6 @@ window#waybar.solo {
 
 window#waybar.termite {
   background-color: #3F3F3F;
-}
-
-window#waybar.chromium {
-  background-color: #000000;
-  border: none;
 }
 
 button {
@@ -81,19 +75,14 @@ button:hover {
 #battery,
 #cpu,
 #memory,
-#disk,
 #temperature,
 #backlight,
 #network,
 #pulseaudio,
-#wireplumber,
-#custom-media,
 #tray,
 #mode,
 #idle_inhibitor,
-#scratchpad,
-#power-profiles-daemon,
-#mpd {
+#power-profiles-daemon {
   padding: 0 10px;
   color: #ffffff;
 }
@@ -114,12 +103,14 @@ button:hover {
 }
 
 #clock {
-  background-color: #64727D;
+  background-color: #9b59b6;
+  color: rgba(0, 255, 153, 1.0);
 }
 
 #battery {
-  background-color: #ffffff;
-  color: #000000;
+  background-color: #9b59b6;
+  color: rgba(0, 255, 153, 1.0);
+  /* color: #000000; */
 }
 
 #battery.charging,
@@ -170,24 +161,20 @@ label:focus {
 }
 
 #cpu {
-  background-color: #2ecc71;
-  color: #000000;
+  /* background-color: #2ecc71; */
+  background-color: #9b59b6;
 }
 
 #memory {
   background-color: #9b59b6;
 }
 
-#disk {
-  background-color: #964B00;
-}
-
 #backlight {
-  background-color: #90b1b1;
+  background-color: #9b59b6;
 }
 
 #network {
-  background-color: #2980b9;
+  background-color: #9b59b6;
 }
 
 #network.disconnected {
@@ -195,8 +182,8 @@ label:focus {
 }
 
 #pulseaudio {
-  background-color: #f1c40f;
-  color: #000000;
+  background-color: #9b59b6;
+  /* color: #000000; */
 }
 
 #pulseaudio.muted {
@@ -205,7 +192,7 @@ label:focus {
 }
 
 #wireplumber {
-  background-color: #fff0f5;
+  background-color: #9b59b6;
   color: #000000;
 }
 
@@ -217,10 +204,6 @@ label:focus {
   background-color: #66cc99;
   color: #2a5c45;
   min-width: 100px;
-}
-
-#custom-media.custom-spotify {
-  background-color: #66cc99;
 }
 
 #custom-media.custom-vlc {
@@ -236,7 +219,7 @@ label:focus {
 }
 
 #tray {
-  background-color: #2980b9;
+  background-color: #9b59b6;
 }
 
 #tray>.passive {
@@ -255,23 +238,6 @@ label:focus {
 #idle_inhibitor.activated {
   background-color: #ecf0f1;
   color: #2d3436;
-}
-
-#mpd {
-  background-color: #66cc99;
-  color: #2a5c45;
-}
-
-#mpd.disconnected {
-  background-color: #f53c3c;
-}
-
-#mpd.stopped {
-  background-color: #90b1b1;
-}
-
-#mpd.paused {
-  background-color: #51a37a;
 }
 
 #language {
@@ -325,4 +291,40 @@ label:focus {
 
 #privacy-item.audio-out {
   background-color: #0069d4;
+}
+
+/*--------------
+    username
+--------------*/
+
+#custom-user {
+  padding-right: 12px;
+}
+
+/*----------------
+    workspaces
+----------------*/
+
+/* #custom-left_div.1, */
+/* #custom-right_div.1 { */
+/* color: #0000ff; */
+/* } */
+
+#workspaces {
+  padding: 0 1px;
+  background-color: #9b59b6;
+  /* background-color: #00ff00; */
+}
+
+#workspaces button.active label,
+#workspaces button.focused label {
+  color: rgba(0, 255, 153, 1.0);
+}
+
+/*------------------
+    window title
+------------------*/
+
+#window {
+  margin-left: 12px;
 }
