@@ -24,9 +24,9 @@ window#waybar.solo {
 }
 */
 
-window#waybar.termite {
-  background-color: #3F3F3F;
-}
+/* window#waybar.termite { */
+/*   background-color: #3F3F3F; */
+/* } */
 
 button {
   /* Use box-shadow instead of border so the text isn't offset */
@@ -81,9 +81,13 @@ button:hover {
 #pulseaudio,
 #tray,
 #mode,
+#workspaces,
+#idle_inhibitor,
 #power-profiles-daemon {
-  padding: 0 10px;
   color: #ffffff;
+  padding: 6px 20px;
+  border-radius: 20px;
+
 }
 
 #window,
@@ -231,7 +235,7 @@ label:focus {
 }
 
 #idle_inhibitor {
-  background-color: #2d3436;
+  background-color: transparent;
 }
 
 #idle_inhibitor.activated {

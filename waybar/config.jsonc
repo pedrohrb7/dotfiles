@@ -1,30 +1,31 @@
 // -*- mode: jsonc -*-
 {
   "layer": "top", // Waybar at top layer
-  "spacing": 12,
+  "spacing": 8,
   "reload_style_on_change": true,
   "modules-left": [
-    "hyprland/workspaces"
-  ],
-  "modules-center": [],
-  "modules-right": [
-    // "mpd",
-    "idle_inhibitor",
-    "pulseaudio",
-    // "power-profiles-daemon",
-    "cpu",
-    "memory",
-    // "temperature",
-    "backlight",
-    // "keyboard-state",
-    // "sway/language",
-    "battery",
-    "battery#bat2",
     "clock",
     "clock#date",
     "tray",
-    "network",
-    "custom/power"
+    "network"
+  ],
+  "modules-center": [
+    "pulseaudio",
+    "hyprland/workspaces",
+    "idle_inhibitor"
+  ],
+  "modules-right": [
+    // "mpd",
+    // "power-profiles-daemon",
+    // "temperature",
+    // "keyboard-state",
+    // "sway/language",
+    // "custom/power"
+    "cpu",
+    "memory",
+    "backlight",
+    "battery",
+    "battery#bat2"
   ],
   "idle_inhibitor": {
     "format": "{icon}",
