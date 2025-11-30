@@ -2,6 +2,7 @@
   /* `otf-font-awesome` is required to be installed for icons */
   font-family: 'FiraCode Nerd Font', Roboto, Helvetica, Arial, sans-serif;
   font-size: 13px;
+  font-weight: 700;
 }
 
 window#waybar {
@@ -105,17 +106,6 @@ button:hover {
   margin-right: 0;
 }
 
-#clock {
-  background-color: #9b59b6;
-  /* color: rgba(0, 255, 153, 1.0); */
-}
-
-#battery {
-  background-color: #9b59b6;
-  /* color: rgba(0, 255, 153, 1.0); */
-  /* color: #000000; */
-}
-
 #battery.charging,
 #battery.plugged {
   color: #ffffff;
@@ -163,31 +153,24 @@ label:focus {
   background-color: #000000;
 }
 
-#cpu {
-  /* background-color: #2ecc71; */
-  background-color: #9b59b6;
-}
-
-#memory {
-  background-color: #9b59b6;
-}
-
-#backlight {
-  background-color: #9b59b6;
-}
-
-#network {
-  background-color: #9b59b6;
+#workspaces,
+#memory,
+#backlight,
+#pulseaudio,
+#tray,
+#network,
+#cpu,
+#clock,
+#battery,
+#idle_inhibitor.activated {
+  background: linear-gradient(45deg, #ff0095, #00ff99);
+  /* color: #000000; */
 }
 
 #network.disconnected {
   background-color: #f53c3c;
 }
 
-#pulseaudio {
-  background-color: #9b59b6;
-  /* color: #000000; */
-}
 
 #pulseaudio.muted {
   background-color: #90b1b1;
@@ -219,10 +202,6 @@ label:focus {
 
 #temperature.critical {
   background-color: #eb4d4b;
-}
-
-#tray {
-  background-color: #9b59b6;
 }
 
 #tray>.passive {
@@ -308,20 +287,13 @@ label:focus {
     workspaces
 ----------------*/
 
-/* #custom-left_div.1, */
-/* #custom-right_div.1 { */
-/* color: #0000ff; */
-/* } */
-
 #workspaces {
   padding: 0 1px;
-  background-color: #9b59b6;
-  /* background-color: #00ff00; */
 }
 
 #workspaces button.active label,
 #workspaces button.focused label {
-  color: rgba(0, 255, 153, 1.0);
+  color: rgba(0, 255, 247, 1.0);
 }
 
 /*------------------
