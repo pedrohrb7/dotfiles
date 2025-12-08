@@ -43,7 +43,6 @@
     }
   },
   "clock": {
-    // "timezone": "America/New_York",
     "timezone": "America/Sao_Paulo",
     "format": "{:%H:%M:%S}  ",
     "interval": 1,
@@ -59,6 +58,7 @@
     // "max-length": 8,
     // "rotate":
     // "on-click":
+    // "on-click": "gnome-calendar",
     // "on-click-middle":
     // "on-click-right":
     // "on-scroll-up":
@@ -144,7 +144,7 @@
     },
     "format": "{capacity}% {icon}",
     "format-full": "{capacity}% {icon}",
-    "format-charging": "{capacity}%  ",
+    "format-charging": "{capacity}%  ",
     "format-plugged": "{capacity}%  ",
     "format-alt": "{time} {icon}",
     // "format-good": "", // An empty format will hide the module
@@ -183,18 +183,17 @@
   "pulseaudio": {
     // "scroll-step": 1, // %, can be a float
     "format": "{volume}% {icon} {format_source}",
-    "format-bluetooth": "{volume}% {icon} {format_source}",
-    "format-bluetooth-muted": " {icon}  {format_source}",
-    "format-muted": " {format_source}",
+    "format-bluetooth": "{volume}% {icon} {format_source}",
+    "format-bluetooth-muted": "󰗿  {format_source}",
+    "format-muted": "󰝟  {format_source}",
     "format-source": "{volume}% ",
     "format-source-muted": " ",
     "format-icons": {
       "headphone": " ",
-      "hands-free": " ",
-      "headset": " ",
+      "hands-free": " ",
+      "headset": "󰗾 ",
       "phone": " ",
       "portable": " ",
-      "car": " ",
       "default": [
         " ",
         " ",
