@@ -1,7 +1,7 @@
 * {
   /* `otf-font-awesome` is required to be installed for icons */
   font-family: 'FiraCode Nerd Font', Roboto, Helvetica, Arial, sans-serif;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -54,12 +54,12 @@ button:hover {
   color: #ffffff;
 }
 
-#workspaces button:hover {
-  background: rgba(0, 0, 0, 0.2);
-}
+/* #workspaces button:hover { */
+/* background: rgba(0, 0, 0, 0.2); */
+/* } */
 
 #workspaces button.focused {
-  background-color: #64727D;
+  /* background-color: #64727D; */
   box-shadow: inset 0 -3px #ffffff;
 }
 
@@ -86,8 +86,8 @@ button:hover {
 #idle_inhibitor,
 #power-profiles-daemon {
   color: #ffffff;
-  padding: 6px 20px;
-  border-radius: 20px;
+  padding: 4px 6px;
+  /* border-radius: 20px; */
 
 }
 
@@ -163,7 +163,7 @@ label:focus {
 #clock,
 #battery,
 #idle_inhibitor.activated {
-  background: linear-gradient(45deg, #ff0095, #00ff99);
+  background: linear-gradient(45deg, #ff0095, #552e71);
   /* color: #000000; */
 }
 
@@ -173,8 +173,8 @@ label:focus {
 
 
 #pulseaudio.muted {
-  background-color: #90b1b1;
-  color: #2a5c45;
+  /* background-color: #90b1b1; */
+  /* color: #2a5c45; */
 }
 
 #wireplumber {

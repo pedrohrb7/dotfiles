@@ -39,6 +39,7 @@ local mem_widget = require("configs.widgets.mem")
 
 local modkey = "Mod4"
 local terminal = "kitty"
+local fileManager = "nautilus"
 
 beautiful.init("~/.config/awesome/themes/default/theme.lua")
 beautiful.bg_systray = theme.bg_focus
@@ -358,6 +359,10 @@ local globalkeys = gears.table.join(
 	awful.key({ modkey }, "Return", function()
 		awful.spawn(terminal)
 	end, { description = "open a terminal", group = "launcher" }),
+
+	awful.key({ modkey }, "e", function()
+		awful.spawn(fileManager)
+	end, { description = "open nautilus", group = "launcher" }),
 
 	awful.key({ modkey, "Control" }, "r", awesome.restart, { description = "reload awesome", group = "awesome" }),
 
