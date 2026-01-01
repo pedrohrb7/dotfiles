@@ -46,7 +46,6 @@ button:hover {
 /* you can set a style on hover for any module like this */
 #pulseaudio:hover {
   /* background-color: #a37800; */
-
   background: linear-gradient(45deg, #ff0095, #33ccff);
 }
 
@@ -111,7 +110,7 @@ button:hover {
 #battery.charging,
 #battery.plugged {
   color: #ffffff;
-  background-color: #26A65B;
+  background: linear-gradient(45deg, #33ccff, #ff0095);
 }
 
 @keyframes blink {
