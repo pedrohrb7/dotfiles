@@ -98,11 +98,11 @@
   },
   "memory": {
     // "format": "{}% ",
+    // "format": " 󰘚 |{used:0.1f}GB",
+    // "format-warning": "󰀧 {percentage}%",
+    // "format-critical": "󰀧 {percentage}%",
+    "format": " 󰘚 | {used:0.1f} GB",
     "interval": 3,
-    "format-warning": "󰀧 {percentage}%",
-    "format-critical": "󰀧 {percentage}%",
-    // "format": " 󰘚  {used:0.1f} GB / {total:0.1f} GB",
-    "format": " 󰘚 |{used:0.1f}GB",
     "states": {
       "warning": 75,
       "critical": 90
@@ -123,7 +123,7 @@
   "backlight": {
     // "device": "acpi_video1",
     // "format": "BKL {percent}%",
-    "format": "{icon }|{percent}%",
+    "format": "{icon}|{percent}%",
     "format-icons": [
       "",
       "",
