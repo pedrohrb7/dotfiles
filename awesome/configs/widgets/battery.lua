@@ -62,11 +62,14 @@ local function worker(user_args)
 			resize = false,
 		},
 		valign = "center",
+		halign = "center",
 		layout = wibox.container.place,
 	})
 	local level_widget = wibox.widget({
 		font = font,
 		widget = wibox.widget.textbox,
+		valign = "center",
+		halign = "center",
 	})
 
 	battery_widget = wibox.widget({

@@ -17,7 +17,7 @@ local function worker(user_args)
 
 	watch('bash -c "LANGUAGE=en_US.UTF-8 free -h | grep Mem"', timeout, function(widget, stdout)
 		local total, used = stdout:match("Mem:%s*(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
-		widget:set_text("   " .. used .. " / " .. total .. " ")
+		widget:set_text("   " .. used)
 	end, ram_widget)
 
 	return ram_widget

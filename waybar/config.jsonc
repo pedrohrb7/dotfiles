@@ -18,8 +18,8 @@
     // "custom/power"
     "tray",
     "pulseaudio",
-    "cpu",
-    "memory",
+    // "cpu",
+    // "memory",
     "backlight",
     "clock",
     "clock#date",
