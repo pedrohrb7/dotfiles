@@ -1,16 +1,11 @@
-layout {
+layout name="sisfin" {
+    cwd "~/projects/sisfin"
     tab name="sisfin-api" {
         pane size=1 borderless=true {
             plugin location="zellij:tab-bar"
         }
-        pane split_direction="vertical" {
-            pane size="65%" command="zsh" {
-                args "-c" "cd sisfin-api && NVIM_APPNAME=smoothvim nvim "
-            }
-            pane split_direction="horizontal" size="35%" {
-                pane size="60%"
-                pane size="40%"
-            }
+        pane command="zsh" {
+            args "-c" "cd sisfin-api && NVIM_APPNAME=smoothvim nvim ."
         } 
         pane size=2 borderless=true {
             plugin location="zellij:status-bar"
@@ -18,13 +13,10 @@ layout {
     }
     tab name="sisfin-front" {
         pane size=1 borderless=true {
-             plugin location="zellij:tab-bar"
+            plugin location="zellij:tab-bar"
         }
-        pane split_direction="vertical" {
-            pane size="65%" command="zsh" {
-                args "-c" "cd sisfin-front && NVIM_APPNAME=smoothvim nvim"
-            }
-            pane size="35%"
+        pane command="zsh" {
+            args "-c" "cd sisfin-front && NVIM_APPNAME=smoothvim nvim ."
         }
         pane size=2 borderless=true {
             plugin location="zellij:status-bar"
