@@ -1,52 +1,41 @@
-layout name="sisfin" {
-    cwd "~/projects/sisfin"
-    tab name="sisfin-api" {
+layout name="auth" {
+    cwd "~/projects/auth"
+    tab name="auth-api" {
         pane size=1 borderless=true {
             plugin location="zellij:tab-bar"
         }
         pane command="zsh" {
-            args "-c" "cd sisfin-api && NVIM_APPNAME=smoothvim nvim ."
+            args "-c" "cd auth-api && NVIM_APPNAME=smoothvim nvim ."
         } 
         pane size=2 borderless=true {
             plugin location="zellij:status-bar"
         }
     }
-    tab name="sisfin-front" {
+    tab name="auth-front" {
         pane size=1 borderless=true {
             plugin location="zellij:tab-bar"
         }
         pane command="zsh" {
-            args "-c" "cd sisfin-front && NVIM_APPNAME=smoothvim nvim ."
+            args "-c" "cd auth-front && NVIM_APPNAME=smoothvim nvim ."
         }
         pane size=2 borderless=true {
             plugin location="zellij:status-bar"
         }
     }
-    tab name="lazygit-api" {
+    tab name="api" {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane  
+        pane size=2 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+    tab name="front" {
         pane size=1 borderless=true {
             plugin location="zellij:tab-bar"
         }
         pane
-        pane size=2 borderless=true {
-            plugin location="zellij:status-bar"
-        }
-    }
-    tab name="lazygit-front" {
-        pane size=1 borderless=true {
-            plugin location="zellij:tab-bar"
-        }
-        pane
-        pane size=2 borderless=true {
-            plugin location="zellij:status-bar"
-        }
-    }
-    tab name="lazydocker" {
-        pane size=1 borderless=true {
-            plugin location="zellij:tab-bar"
-        }
-        pane command="zsh" {
-            args "-c" "lazydocker"
-        }
         pane size=2 borderless=true {
             plugin location="zellij:status-bar"
         }
