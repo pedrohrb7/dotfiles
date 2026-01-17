@@ -59,7 +59,6 @@ local mylauncher = awful.widget.launcher({ image = beautiful.awesome_icon })
 
 -- Menubar configuration
 menubar.utils.terminal = terminal -- Set the terminal for applications that require it
--- }}}
 
 -- Keyboard map indicator and switcher
 local mykeyboardlayout = awful.widget.keyboardlayout()
