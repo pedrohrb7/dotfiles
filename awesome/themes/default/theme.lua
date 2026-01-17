@@ -26,7 +26,7 @@ theme.fg_urgent = color.white
 theme.fg_minimize = color.white
 
 theme.useless_gap = dpi(4)
-theme.border_width = dpi(2)
+theme.border_width = dpi(1)
 theme.border_normal = color.border_normal
 theme.border_focus = color.magenta
 theme.border_marked = color.border_marked
@@ -77,7 +77,7 @@ theme.menu_width = dpi(200)
 -- You can add as many variables as
 -- you wish and access them by using
 -- beautiful.variable in your rc.lua
---theme.bg_widget = "#cc0000"
+-- theme.bg_widget = "#cc0000"
 
 -- Define the image to load
 theme.titlebar_close_button_normal = themes_path .. "default/titlebar/close_normal.png"
@@ -131,7 +131,7 @@ theme.awesome_icon = theme_assets.awesome_icon(theme.menu_height, theme.bg_focus
 -- from /usr/share/icons and /usr/share/icons/hicolor will be used.
 theme.icon_theme = nil
 -- theme.wallpaper = themes_path .. "default/background.png"
-theme.wallpaper = "/mnt/data/lotofwallpapers/blackcat.jpg"
+theme.wallpaper = "/mnt/data/lotofwallpapers/tokyo-night24.png"
 -- theme.wallpaper = "/mnt/data/lotofwallpapers/manhattan.jpg"
 
 return theme

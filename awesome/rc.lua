@@ -4,18 +4,13 @@ pcall(require, "luarocks.loader")
 
 -- Error handling
 require("configs.handle-errors")
--- Enable hotkeys help widget for VIM and other apps
--- when client with a matching name is opened:
+
 require("awful.hotkeys_popup.keys")
 require("awful.autofocus")
 
 -- Standard awesome library
 local gears = require("gears")
 local awful = require("awful")
-
-local cairo = require("lgi").cairo
-local surface = cairo.ImageSurface(cairo.Format.ARGB32, 200, 50)
-local cr = cairo.Context(surface)
 
 -- Widget and layout library
 local wibox = require("wibox")
@@ -26,20 +21,20 @@ local beautiful = require("beautiful")
 local menubar = require("menubar")
 local hotkeys_popup = require("awful.hotkeys_popup")
 
--- Import custom widgets
 local calendar_widget = require("configs.widgets.calendar")
 local volume_widget = require("configs.widgets.audio.volume")
-local cpu_widget = require("configs.widgets.cpu")
+-- local cpu_widget = require("configs.widgets.cpu")
 local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
 local battery_widget = require("configs.widgets.battery")
 local theme = require("themes.default.theme")
 local color = require("configs.color")
-local gpu_widget = require("configs.widgets.gpu")
-local mem_widget = require("configs.widgets.mem")
+-- local gpu_widget = require("configs.widgets.gpu")
+-- local mem_widget = require("configs.widgets.mem")
 
 local modkey = "Mod4"
 local terminal = "kitty"
 local fileManager = "nautilus"
+local browser = "brave"
 
 beautiful.init("~/.config/awesome/themes/default/theme.lua")
 beautiful.bg_systray = theme.bg_focus
@@ -69,9 +64,6 @@ menubar.utils.terminal = terminal -- Set the terminal for applications that requ
 -- Keyboard map indicator and switcher
 local mykeyboardlayout = awful.widget.keyboardlayout()
 
--- {{{ Wibar
--- Create a textclock widget
--- local mytextclock = wibox.widget.textclock()
 -- local mytextclock = wibox.widget.textclock()
 local mytextclock = wibox.widget.textclock("   %H:%M:%S %p  %a, %d %b, %Y ", 1, "America/Sao_Paulo")
 
@@ -162,11 +154,11 @@ awful.screen.connect_for_each_screen(function(s)
 	-- Wallpaper
 	set_wallpaper(s)
 
-	-- Each screen has its own tag table.
 	-- local tagNames = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
 	-- awful.tag(tagNames, s, awful.layout.layouts[1])
-	local tagPacman = { " 󰮯 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 " }
-	awful.tag(tagPacman, s, awful.layout.layouts[1])
+	-- local tagPacman = { " 󰮯 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 " }
+	local tagListIcons = { " 󰮯 ", "A", "W", "E", "S", "O", "M", "E", " 󰊠 " }
+	awful.tag(tagListIcons, s, awful.layout.layouts[1])
 
 	-- Create a promptbox for each screen
 	s.mypromptbox = awful.widget.prompt({
@@ -199,6 +191,7 @@ awful.screen.connect_for_each_screen(function(s)
 	-- Create a taglist widget
 	s.mytaglist = awful.widget.taglist({
 		screen = s,
+		-- deprecated - commented to test
 		filter = awful.widget.taglist.filter.all,
 		buttons = taglist_buttons,
 	})
@@ -207,7 +200,70 @@ awful.screen.connect_for_each_screen(function(s)
 	s.mytasklist = awful.widget.tasklist({
 		screen = s,
 		filter = awful.widget.tasklist.filter.currenttags,
+		-- filter = awful.widget.tasklist.filter.allscreen, -- Or filter.currenttags, etc.
 		buttons = tasklist_buttons,
+
+		style = {
+			shape_border_width = 1,
+			shape_border_color = "#777777",
+			shape = gears.shape.rounded_bar,
+			fg_focus = color.black,
+			bg_focus = color.magenta,
+			fg_normal = color.white,
+		},
+		layout = {
+			spacing = 10,
+			spacing_widget = {
+				{
+					forced_width = 5,
+					shape = gears.shape.circle,
+					widget = wibox.widget.separator,
+				},
+				valign = "center",
+				halign = "center",
+				widget = wibox.container.place,
+			},
+			layout = wibox.layout.flex.horizontal,
+		},
+
+		-- Define the look of each task list item
+		-- widget_template = {
+		-- 	{ -- Background Container (optional)
+		-- 		{ -- Icon & Text Container
+		-- 			{ id = "icon_role", widget = wibox.widget.imagebox }, -- Client icon
+		-- 			{ id = "text_role", widget = wibox.widget.textbox }, -- Client name
+		-- 			layout = wibox.layout.fixed.horizontal, -- Arrange icon and text
+		-- 			spacing = 5,
+		-- 		},
+		-- 		widget = wibox.container.background,
+		-- 		bg = beautiful.transparent, -- Use theme color
+		-- 		shape = gears.shape.rounded_rect, -- Rounded corners
+		-- 		forced_height = 30, -- Set item height
+		-- 		forced_width = 150, -- Optional: fixed width
+		-- 	},
+		-- 	id = "background_role", -- Required for background container
+		-- },
+
+		-- Layout for the whole tasklist (horizontal flow)
+		-- layout = {
+		-- 	spacing = 10, -- Space between items
+		-- 	spacing_widget = { -- Widget for spacing (e.g., a small circle)
+		-- 		{ forced_width = 5, shape = gears.shape.circle, widget = wibox.widget.separator },
+		-- 		valign = "center",
+		-- 		halign = "center",
+		-- 		widget = wibox.container.place,
+		-- 	},
+		-- 	layout = wibox.layout.flex.horizontal,
+		-- },
+		-- Add update_callback for more dynamic styling if needed, e.g., changing bg on hover
+		-- update_callback = function(self, c, index, clients)
+		-- 	local item = self:get_widgets_by_id("background_role")[1]
+		-- 	if c == client.focus then
+		-- 		item:set_bg(beautiful.bg_focus) -- Change color when focused
+		-- 	else
+		-- 		item:set_bg(beautiful.bg_normal)
+		-- 	end
+		-- end,
 	})
 
 	-- Create the wibox
@@ -256,10 +312,10 @@ awful.screen.connect_for_each_screen(function(s)
 			layout = wibox.layout.fixed.horizontal(),
 			spacing = 5,
 			widget_container({ widget = mykeyboardlayout }),
-			-- widget_container({ widget = volume_widget }),
-			widget_container({ widget = cpu_widget() }),
+			widget_container({ widget = volume_widget }),
+			-- widget_container({ widget = cpu_widget() }),
 			-- widget_container({ widget = mem_widget() }),
-			widget_container({ widget = gpu_widget }),
+			-- widget_container({ widget = gpu_widget }),
 			widget_container({
 				widget = brightness_widget({
 					type = "icon_and_text",
@@ -284,9 +340,7 @@ awful.screen.connect_for_each_screen(function(s)
 		},
 	})
 end)
--- }}}
 
--- {{{ Mouse bindings
 root.buttons(gears.table.join(
 	-- awful.button({}, 3, function()
 	-- 	mainmenu:toggle()
@@ -294,7 +348,6 @@ root.buttons(gears.table.join(
 	awful.button({}, 4, awful.tag.viewnext),
 	awful.button({}, 5, awful.tag.viewprev)
 ))
--- }}}
 
 -- {{{ Key bindings
 local globalkeys = gears.table.join(
@@ -359,6 +412,10 @@ local globalkeys = gears.table.join(
 	awful.key({ modkey }, "Return", function()
 		awful.spawn(terminal)
 	end, { description = "open a terminal", group = "launcher" }),
+
+	awful.key({ modkey }, "b", function()
+		awful.spawn(browser)
+	end, { description = "open default browser", group = "launcher" }),
 
 	awful.key({ modkey }, "e", function()
 		awful.spawn(fileManager)
@@ -673,3 +730,6 @@ end)
 
 --Gaps
 beautiful.useless_gap = 8
+
+-- Autostart applications
+awful.spawn.with_shell("~/.config/awesome/autostart.sh")
