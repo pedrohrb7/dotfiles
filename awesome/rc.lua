@@ -258,7 +258,7 @@ awful.screen.connect_for_each_screen(function(s)
 			widget_container({ widget = mykeyboardlayout }),
 			-- widget_container({ widget = volume_widget }),
 			widget_container({ widget = cpu_widget() }),
-			widget_container({ widget = mem_widget() }),
+			-- widget_container({ widget = mem_widget() }),
 			widget_container({ widget = gpu_widget }),
 			widget_container({
 				widget = brightness_widget({
