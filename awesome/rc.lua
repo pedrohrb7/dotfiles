@@ -19,7 +19,6 @@ local wibox = require("wibox")
 local beautiful = require("beautiful")
 
 local menubar = require("menubar")
-local hotkeys_popup = require("awful.hotkeys_popup")
 
 local calendar_widget = require("configs.widgets.calendar")
 local volume_widget = require("configs.widgets.audio.volume")
@@ -61,10 +60,10 @@ local mylauncher = awful.widget.launcher({ image = beautiful.awesome_icon })
 menubar.utils.terminal = terminal -- Set the terminal for applications that require it
 
 -- Keyboard map indicator and switcher
-local mykeyboardlayout = awful.widget.keyboardlayout()
+-- local mykeyboardlayout = awful.widget.keyboardlayout()
 
 -- local mytextclock = wibox.widget.textclock()
--- local mytextclock = wibox.widget.textclock("   %H:%M:%S %p  %a, %d %b, %Y ", 1, "America/Sao_Paulo")
+local mytextclock = wibox.widget.textclock("   %H:%M:%S %p  %a, %d %b, %Y ", 1, "America/Sao_Paulo")
 
 -- or customized
 local cw = calendar_widget({
@@ -77,11 +76,11 @@ local cw = calendar_widget({
 	next_month_button = 3,
 })
 
--- mytextclock:connect_signal("button::press", function(_, _, _, button)
--- 	if button == 1 then
--- 		cw.toggle()
--- 	end
--- end)
+mytextclock:connect_signal("button::press", function(_, _, _, button)
+	if button == 1 then
+		cw.toggle()
+	end
+end)
 
 -- Create a wibox for each screen and add it
 local taglist_buttons = gears.table.join(
@@ -153,13 +152,9 @@ awful.screen.connect_for_each_screen(function(s)
 	-- Wallpaper
 	set_wallpaper(s)
 
-	-- theme.at_screen_connect(s)
-
 	-- local tagNames = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
-	-- awful.tag(tagNames, s, awful.layout.layouts[1])
-	-- local tagPacman = { " 󰮯 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 ", " 󰊠 " }
-	local tagListIcons = { " 󰮯 ", "A", "W", "E", "S", "O", "M", "E", " 󰊠 " }
-	awful.tag(tagListIcons, s, awful.layout.layouts[1])
+	local tagPacman = { " 󰮯 ", "A", "W", "E", "S", "O", "M", "E", " 󰊠 " }
+	awful.tag(tagPacman, s, awful.layout.layouts[1])
 
 	-- Create a promptbox for each screen
 	s.mypromptbox = awful.widget.prompt({
@@ -192,7 +187,6 @@ awful.screen.connect_for_each_screen(function(s)
 	-- Create a taglist widget
 	s.mytaglist = awful.widget.taglist({
 		screen = s,
-		-- deprecated - commented to test
 		filter = awful.widget.taglist.filter.all,
 		buttons = taglist_buttons,
 	})
@@ -205,12 +199,9 @@ awful.screen.connect_for_each_screen(function(s)
 		buttons = tasklist_buttons,
 
 		style = {
-			shape_border_width = 1,
-			shape_border_color = "#777777",
-			shape = gears.shape.rounded_bar,
-			fg_focus = color.black,
 			bg_focus = color.magenta,
 			fg_normal = color.white,
+			align = "center",
 		},
 		layout = {
 			spacing = 10,
@@ -226,45 +217,33 @@ awful.screen.connect_for_each_screen(function(s)
 			},
 			layout = wibox.layout.flex.horizontal,
 		},
-
-		-- Define the look of each task list item
-		-- widget_template = {
-		-- 	{ -- Background Container (optional)
-		-- 		{ -- Icon & Text Container
-		-- 			{ id = "icon_role", widget = wibox.widget.imagebox }, -- Client icon
-		-- 			{ id = "text_role", widget = wibox.widget.textbox }, -- Client name
-		-- 			layout = wibox.layout.fixed.horizontal, -- Arrange icon and text
-		-- 			spacing = 5,
-		-- 		},
-		-- 		widget = wibox.container.background,
-		-- 		bg = beautiful.transparent, -- Use theme color
-		-- 		shape = gears.shape.rounded_rect, -- Rounded corners
-		-- 		forced_height = 30, -- Set item height
-		-- 		forced_width = 150, -- Optional: fixed width
-		-- 	},
-		-- 	id = "background_role", -- Required for background container
-		-- },
-
-		-- Layout for the whole tasklist (horizontal flow)
-		-- layout = {
-		-- 	spacing = 10, -- Space between items
-		-- 	spacing_widget = { -- Widget for spacing (e.g., a small circle)
-		-- 		{ forced_width = 5, shape = gears.shape.circle, widget = wibox.widget.separator },
-		-- 		valign = "center",
-		-- 		halign = "center",
-		-- 		widget = wibox.container.place,
-		-- 	},
-		-- 	layout = wibox.layout.flex.horizontal,
-		-- },
-		-- Add update_callback for more dynamic styling if needed, e.g., changing bg on hover
-		-- update_callback = function(self, c, index, clients)
-		-- 	local item = self:get_widgets_by_id("background_role")[1]
-		-- 	if c == client.focus then
-		-- 		item:set_bg(beautiful.bg_focus) -- Change color when focused
-		-- 	else
-		-- 		item:set_bg(beautiful.bg_normal)
-		-- 	end
-		-- end,
+		widget_template = {
+			{
+				{
+					{
+						{
+							id = "icon_role",
+							widget = wibox.widget.imagebox,
+						},
+						margins = 2,
+						widget = wibox.container.margin,
+					},
+					{
+						id = "text_role",
+						widget = wibox.widget.textbox,
+					},
+					layout = wibox.layout.fixed.horizontal,
+				},
+				left = 50,
+				right = 10,
+				widget = wibox.container.margin,
+			},
+			id = "background_role",
+			align = "center",
+			margin_right = 20,
+			right = 20,
+			widget = wibox.container.background,
+		},
 	})
 
 	-- Create the wibox
@@ -312,7 +291,7 @@ awful.screen.connect_for_each_screen(function(s)
 		{ -- Right widgets
 			layout = wibox.layout.fixed.horizontal(),
 			spacing = 5,
-			widget_container({ widget = mykeyboardlayout }),
+			-- widget_container({ widget = mykeyboardlayout }),
 			widget_container({ widget = volume_widget }),
 			widget_container({ widget = cpu_widget() }),
 			-- widget_container({ widget = mem_widget() }),
@@ -342,15 +321,8 @@ awful.screen.connect_for_each_screen(function(s)
 	})
 end)
 
-root.buttons(gears.table.join(
-	-- awful.button({}, 3, function()
-	-- 	mainmenu:toggle()
-	-- end),
-	awful.button({}, 4, awful.tag.viewnext),
-	awful.button({}, 5, awful.tag.viewprev)
-))
+root.buttons(gears.table.join(awful.button({}, 4, awful.tag.viewnext), awful.button({}, 5, awful.tag.viewprev)))
 
--- {{{ Key bindings
 local globalkeys = gears.table.join(
 	-- Brightness widget
 	awful.key({}, "XF86MonBrightnessUp", function()
@@ -378,7 +350,6 @@ local globalkeys = gears.table.join(
 		awful.spawn("flameshot gui")
 	end, { description = "take screenshot", group = "hotkeys" }),
 
-	awful.key({ modkey }, "s", hotkeys_popup.show_help, { description = "show help", group = "awesome" }),
 	awful.key({ modkey }, "Left", awful.tag.viewprev, { description = "view previous", group = "tag" }),
 	awful.key({ modkey }, "Right", awful.tag.viewnext, { description = "view next", group = "tag" }),
 	awful.key({ modkey }, "Escape", awful.tag.history.restore, { description = "go back", group = "tag" }),
@@ -599,12 +570,8 @@ local clientbuttons = gears.table.join(
 
 -- Set keys
 root.keys(globalkeys)
--- }}}
 
--- {{{ Rules
--- Rules to apply to new clients (through the "manage" signal).
 awful.rules.rules = {
-	-- All clients will match this rule.
 	{
 		rule = {},
 		properties = {
@@ -678,7 +645,6 @@ end)
 
 -- Add a titlebar if titlebars_enabled is set to true in the rules.
 client.connect_signal("request::titlebars", function(c)
-	-- buttons for the titlebar
 	local buttons = gears.table.join(
 		awful.button({}, 1, function()
 			c:emit_signal("request::activate", "titlebar", { raise = true })
@@ -721,12 +687,13 @@ client.connect_signal("mouse::enter", function(c)
 	c:emit_signal("request::activate", "mouse_enter", { raise = false })
 end)
 
--- client.connect_signal("focus", function(c)
--- 	c.border_color = beautiful.border_focus
--- end)
--- client.connect_signal("unfocus", function(c)
--- 	c.border_color = beautiful.border_normal
--- end)
+client.connect_signal("focus", function(c)
+	c.border_color = beautiful.border_focus
+end)
+
+client.connect_signal("unfocus", function(c)
+	c.border_color = beautiful.border_normal
+end)
 
 --Gaps
 beautiful.useless_gap = 8
