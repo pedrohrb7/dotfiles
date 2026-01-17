@@ -23,24 +23,24 @@ local hotkeys_popup = require("awful.hotkeys_popup")
 
 local calendar_widget = require("configs.widgets.calendar")
 local volume_widget = require("configs.widgets.audio.volume")
--- local cpu_widget = require("configs.widgets.cpu")
+local cpu_widget = require("configs.widgets.cpu")
 local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
 local battery_widget = require("configs.widgets.battery")
 local theme = require("themes.default.theme")
 local color = require("configs.color")
--- local gpu_widget = require("configs.widgets.gpu")
+local gpu_widget = require("configs.widgets.gpu")
 -- local mem_widget = require("configs.widgets.mem")
 
 local modkey = "Mod4"
-local terminal = "kitty"
+local terminal = "ghostty"
 local fileManager = "nautilus"
 local browser = "brave"
 
 beautiful.init("~/.config/awesome/themes/default/theme.lua")
 beautiful.bg_systray = theme.bg_focus
 beautiful.systray_icon_spacing = 8
-beautiful.menubar_bg_normal = color.magenta
-beautiful.menubar_fg_normal = color.black
+-- beautiful.menubar_bg_normal = color.magenta
+-- beautiful.menubar_fg_normal = color.black
 
 -- Table of layouts to cover with awful.layout.inc, order matters.
 awful.layout.layouts = {
@@ -64,7 +64,7 @@ menubar.utils.terminal = terminal -- Set the terminal for applications that requ
 local mykeyboardlayout = awful.widget.keyboardlayout()
 
 -- local mytextclock = wibox.widget.textclock()
-local mytextclock = wibox.widget.textclock("   %H:%M:%S %p  %a, %d %b, %Y ", 1, "America/Sao_Paulo")
+-- local mytextclock = wibox.widget.textclock("   %H:%M:%S %p  %a, %d %b, %Y ", 1, "America/Sao_Paulo")
 
 -- or customized
 local cw = calendar_widget({
@@ -77,11 +77,11 @@ local cw = calendar_widget({
 	next_month_button = 3,
 })
 
-mytextclock:connect_signal("button::press", function(_, _, _, button)
-	if button == 1 then
-		cw.toggle()
-	end
-end)
+-- mytextclock:connect_signal("button::press", function(_, _, _, button)
+-- 	if button == 1 then
+-- 		cw.toggle()
+-- 	end
+-- end)
 
 -- Create a wibox for each screen and add it
 local taglist_buttons = gears.table.join(
@@ -152,6 +152,8 @@ end
 awful.screen.connect_for_each_screen(function(s)
 	-- Wallpaper
 	set_wallpaper(s)
+
+	-- theme.at_screen_connect(s)
 
 	-- local tagNames = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
 	-- awful.tag(tagNames, s, awful.layout.layouts[1])
@@ -312,9 +314,9 @@ awful.screen.connect_for_each_screen(function(s)
 			spacing = 5,
 			widget_container({ widget = mykeyboardlayout }),
 			widget_container({ widget = volume_widget }),
-			-- widget_container({ widget = cpu_widget() }),
+			widget_container({ widget = cpu_widget() }),
 			-- widget_container({ widget = mem_widget() }),
-			-- widget_container({ widget = gpu_widget }),
+			widget_container({ widget = gpu_widget }),
 			widget_container({
 				widget = brightness_widget({
 					type = "icon_and_text",
@@ -692,7 +694,7 @@ client.connect_signal("request::titlebars", function(c)
 		{ -- Left
 			awful.titlebar.widget.iconwidget(c),
 			buttons = buttons,
-			layout = wibox.layout.fixed.horizontal,
+			-- layout = wibox.layout.fixed.horizontal,
 		},
 		{ -- Middle
 			{ -- Title
@@ -700,7 +702,7 @@ client.connect_signal("request::titlebars", function(c)
 				widget = awful.titlebar.widget.titlewidget(c),
 			},
 			buttons = buttons,
-			layout = wibox.layout.flex.horizontal,
+			-- layout = wibox.layout.flex.horizontal,
 		},
 		{ -- Right
 			awful.titlebar.widget.floatingbutton(c),
@@ -708,9 +710,9 @@ client.connect_signal("request::titlebars", function(c)
 			awful.titlebar.widget.stickybutton(c),
 			awful.titlebar.widget.ontopbutton(c),
 			awful.titlebar.widget.closebutton(c),
-			layout = wibox.layout.fixed.horizontal(),
+			-- layout = wibox.layout.fixed.horizontal(),
 		},
-		layout = wibox.layout.align.horizontal,
+		-- layout = wibox.layout.align.horizontal,
 	})
 end)
 
@@ -719,13 +721,12 @@ client.connect_signal("mouse::enter", function(c)
 	c:emit_signal("request::activate", "mouse_enter", { raise = false })
 end)
 
-client.connect_signal("focus", function(c)
-	c.border_color = beautiful.border_focus
-end)
-client.connect_signal("unfocus", function(c)
-	c.border_color = beautiful.border_normal
-end)
--- }}}
+-- client.connect_signal("focus", function(c)
+-- 	c.border_color = beautiful.border_focus
+-- end)
+-- client.connect_signal("unfocus", function(c)
+-- 	c.border_color = beautiful.border_normal
+-- end)
 
 --Gaps
 beautiful.useless_gap = 8
