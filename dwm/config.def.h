@@ -8,6 +8,16 @@ static const int showbar = 1;           /* 0 means no bar */
 static const int topbar = 1;            /* 0 means bottom bar */
 static const char *fonts[] = {"FiraCode Nerd Font:size=10"};
 static const char dmenufont[] = "FiraCode Nerd Font:size=10";
+static const unsigned int systraypinning =
+    0; /* 0: sloppy systray follows selected monitor, >0: pin systray to monitor
+          X */
+static const unsigned int systrayonleft =
+    0; /* 0: systray in the right corner, >0: systray on left of status text */
+static const unsigned int systrayspacing = 2; /* systray spacing */
+static const int systraypinningfailfirst =
+    1; /* 1: if pinning fails, display systray on the first monitor, False:
+          display systray on the last monitor*/
+static const int showsystray = 1; /* 0 means no systray */
 static const char col_gray1[] = "#222222";
 static const char col_gray2[] = "#444444";
 static const char col_gray3[] = "#bbbbbb";
@@ -41,9 +51,9 @@ static const int refreshrate =
     120; /* refresh rate (per second) for client move/resize */
 
 static const Layout layouts[] = {
-    {"[]=", tile},
-    {"><>", NULL}, /* no layout function means floating behavior */
-    {"[M]", monocle},
+    {"[Tile]", tile},
+    {"[Float]", NULL}, /* no layout function means floating behavior */
+    {"[Mon]", monocle},
 };
 
 #define MODKEY Mod4Mask
@@ -65,8 +75,19 @@ static const char *dmenucmd[] = {
     "dmenu_run", "-m",      dmenumon, "-fn",    dmenufont, "-nb",     col_gray1,
     "-nf",       col_gray3, "-sb",    col_cyan, "-sf",     col_gray4, NULL};
 static const char *termcmd[] = {"kitty", NULL};
+
 static const char *upbrightness[] = {"brightnessctl", "s", "5%+", NULL};
 static const char *downbrightness[] = {"brightnessctl", "s", "5%-", NULL};
+
+static const char *volup[] = {"pactl", "set-sink-volume", "@DEFAULT_SINK@",
+                              "+5%", NULL};
+static const char *voldown[] = {"pactl", "set-sink-volume", "@DEFAULT_SINK@",
+                                "-5%", NULL};
+static const char *volmute[] = {"pactl", "set-sink-mute", "@DEFAULT_SINK@",
+                                "toggle", NULL};
+
+static const char *mictoggle[] = {"pactl", "set-source-mute",
+                                  "@DEFAULT_SOURCE@", "toggle", NULL};
 
 static const Key keys[] = {
     {MODKEY, XK_p, spawn, {.v = dmenucmd}},
@@ -92,6 +113,14 @@ static const Key keys[] = {
     {MODKEY, XK_period, focusmon, {.i = +1}},
     {MODKEY | ShiftMask, XK_comma, tagmon, {.i = -1}},
     {MODKEY | ShiftMask, XK_period, tagmon, {.i = +1}},
+
+    /* Mic keymaps */
+    {MODKEY, XK_o, spawn, {.v = mictoggle}},
+
+    /* Audio keymaps */
+    {0, XF86XK_AudioRaiseVolume, spawn, {.v = volup}},
+    {0, XF86XK_AudioLowerVolume, spawn, {.v = voldown}},
+    {0, XF86XK_AudioMute, spawn, {.v = volmute}},
 
     {0, XF86XK_MonBrightnessUp, spawn, {.v = upbrightness}},
     {0, XF86XK_MonBrightnessDown, spawn, {.v = downbrightness}},
