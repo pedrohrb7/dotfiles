@@ -75,6 +75,7 @@ static const char *dmenucmd[] = {
     "dmenu_run", "-m",      dmenumon, "-fn",    dmenufont, "-nb",     col_gray1,
     "-nf",       col_gray3, "-sb",    col_cyan, "-sf",     col_gray4, NULL};
 static const char *termcmd[] = {"kitty", NULL};
+static const char *screenshotcmd[] = {"flameshot", "gui", NULL};
 
 static const char *upbrightness[] = {"brightnessctl", "s", "5%+", NULL};
 static const char *downbrightness[] = {"brightnessctl", "s", "5%-", NULL};
@@ -124,6 +125,13 @@ static const Key keys[] = {
 
     {0, XF86XK_MonBrightnessUp, spawn, {.v = upbrightness}},
     {0, XF86XK_MonBrightnessDown, spawn, {.v = downbrightness}},
+
+    /* Gaps keymaps  */
+    {MODKEY, XK_minus, setgaps, {.i = -1}},
+    {MODKEY, XK_equal, setgaps, {.i = +1}},
+    {MODKEY | ShiftMask, XK_equal, setgaps, {.i = 0}},
+
+    {MODKEY, XK_Print, spawn, {.v = screenshotcmd}},
 
     TAGKEYS(XK_1, 0) TAGKEYS(XK_2, 1) TAGKEYS(XK_3, 2) TAGKEYS(XK_4, 3)
         TAGKEYS(XK_5, 4) TAGKEYS(XK_6, 5) TAGKEYS(XK_7, 6) TAGKEYS(XK_8, 7)
