@@ -53,7 +53,7 @@ static const int refreshrate =
 static const Layout layouts[] = {
     {"[Tile]", tile},
     {"[Float]", NULL}, /* no layout function means floating behavior */
-    {"[Mon]", monocle},
+    {"[><]", monocle},
 };
 
 #define MODKEY Mod4Mask
