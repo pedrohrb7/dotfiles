@@ -70,7 +70,8 @@ static const struct arg args[] = {
     {cpu_perc, "CPU: %s% | ", NULL},
     {battery_perc, "BAT: %s | ", "BAT1"},
     {datetime, "%s | ", "%F %T"},
-    {run_command, "VOL:%s | ", "./components/get_volume.sh"},
+    {run_command, "VOL: %s | ", "~/.config/slstatus/components/get_volume.sh"},
     {mic_perc, "MIC: %s | ", NULL},
-    {run_command, "BRI: %s | ", "./components/get_brightness.sh"},
+    {run_command, "BRI: %s | ",
+     "~/.config/slstatus/components/get_brightness.sh"},
 };

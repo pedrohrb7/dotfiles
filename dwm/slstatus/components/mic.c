@@ -7,10 +7,12 @@
 
 const char *mic_perc(const char *card) {
   char cmd[128];
-  char buf[64];
+  char buf[256];
   FILE *fp;
   int vol;
-  char muted[4];
+  char *ptr;
+
+  (void)card; /* Suppress unused parameter warning */
 
   /* Get mute status */
   snprintf(cmd, sizeof(cmd), "pactl get-source-mute @DEFAULT_SOURCE@");
@@ -41,8 +43,13 @@ const char *mic_perc(const char *card) {
   }
   pclose(fp);
 
-  /* Parse volume percentage */
-  if (sscanf(buf, "%*s %*d / %d%%", &vol) != 1)
+  /* Parse volume percentage - find first '/' then skip spaces */
+  ptr = strchr(buf, '/');
+  if (ptr == NULL)
+    return NULL;
+
+  /* %d automatically skips leading whitespace */
+  if (sscanf(ptr + 1, " %d%%", &vol) != 1)
     return NULL;
 
   return bprintf("%d%% Mute: no", vol);
