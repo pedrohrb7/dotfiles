@@ -81,6 +81,8 @@ alias rm='rm -I --preserve-root=all'
 alias mv='mv -i'
 alias errors="journalctl -b -p err | less"
 
+alias zlj='zellij'
+
 alias projects='cd /mnt/data/projects'
 alias ldocker='lazydocker'
 alias lgit='lazygit'
