@@ -11,7 +11,7 @@ export PATH="$ASDF_DATA_DIR/shims:$PATH"
 export FZF_DEFAULT_OPTS='--ansi --preview="bat --style=numbers --color=always {}" --preview-window=right:50%:wrap'
 source <(fzf --zsh)
 
-export EDITOR='/usr/bin/nvim'
+export EDITOR='NVIM_APPNAME=smoothvim /usr/bin/nvim'
 export XDG_CONFIG_HOME=$HOME/.config
 export XDG_CUSTOM_DOTFILES=$HOME/dotfiles
 export NVM_SYMLINK_CURRENT=true
