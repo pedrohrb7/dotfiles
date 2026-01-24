@@ -1,6 +1,5 @@
-![Home screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/screen_3.png)
-![Nvim screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/screen_1.png)
-![Terminal screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/screen_2.png)
+![Home screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/w1.png)
+![Terminal screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/w2.png)
 
 ## Packages
 
