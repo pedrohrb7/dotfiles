@@ -23,7 +23,7 @@ find_position = { fg = "#4A8B8B", bg = "reset", bold = true, italic = true }
 
 # Marker
 marker_copied = { fg = "#629C7D", bg = "#629C7D" }
-marker_cut = { fg = "#9F3486", bg = "#b53893" }
+marker_cut = { fg = "#342F4E", bg = "#342F4E" }
 marker_marked = { fg = "#E5A72A", bg = "#E5A72A" }
 marker_selected = { fg = "#8ee4a4", bg = "#8ee4a4" }
 
@@ -88,7 +88,6 @@ sep_right = { open = "", close = "" }
 progress_label = { fg = "#121212", bold = true }
 progress_normal = { fg = "#8ee4a4", bg = "#323232" }
 progress_error = { fg = "#b53893", bg = "#323232" }
-# #8ee4a4, #b53893
 
 # Permissions
 perm_sep = { fg = "#949494", bold = true }
@@ -208,16 +207,16 @@ btn_labels = [ " [Y]es  ", "  (N)o  " ]
 
 rules = [
   # Images
-  { mime = "image/*", fg = "#E49A44" },
+  { mime = "image/*", fg = "#8ee4a4" },
 
   # Media
-  { mime = "{audio,video}/*", fg = "#D87C4A" },
+  { mime = "{audio,video}/*", fg = "#8ee4a4" },
 
   # Archives
   { mime = "application/{zip,rar,7z*,tar,gzip,xz,zstd,bzip*,lzma,compress,archive,cpio,arj,xar,ms-cab*}", fg = "#DF6464" },
 
   # Documents
-  { mime = "application/{pdf,doc,rtf}", fg = "#C4693D" },
+  { mime = "application/{pdf,doc,rtf}", fg = "#8ee4a4" },
 
   # Fallback
   { url = "*", fg = "#d5d5d5" },
