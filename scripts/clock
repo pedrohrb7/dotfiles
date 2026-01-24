@@ -1,4 +1,0 @@
-#!/bin/bash
-
-TIME="$(date '+%d %b %Y, %a %H:%M')"
-echo "(  $TIME  )"
