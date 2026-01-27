@@ -4,9 +4,7 @@ layout name="sisfin" {
         pane size=1 borderless=true {
             plugin location="zellij:tab-bar"
         }
-        pane command="zsh" {
-            args "-c" "cd sisfin-api && NVIM_APPNAME=smoothvim nvim ."
-        } 
+        pane 
         pane size=2 borderless=true {
             plugin location="zellij:status-bar"
         }
@@ -15,47 +13,28 @@ layout name="sisfin" {
         pane size=1 borderless=true {
             plugin location="zellij:tab-bar"
         }
-        pane command="zsh" {
-            args "-c" "cd sisfin-front && NVIM_APPNAME=smoothvim nvim ."
-        }
+        pane 
         pane size=2 borderless=true {
             plugin location="zellij:status-bar"
         }
     }
-    tab name="lazygit-api" {
+    tab name="git" {
         pane size=1 borderless=true {
             plugin location="zellij:tab-bar"
         }
-        pane
+        pane 
         pane size=2 borderless=true {
             plugin location="zellij:status-bar"
         }
     }
-    tab name="lazygit-front" {
+    tab name="server" {
         pane size=1 borderless=true {
             plugin location="zellij:tab-bar"
         }
-        pane
-        pane size=2 borderless=true {
-            plugin location="zellij:status-bar"
-        }
-    }
-    tab name="lazydocker" {
-        pane size=1 borderless=true {
-            plugin location="zellij:tab-bar"
-        }
-        pane command="zsh" {
-            args "-c" "lazydocker"
-        }
-        pane size=2 borderless=true {
-            plugin location="zellij:status-bar"
-        }
-    }
-    tab name="empty" {
-        pane size=1 borderless=true {
-            plugin location="zellij:tab-bar"
-        }
-        pane
+        pane split_direction="horizontal" {
+            pane 
+            pane 
+        } 
         pane size=2 borderless=true {
             plugin location="zellij:status-bar"
         }
