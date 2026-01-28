@@ -17,7 +17,7 @@ export XDG_CUSTOM_DOTFILES=$HOME/dotfiles
 export NVM_SYMLINK_CURRENT=true
 
 alias svim='NVIM_APPNAME=smoothvim nvim'
-alias nvimy='NVIM_APPNAME=nvim_nightly nvim'
+alias vimy='NVIM_APPNAME=nvim_nightly nvim'
 
 # source more
 source ~/private.zsh

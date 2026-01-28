@@ -139,6 +139,7 @@ conform.setup({
 				"package.json",
 				"eslintrc.json",
 				"eslintrc.js",
+				".eslintrc.js",
 				"eslintrc",
 			}),
 		},
@@ -185,7 +186,8 @@ lint.linters_by_ft = {
 local eslint = lint.linters.eslint_d
 
 eslint.args = {
-	"--no-warn-ignored", -- <-- this is the key argument
+	-- "--no-warn-ignored", -- <-- this is the key argument
+	"--ignore", -- <-- this is the key argument
 	"--format",
 	"json",
 	"--stdin",

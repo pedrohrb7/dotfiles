@@ -9,6 +9,7 @@ local default_keymaps = {
 	{ keys = "<leader>k", func = vim.lsp.buf.hover, desc = "Hover Documentation", has = "hoverProvider" },
 	{ keys = "K", func = vim.lsp.buf.hover, desc = "Hover (alt)", has = "hoverProvider" },
 	{ keys = "gd", func = vim.lsp.buf.definition, desc = "Goto Definition", has = "definitionProvider" },
+  { keys = "<leader>d", func = vim.diagnostic.open_float,  desc = "Show line diagnostics" } ,
 }
 
 local completion = vim.g.completion_mode or "blink" -- or 'native'
