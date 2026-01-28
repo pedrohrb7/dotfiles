@@ -61,7 +61,10 @@ vim.g.autoformat = true
 vim.g.trouble_lualine = true
 
 vim.pack.add({
+  -- theme packages 
 	{ src = "https://github.com/rose-pine/neovim" },
+	{ src = "https://github.com/folke/tokyonight.nvim" },
+
 	{ src = "https://github.com/neovim/nvim-lspconfig" },
 	{ src = "https://github.com/mason-org/mason.nvim" },
 	{ src = "https://github.com/mason-org/mason-lspconfig.nvim" },
@@ -75,15 +78,17 @@ require("mason-lspconfig").setup()
 require("mason-tool-installer").setup({
 	ensure_installed = {
 		"lua_ls",
+    "stylua",
 		"ts_ls",
 		"eslint_d",
 	},
 })
 
-require("rose-pine").setup({
-	styles = {
-		transparency = true,
-	},
-})
+-- require("tokyonight").setup()
+-- require("rose-pine").setup({
+-- 	styles = {
+-- 		transparency = true,
+-- 	},
+-- })
 
-vim.cmd("colorscheme rose-pine")
+vim.cmd("colorscheme tokyonight-night")

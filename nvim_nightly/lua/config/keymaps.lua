@@ -26,12 +26,30 @@ keymap.set("n", "<c-j>", ":wincmd j<CR>", opts) -- "Go to panel below" })
 keymap.set("n", "<c-h>", ":wincmd h<CR>", opts) -- "Go to the left panel" })
 keymap.set("n", "<c-l>", ":wincmd l<CR>", opts) -- "Go to the right panel" })
 
+--  buffer navigation
+keymap.set("n", "<S-l>", ":bnext<CR>", opts) --, { desc = "better way to navigate to next buffer" })
+keymap.set("n", "<S-h>", ":bprev<CR>", opts) --, { desc = "better way to navigate to previous buffer" })
+
+-- Easily split windows
+vim.keymap.set("n", "<leader>wv", ":vsplit<cr>", { desc = "[W]indow Split [V]ertical" })
+vim.keymap.set("n", "<leader>wh", ":split<cr>", { desc = "[W]indow Split [H]orizontal" })
+
+-- Resize window using <ctrl> arrow keys
+keymap.set("n", "<C-Up>", "<cmd>resize +2<cr>", opts)
+keymap.set("n", "<C-Down>", "<cmd>resize -2<cr>", opts)
+keymap.set("n", "<C-Left>", "<cmd>vertical resize -2<cr>", opts)
+keymap.set("n", "<C-Right>", "<cmd>vertical resize +2<cr>", opts)
+
 -- Stay in indent mode
 keymap.set("v", "<", "<gv", opts) -- "Indent mode on back" })
 keymap.set("v", ">", ">gv", opts) -- "Indent mode on indenting" })
 
 -- Keep last yanked when pasting
 keymap.set("v", "p", '"_dP', opts)
+
+-- insert new line
+keymap.set("n", "<leader>o", "o<ESC>", opts)
+keymap.set("n", "<leader>O", "O<ESC>", opts)
 
 -- #######################################
 -- Plugins keymaps
