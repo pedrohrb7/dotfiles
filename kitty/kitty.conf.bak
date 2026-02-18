@@ -2479,6 +2479,6 @@ map ctrl+alt+enter launch --cwd=current
 
 
 # BEGIN_KITTY_THEME
-# Rosé Pine Moon
+# Cyberpunk Neon
 include current-theme.conf
 # END_KITTY_THEME
