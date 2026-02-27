@@ -66,14 +66,14 @@ static const char unknown_str[] = "n/a";
  */
 static const struct arg args[] = {
     /* function format          argument */
-    {wifi_essid, "WIFI: %s | ", "wlan0"},
-    {cpu_perc, "CPU: %s% | ", NULL},
-    {battery_perc, "BAT: %s | ", "BAT1"},
-    {datetime, "%s | ", "%F %T"},
-    {vol_perc, "%s | ", NULL},
+    // {wifi_essid, "WIFI: %s | ", "wlan0"},
+    // {cpu_perc, "CPU: %s% | ", NULL},
     // {run_command, "VOL: %s | ",
     // "~/.config/slstatus/components/get_volume.sh"},
+    {datetime, "%s | ", "%F %T"},
+    {vol_perc, "%s | ", NULL},
     {mic_perc, "MIC: %s | ", NULL},
     {run_command, "BRI: %s | ",
      "~/.config/slstatus/components/get_brightness.sh"},
+    {battery_perc, "BAT: %s | ", "BAT1"},
 };

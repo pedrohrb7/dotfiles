@@ -81,7 +81,7 @@ static char dmenumon[2] =
 
 static const char *dmenucmd[] = {"rofi", "-show", "drun", NULL};
 static const char *termcmd[] = {"kitty", NULL};
-static const char *browsercmd[] = {"zen-browser", NULL};
+static const char *browsercmd[] = {"brave", NULL};
 static const char *screenshotcmd[] = {"flameshot", "gui", NULL};
 
 static const char *upbrightness[] = {"brightnessctl", "s", "5%+", NULL};
