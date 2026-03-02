@@ -10,4 +10,4 @@ function run {
 run picom
 # run conky
 run nm-applet
-
+run "nitrogen --restore"

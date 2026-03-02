@@ -17,7 +17,7 @@ local volume_widget = wibox.widget({
 	{
 		id = "icon",
 		widget = wibox.widget.imagebox,
-		image = " ", -- Replace with an actual path to an icon
+		image = "  ", -- Replace with an actual path to an icon
 	},
 	{
 		id = "text",
@@ -28,12 +28,14 @@ local volume_widget = wibox.widget({
 	layout = wibox.layout.fixed.horizontal,
 })
 
+local VOL_CMD = "pamixer --get-volume-human"
+
 -- Update the volume widget
 local update_volume_widget = function()
-	awful.spawn.easy_async_with_shell("pamixer --get-volume-human", function(stdout)
+	awful.spawn.easy_async_with_shell(VOL_CMD, function(stdout)
 		local volume_percentage = stdout
 		if volume_percentage then
-			volume_widget.text.text = " " .. volume_percentage
+			volume_widget.text.text = "  " .. volume_percentage
 			-- Optional: Change icon based on mute status or volume level
 			-- For example, check mute status using `amixer get Master | grep -oP '\\[(on|off)\\]'`
 		end
@@ -43,7 +45,7 @@ end
 -- Initial update and periodic updates
 update_volume_widget()
 awful.widget.watch(
-	"pamixer --get-volume-human",
+	VOL_CMD,
 	1, -- Update every 1 second
 	function()
 		update_volume_widget()

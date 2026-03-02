@@ -17,8 +17,11 @@ local menubar = require("menubar")
 
 local calendar_widget = require("configs.widgets.calendar")
 local volume_widget = require("configs.widgets.audio.volume")
+local mic_widget = require("configs.widgets.audio.mic")
 local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
 local battery_widget = require("configs.widgets.battery")
+local gpu_widget = require("configs.widgets.gpu")
+local cpu_widget = require("configs.widgets.cpu")
 local color = require("configs.color")
 
 beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
@@ -278,7 +281,11 @@ awful.screen.connect_for_each_screen(function(s)
 		{ -- Right widgets
 			layout = wibox.layout.fixed.horizontal(),
 			spacing = 5,
+			widget_container({ widget = mykeyboardlayout }),
+			widget_container({ widget = cpu_widget() }),
+			widget_container({ widget = gpu_widget }),
 			widget_container({ widget = volume_widget }),
+			widget_container({ widget = mic_widget }),
 			widget_container({
 				widget = brightness_widget({
 					type = "icon_and_text",
@@ -298,7 +305,6 @@ awful.screen.connect_for_each_screen(function(s)
 				}),
 			}),
 			widget_container({ widget = mytextclock }),
-			widget_container({ widget = mykeyboardlayout }),
 			wibox.widget.systray(),
 			s.mylayoutbox,
 		},
@@ -321,6 +327,7 @@ kbdcfg.switch = function()
 end
 
 local globalkeys = gears.table.join(
+	-- #############################################
 	-- Brightness widget
 	awful.key({}, "XF86MonBrightnessUp", function()
 		brightness_widget:inc()
@@ -329,7 +336,10 @@ local globalkeys = gears.table.join(
 	awful.key({}, "XF86MonBrightnessDown", function()
 		brightness_widget:dec()
 	end, { description = "decrease brightness", group = "custom" }),
+	--
+	-- #############################################
 
+	-- #############################################
 	-- Volume keys
 	awful.key({}, "XF86AudioLowerVolume", function()
 		awful.util.spawn("pamixer -d 5", false)
@@ -342,6 +352,34 @@ local globalkeys = gears.table.join(
 	awful.key({}, "XF86AudioMute", function()
 		awful.util.spawn("pamixer -t", false)
 	end),
+
+	-- alternative config for 60% keyboard
+	awful.key({ SUPER, "Shift" }, "g", function()
+		awful.util.spawn("pamixer -i 5", false)
+	end),
+	awful.key({ SUPER, "Shift" }, "f", function()
+		awful.util.spawn("pamixer -d 5", false)
+	end),
+	awful.key({ SUPER, "Shift" }, "0", function()
+		awful.util.spawn("pamixer -d 5", false)
+	end),
+	--
+	-- #############################################
+	-- #############################################
+	-- Mic keys
+	awful.key({ SUPER, "Shift" }, "o", function()
+		awful.util.spawn("pamixer --default-source -t", false)
+	end),
+
+	awful.key({ SUPER, "Shift" }, "n", function()
+		awful.util.spawn("pamixer --default-source -i 5", false)
+	end),
+
+	awful.key({ SUPER, "Shift" }, "b", function()
+		awful.util.spawn("pamixer --default-source -d 5", false)
+	end),
+	--
+	-- #############################################
 
 	awful.key({}, "Print", function()
 		awful.spawn("flameshot gui")

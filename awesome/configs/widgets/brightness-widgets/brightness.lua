@@ -70,7 +70,7 @@ local function worker(user_args)
 	brightness_widget.widget = wibox.widget({
 		{
 			{
-				image = "󰃟 ",
+				image = "󰃟  ",
 				resize = false,
 				widget = wibox.widget.imagebox,
 			},
