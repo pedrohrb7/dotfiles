@@ -344,11 +344,9 @@ local globalkeys = gears.table.join(
 	awful.key({}, "XF86AudioLowerVolume", function()
 		awful.util.spawn("pamixer -d 5", false)
 	end),
-
 	awful.key({}, "XF86AudioRaiseVolume", function()
 		awful.util.spawn("pamixer -i 5", false)
 	end),
-
 	awful.key({}, "XF86AudioMute", function()
 		awful.util.spawn("pamixer -t", false)
 	end),
@@ -361,20 +359,19 @@ local globalkeys = gears.table.join(
 		awful.util.spawn("pamixer -d 5", false)
 	end),
 	awful.key({ SUPER, "Shift" }, "0", function()
-		awful.util.spawn("pamixer -d 5", false)
+		awful.util.spawn("pamixer -t", false)
 	end),
 	--
 	-- #############################################
+
 	-- #############################################
 	-- Mic keys
 	awful.key({ SUPER, "Shift" }, "o", function()
 		awful.util.spawn("pamixer --default-source -t", false)
 	end),
-
 	awful.key({ SUPER, "Shift" }, "n", function()
 		awful.util.spawn("pamixer --default-source -i 5", false)
 	end),
-
 	awful.key({ SUPER, "Shift" }, "b", function()
 		awful.util.spawn("pamixer --default-source -d 5", false)
 	end),

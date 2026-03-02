@@ -7,7 +7,10 @@ function run {
   fi
 }
 
-run picom
+# run picom
 # run conky
 run nm-applet
 run "nitrogen --restore"
+run optimus-manager
+run flameshot
+
