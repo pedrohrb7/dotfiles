@@ -9,8 +9,10 @@ function run {
 
 # run picom
 # run conky
+run pasystray
+run blueman-applet
 run nm-applet
-run "nitrogen --restore"
 run optimus-manager
 run flameshot
+run "nitrogen --restore"
 

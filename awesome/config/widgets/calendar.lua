@@ -13,7 +13,7 @@ local beautiful = require("beautiful")
 local wibox = require("wibox")
 local gears = require("gears")
 local naughty = require("naughty")
-local color = require("configs.color")
+local color = require("config.styles.color")
 
 local calendar_widget = {}
 

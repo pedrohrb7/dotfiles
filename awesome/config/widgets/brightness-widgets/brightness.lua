@@ -16,7 +16,7 @@ local gfs = require("gears.filesystem")
 local naughty = require("naughty")
 local beautiful = require("beautiful")
 
-local ICON_DIR = gfs.get_configuration_dir() .. "configs/widgets/brightness_widget/"
+local ICON_DIR = gfs.get_configuration_dir() .. "config/widgets/brightness_widget/"
 local get_brightness_cmd
 local set_brightness_cmd
 local inc_brightness_cmd

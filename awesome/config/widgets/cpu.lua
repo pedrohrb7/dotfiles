@@ -21,7 +21,7 @@ local CMD = [[sh -c "grep '^cpu.' /proc/stat; ps -eo 'pid:10,pcpu:5,pmem:5,comm:
 local CMD_slim = [[grep --max-count=1 '^cpu.' /proc/stat]]
 
 local HOME_DIR = os.getenv("HOME")
-local WIDGET_DIR = HOME_DIR .. "/.config/awesome/configs/widgets/cpu-widget"
+local WIDGET_DIR = HOME_DIR .. "/.config/awesome/config/widgets/cpu"
 
 local cpu_widget = {}
 local cpu_rows = {

@@ -8,7 +8,7 @@ local dpi = xresources.apply_dpi
 
 local gfs = require("gears.filesystem")
 local themes_path = gfs.get_themes_dir()
-local color = require("configs.color")
+local color = require("config.styles.color")
 
 local theme = {}
 

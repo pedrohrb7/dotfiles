@@ -3,7 +3,7 @@
 pcall(require, "luarocks.loader")
 
 -- Error handling
-require("configs.handle-errors")
+require("config.handle-errors")
 
 require("awful.hotkeys_popup.keys")
 require("awful.autofocus")
@@ -15,14 +15,16 @@ local wibox = require("wibox")
 local beautiful = require("beautiful")
 local menubar = require("menubar")
 
-local calendar_widget = require("configs.widgets.calendar")
-local volume_widget = require("configs.widgets.audio.volume")
-local mic_widget = require("configs.widgets.audio.mic")
-local brightness_widget = require("configs.widgets.brightness-widgets.brightness")
-local battery_widget = require("configs.widgets.battery")
-local gpu_widget = require("configs.widgets.gpu")
-local cpu_widget = require("configs.widgets.cpu")
-local color = require("configs.color")
+local calendar_widget = require("config.widgets.calendar")
+local volume_widget = require("config.widgets.audio.volume")
+local mic_widget = require("config.widgets.audio.mic")
+local brightness_widget = require("config.widgets.brightness-widgets.brightness")
+local battery_widget = require("config.widgets.battery")
+local gpu_widget = require("config.widgets.gpu")
+local cpu_widget = require("config.widgets.cpu")
+local color = require("config.styles.color")
+
+-- beautiful.init("config.theme.default.theme")
 
 beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 

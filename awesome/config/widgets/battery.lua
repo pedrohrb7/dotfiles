@@ -19,7 +19,7 @@ local dpi = require("beautiful").xresources.apply_dpi
 -- Battery 0: Discharging, 75%, 01:51:38 remaining
 -- Battery 0: Charging, 53%, 00:57:43 until charged
 
-local WIDGET_DIR = "~/dotfiles/awesome/configs/widgets"
+local WIDGET_DIR = "~/dotfiles/awesome/config/widgets"
 
 local battery_widget = {}
 
@@ -27,7 +27,7 @@ local function worker(user_args)
 	local args = user_args or {}
 
 	local font = args.font or "FiraCode Nerd Font 10"
-	local path_to_icons = args.path_to_icons or os.getenv("HOME") .. "/dotfiles/awesome/icons/battery/"
+	local path_to_icons = args.path_to_icons or os.getenv("HOME") .. "/dotfiles/awesome/config/icons/battery/"
 	local show_current_level = args.show_current_level or false
 	local margin_left = args.margin_left or 0
 	local margin_right = args.margin_right or 0
