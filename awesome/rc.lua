@@ -14,6 +14,7 @@ local awful = require("awful")
 local wibox = require("wibox")
 local beautiful = require("beautiful")
 local menubar = require("menubar")
+local naughty = require("naughty")
 
 local calendar_widget = require("config.widgets.calendar")
 local volume_widget = require("config.widgets.audio.volume")
@@ -25,6 +26,51 @@ local cpu_widget = require("config.widgets.cpu")
 local color = require("config.styles.color")
 
 -- beautiful.init("config.theme.default.theme")
+local function focus_window_for_notification(pid, appname)
+	for _, c in ipairs(client.get()) do
+		-- no all apps send pid with the notification (e.g., chrome)
+		-- or might send the notification from a different pid
+		if pid then
+			if c.pid == pid then
+				c:jump_to()
+				return
+			end
+		-- this is extremely sketch and might match incorrect clients,
+		-- or the wrong window for clients with multiple windows
+		elseif c.name:match(appname) then
+			c:jump_to()
+			return
+		end
+	end
+end
+
+naughty.config.notify_callback = function(args)
+	-- wrap any action callbacks if the notification has actions
+	if args.actions then
+		local actions = {}
+		for action, callback in pairs(args.actions) do
+			actions[action] = function(...)
+				local pid = args.freedesktop_hints["sender-pid"]
+				focus_window_for_notification(pid, args.appname)
+				callback(...)
+			end
+		end
+		args.actions = actions
+	end
+	-- wrap run function
+	local run = args.run
+	args.run = function(notification)
+		local pid = args.freedesktop_hints["sender-pid"]
+		focus_window_for_notification(pid, args.appname)
+		-- if user provided run function or there is a default action, run it
+		if run then
+			run(notification)
+		else
+			notification.die(naughty.notificationClosedReason.dismissedByUser)
+		end
+	end
+	return args
+end
 
 beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 
@@ -339,6 +385,13 @@ local globalkeys = gears.table.join(
 		brightness_widget:dec()
 	end, { description = "decrease brightness", group = "custom" }),
 	--
+	-- Alternatively, keybindings to control brightness:
+	awful.key({ SUPER, "Shift" }, "g", function()
+		brightness_widget:inc()
+	end),
+	awful.key({ SUPER, "Shift" }, "f", function()
+		brightness_widget:dec()
+	end),
 	-- #############################################
 
 	-- #############################################
@@ -350,17 +403,6 @@ local globalkeys = gears.table.join(
 		awful.util.spawn("pamixer -i 5", false)
 	end),
 	awful.key({}, "XF86AudioMute", function()
-		awful.util.spawn("pamixer -t", false)
-	end),
-
-	-- alternative config for 60% keyboard
-	awful.key({ SUPER, "Shift" }, "g", function()
-		awful.util.spawn("pamixer -i 5", false)
-	end),
-	awful.key({ SUPER, "Shift" }, "f", function()
-		awful.util.spawn("pamixer -d 5", false)
-	end),
-	awful.key({ SUPER, "Shift" }, "0", function()
 		awful.util.spawn("pamixer -t", false)
 	end),
 	--
@@ -516,10 +558,6 @@ local clientkeys = gears.table.join(
 		c:move_to_screen()
 	end, { description = "move to screen", group = "client" }),
 
-	awful.key({ SUPER }, "t", function(c)
-		c.ontop = not c.ontop
-	end, { description = "toggle keep on top", group = "client" }),
-
 	awful.key({ SUPER }, "n", function(c)
 		-- The client currently has the input focus, so it cannot be
 		-- minimized, since minimized clients can't have the focus.
@@ -641,10 +679,8 @@ awful.rules.rules = {
 				"Kruler",
 				"MessageWin", -- kalarm.
 				"Sxiv",
-				"Tor Browser", -- Needs a fixed window size to avoid fingerprinting by screen size.
 				"Wpa_gui",
-				"veromix",
-				"xtightvncviewer",
+				"pavucontrol",
 			},
 
 			-- Note that the name property shown in xprop might be set slightly after creation of the client

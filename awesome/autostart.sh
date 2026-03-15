@@ -14,5 +14,6 @@ run blueman-applet
 run nm-applet
 run optimus-manager
 run flameshot
+run /usr/bin/lxpolkit
 run "nitrogen --restore"
 
