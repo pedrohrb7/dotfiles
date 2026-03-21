@@ -76,7 +76,7 @@ beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 
 local SUPER = "Mod4"
 local ALT = "Mod1"
-local terminal = "kitty"
+local terminal = "terminator"
 local fileManager = "nautilus"
 local browser = "brave"
 
@@ -191,9 +191,9 @@ awful.screen.connect_for_each_screen(function(s)
 	-- Wallpaper
 	set_wallpaper(s)
 
-	-- local tagNames = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
-	local tagPacman = { " 󰮯 ", "A", "W", "E", "S", "O", "M", "E", " 󰊠 " }
-	awful.tag(tagPacman, s, awful.layout.layouts[1])
+	local tags = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
+	-- local tags = { " 󰮯 ", "A", "W", "E", "S", "O", "M", "E", " 󰊠 " }
+	awful.tag(tags, s, awful.layout.layouts[1])
 
 	-- Create a promptbox for each screen
 	s.mypromptbox = awful.widget.prompt({
@@ -469,6 +469,12 @@ local globalkeys = gears.table.join(
 		awful.spawn(fileManager)
 	end, { description = "open nautilus", group = "launcher" }),
 
+	-- Menubar
+	awful.key({ SUPER }, "p", function()
+		-- menubar.show()
+		awful.spawn("rofi -show drun")
+	end, { description = "show the menubar", group = "launcher" }),
+
 	awful.key({ SUPER, "Control" }, "r", awesome.restart, { description = "reload awesome", group = "awesome" }),
 
 	awful.key({ SUPER, "Shift" }, "q", awesome.quit, { description = "quit awesome", group = "awesome" }),
@@ -525,12 +531,7 @@ local globalkeys = gears.table.join(
 			exe_callback = awful.util.eval,
 			history_path = awful.util.get_cache_dir() .. "/history_eval",
 		})
-	end, { description = "lua execute prompt", group = "awesome" }),
-
-	-- Menubar
-	awful.key({ SUPER }, "p", function()
-		menubar.show()
-	end, { description = "show the menubar", group = "launcher" })
+	end, { description = "lua execute prompt", group = "awesome" })
 )
 
 local clientkeys = gears.table.join(
