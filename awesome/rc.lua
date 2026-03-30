@@ -76,7 +76,7 @@ beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 
 local SUPER = "Mod4"
 local ALT = "Mod1"
-local terminal = "terminator"
+local terminal = "alacritty"
 local fileManager = "nautilus"
 local browser = "brave"
 
