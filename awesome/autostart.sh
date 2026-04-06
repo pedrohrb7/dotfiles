@@ -7,13 +7,11 @@ function run {
   fi
 }
 
-# run picom
-# run conky
-run pasystray
-run blueman-applet
-run nm-applet
-run optimus-manager
-run flameshot
-run /usr/bin/lxpolkit
-run "nitrogen --restore"
+run "pipewire"
+run "wireplumber"
+run "blueman-applet"
+run "nm-applet"
+run "flameshot"
+run "dunst"
+run "pasystray"
 

@@ -130,9 +130,6 @@ theme.awesome_icon = theme_assets.awesome_icon(theme.menu_height, theme.bg_focus
 -- Define the icon theme for application icons. If not set then the icons
 -- from /usr/share/icons and /usr/share/icons/hicolor will be used.
 theme.icon_theme = nil
--- theme.wallpaper = themes_path .. "default/background.png"
-theme.wallpaper = "/mnt/data/lotofwallpapers/tokyo-night24.png"
--- theme.wallpaper = "/mnt/data/lotofwallpapers/manhattan.jpg"
 
 return theme
 

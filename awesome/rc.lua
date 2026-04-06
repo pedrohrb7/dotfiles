@@ -23,62 +23,30 @@ local brightness_widget = require("config.widgets.brightness-widgets.brightness"
 local battery_widget = require("config.widgets.battery")
 local gpu_widget = require("config.widgets.gpu")
 local cpu_widget = require("config.widgets.cpu")
+local mem_widget = require("config.widgets.mem")
 local color = require("config.styles.color")
 
--- beautiful.init("config.theme.default.theme")
-local function focus_window_for_notification(pid, appname)
-	for _, c in ipairs(client.get()) do
-		-- no all apps send pid with the notification (e.g., chrome)
-		-- or might send the notification from a different pid
-		if pid then
-			if c.pid == pid then
-				c:jump_to()
-				return
-			end
-		-- this is extremely sketch and might match incorrect clients,
-		-- or the wrong window for clients with multiple windows
-		elseif c.name:match(appname) then
-			c:jump_to()
-			return
-		end
-	end
-end
+local dpi = require("beautiful.xresources").apply_dpi
 
-naughty.config.notify_callback = function(args)
-	-- wrap any action callbacks if the notification has actions
-	if args.actions then
-		local actions = {}
-		for action, callback in pairs(args.actions) do
-			actions[action] = function(...)
-				local pid = args.freedesktop_hints["sender-pid"]
-				focus_window_for_notification(pid, args.appname)
-				callback(...)
-			end
-		end
-		args.actions = actions
-	end
-	-- wrap run function
-	local run = args.run
-	args.run = function(notification)
-		local pid = args.freedesktop_hints["sender-pid"]
-		focus_window_for_notification(pid, args.appname)
-		-- if user provided run function or there is a default action, run it
-		if run then
-			run(notification)
-		else
-			notification.die(naughty.notificationClosedReason.dismissedByUser)
-		end
-	end
-	return args
-end
+-- Notification configuration
+naughty.config.defaults.border_width = dpi(3)
+naughty.config.spacing = dpi(8)
+naughty.config.padding = dpi(16)
+naughty.config.defaults.margin = dpi(8)
+naughty.config.defaults.timeout = 5
+naughty.config.presets = {
+	normal = { timeout = 4, fg = color.red, bg = color.border_normal, border_color = color.green },
+	low = { timeout = 2, fg = color.white, bg = color.magenta, border_color = color.green },
+	critical = { border_width = 1, border_color = color.red, fg = color.border_normal, bg = color.red, timeout = 0 },
+}
 
 beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 
 local SUPER = "Mod4"
 local ALT = "Mod1"
 local terminal = "alacritty"
-local fileManager = "nautilus"
-local browser = "brave"
+local fileManager = "thunar"
+local browser = "vivaldi-stable"
 
 beautiful.systray_icon_spacing = 8 -- Default SUPER.
 
@@ -173,19 +141,11 @@ local tasklist_buttons = gears.table.join(
 )
 
 local function set_wallpaper(s)
-	-- Wallpaper
-	if beautiful.wallpaper then
-		local wallpaper = beautiful.wallpaper
-		-- If wallpaper is a function, call it with the screen
-		if type(wallpaper) == "function" then
-			wallpaper = wallpaper(s)
-		end
-		gears.wallpaper.maximized(wallpaper, s, true)
-	end
+	awful.spawn.with_shell("~/.fehbg", false)
 end
 
 -- Re-set wallpaper when a screen's geometry changes (e.g. different resolution)
--- awful.screen.connect_signal("property::geometry", set_wallpaper)
+screen.connect_signal("property::geometry", set_wallpaper)
 
 awful.screen.connect_for_each_screen(function(s)
 	-- Wallpaper
@@ -331,6 +291,7 @@ awful.screen.connect_for_each_screen(function(s)
 			spacing = 5,
 			widget_container({ widget = mykeyboardlayout }),
 			widget_container({ widget = cpu_widget() }),
+			widget_container({ widget = mem_widget() }),
 			widget_container({ widget = gpu_widget }),
 			widget_container({ widget = volume_widget }),
 			widget_container({ widget = mic_widget }),
@@ -583,8 +544,39 @@ local clientkeys = gears.table.join(
 	-- ###############################
 	awful.key({ ALT }, "space", function()
 		kbdcfg.switch()
-	end, { description = "change keyboard laytout", group = "custom" })
+	end, { description = "change keyboard laytout", group = "custom" }),
 	-- ###############################
+
+	-- ###############################
+	-- Send a test notification
+	-- info at https://awesomewm.org/doc/api/libraries/naughty.html#notify
+	awful.key({ SUPER, "Shift" }, "t", function()
+		awful.spawn.with_shell([[
+        action=$(dunstify "Test Title" "Test Notification" -A "change,Change" -u normal -b)
+        if [ "$action" = "change" ]; then
+            dunstify "CHANGE" "MUDA"
+        fi
+    ]])
+		-- naughty.notify({
+		-- 	title = "Test Title",
+		-- 	text = "Test Notification",
+		-- 	preset = naughty.config.presets.normal,
+		-- 	-- actions = {
+		-- 	-- change = awful.spawn.with_shell('dunstify "CHANGE" "MUDA"'),
+		-- 	-- },
+		--
+		-- 	timeout = 0,
+		-- 	actions = {
+		-- 		change = naughty.action("Change"),
+		-- 	},
+		-- 	callback = function(notification, action)
+		-- 		if action and action.name == "Change" then
+		-- 			awful.spawn.with_shell('dunstify "CHANGE" "MUDA"')
+		-- 			awful.spawn.with_shell("NOTIFY :: " .. notification)
+		-- 		end
+		-- 	end,
+		-- })
+	end, { description = "send test notification", group = "awesome" })
 )
 
 -- Bind all key numbers to tags.
@@ -773,7 +765,7 @@ client.connect_signal("unfocus", function(c)
 end)
 
 --Gaps
-beautiful.useless_gap = 2
+beautiful.useless_gap = 4
 
 -- Autostart applications
 awful.spawn.with_shell("~/.config/awesome/autostart.sh")
