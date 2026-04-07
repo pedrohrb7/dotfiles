@@ -8,10 +8,5 @@ function run {
 }
 
 run "pipewire"
-run "wireplumber"
-run "blueman-applet"
 run "nm-applet"
-run "flameshot"
-run "dunst"
 run "pasystray"
-

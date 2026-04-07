@@ -1,4 +1,2 @@
-lxsession &
-/usr/bin/lxpolkit &
-/home/pedro/dotfiles-config/autostart.sh &
+/home/phrb/.config/awesome/autostart.sh &
 exec awesome

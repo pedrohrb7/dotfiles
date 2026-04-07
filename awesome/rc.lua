@@ -768,4 +768,4 @@ end)
 beautiful.useless_gap = 4
 
 -- Autostart applications
-awful.spawn.with_shell("~/.config/awesome/autostart.sh")
+-- awful.spawn.with_shell("~/.config/awesome/autostart.sh")
