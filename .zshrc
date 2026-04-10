@@ -11,7 +11,7 @@ export PATH="$ASDF_DATA_DIR/shims:$PATH"
 export FZF_DEFAULT_OPTS='--ansi --preview="bat --style=numbers --color=always {}" --preview-window=right:50%:wrap'
 source <(fzf --zsh)
 
-export EDITOR='/usr/bin/nvim'
+export EDITOR='nvim'
 export XDG_CONFIG_HOME=$HOME/.config
 export XDG_CUSTOM_DOTFILES=$HOME/dotfiles
 export NVM_SYMLINK_CURRENT=true
@@ -82,6 +82,8 @@ alias rm='rm -I --preserve-root=all'
 alias mv='mv -i'
 alias errors="journalctl -b -p err | less"
 
+alias zlj='zellij'
+
 alias projects='cd /mnt/data/projects'
 alias ldocker='lazydocker'
 alias lgit='lazygit'
@@ -89,7 +91,7 @@ alias ldkr='lazydocker'
 
 # end of personal settings and shortcuts
 
-alias startdb="/mnt/data/projects/databases/docker_databases.sh"
+alias startdb="/mnt/data/projects/server/databases/docker_databases.sh"
 
 # sonar configs
 export SONAR_URL="http://127.0.0.1:9003"
