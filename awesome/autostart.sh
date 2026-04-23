@@ -7,6 +7,4 @@ function run {
   fi
 }
 
-run "pipewire"
 run "nm-applet"
-run "pasystray"
