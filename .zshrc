@@ -1,3 +1,9 @@
+# Oh my zshell config
+export ZSH="$HOME/.oh-my-zsh"
+ZSH_THEME="robbyrussell"
+plugins=(git sdk zsh-autosuggestions zsh-syntax-highlighting)
+source $ZSH/oh-my-zsh.sh
+
 # If you come from bash you might have to change your $PATH.
 export PATH=$HOME/bin:/usr/local/bin:$PATH
 export PATH=$HOME/.local/bin:$PATH
@@ -8,30 +14,12 @@ export EDITOR='nvim'
 export XDG_CONFIG_HOME=$HOME/.config
 export XDG_CUSTOM_DOTFILES=$HOME/dotfiles
 
-export NVM_SYMLINK_CURRENT=true
-
-export ZSH=$HOME/.oh-my-zsh
-
-export FZF_DEFAULT_OPTS="--color=fg:${fg},bg:${bg},hl:${purple},fg+:${fg},bg+:${bg_highlight},hl+:${purple},info:${blue},prompt:${cyan},pointer:${cyan},marker:${cyan},spinner:${cyan},header:${cyan}"
-
-# -- Use fd instead of fzf --
-export FZF_DEFAULT_COMMAND="fd --hidden --strip-cwd-prefix --exclude .git"
-export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
-export FZF_ALT_C_COMMAND="fd --type=d --hidden --strip-cwd-prefix --exclude .git"
-
-export FZF_CTRL_T_OPTS="--preview 'bat -n --color=always --line-range :500 {}'"
-export FZF_ALT_C_OPTS="--preview 'eza --tree --color=always {} | head -200'"
-
 # Android ENV
 export ANDROID_HOME=$HOME/Android/Sdk
 export PATH=$PATH:$ANDROID_HOME/emulator
 export PATH=$PATH:$ANDROID_HOME/tools
 export PATH=$PATH:$ANDROID_HOME/tools/bin
 export PATH=$PATH:$ANDROID_HOME/platform-tools
-
-. /etc/profile.d/fzf.zsh
-export FZF_DEFAULT_OPTS='--ansi --preview="bat --style=numbers --color=always {}" --preview-window=right:50%:wrap'
-source <(fzf --zsh)
 
 # source more
 source ~/private.zsh
@@ -50,14 +38,6 @@ purple="#B388FF"
 blue="#06BCE4"
 cyan="#2CF9ED"
 
-export ZSH_THEME="robbyrussell"
-
-# source ~/.config/fzf-git.sh/fzf-git.sh
-# . "$HOME/.cargo/env"
-
-plugins=(git sdk zsh-autosuggestions zsh-syntax-highlighting)
-
-# omz
 alias zshrestart="source ~/.zshrc"
 alias zshconfig="nvim ~/.zshrc"
 alias ohmyzsh="nvim ~/.oh-my-zsh"
@@ -99,6 +79,13 @@ alias projects='cd /mnt/data/projects'
 alias ldocker='lazydocker'
 alias lgit='lazygit'
 
+# ----- Docker ------
+
+alias vdockerup="sudo ln -s /etc/sv/docker /var/service"
+alias vdockerdown="sudo rm /var/service/docker"
+
+#
+
 # ----- Bat (better cat) -----
 alias cat="bat"
 
@@ -108,31 +95,6 @@ alias ls="eza --color=always --long --git --icons=always"
 # end of personal settings and shortcuts
 
 alias startdb="/mnt/data/projects/server/databases/docker_databases.sh"
-
-# sonar configs
-export SONAR_URL="http://127.0.0.1:9003"
-
-alias sonarltsc="docker run -d -m4g --name sonarqubeLTScommunity -p 9003:9000 -p 9092:9092 sonarqube:lts-community"
-alias sonar98c="docker run -d -m4g --name sonarqube98community -p 9003:9000 -p 9092:9092 sonarqube:9.8.0-community"
-alias sonar10c="docker run --name sonarqube10community -p 9003:9000 -p 9092:9092 sonarqube:10.1-community"
-
-alias sonaru="docker start sonarqube10community"
-alias sonarr='docker run --rm -ti -v ${PWD}:/usr/src --link sonarqube10community sonarsource/sonar-scanner-cli sonar-scanner -D"sonar.sources=." -D"sonar.host.url=$SONAR_URL" -D"sonar.token=$SONAR_TOKEN" -D"sonar.projectVersion=$(git rev-parse --symbolic-full-name --abbrev-ref HEAD)" -X'
-
-# General docker shortcuts
-alias ddown='docker-compose down'
-alias dupd='docker-compose up -d'
-alias dup='docker-compose up'
-alias dklist='docker ps -a --format "{{.ID}} - {{.Names}} - {{.Status}}"'
-
-alias dockerdown="sudo systemctl stop docker.service docker.socket"
-alias dockerup="sudo systemctl start docker.service docker.socket"
-alias dockerstatus="sudo systemctl status docker.service docker.socket"
-
-alias shutupdocker='docker stop $(docker ps -aq) -t0'
-alias startupdocker='docker start $(docker ps -aq)'
-alias dkkill='docker rm -f $(docker ps -aq)'
-# End of docker shortcuts
 
 export NVM_DIR="$HOME/.config/nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
