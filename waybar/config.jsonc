@@ -1,0 +1,271 @@
+// -*- mode: jsonc -*-
+{
+  "layer": "top", // Waybar at top layer
+  "spacing": 8,
+  "reload_style_on_change": true,
+  "modules-left": [
+    "hyprland/workspaces"
+  ],
+  "modules-center": [],
+  "modules-right": [
+    // "network",
+    // "idle_inhibitor",
+    // "mpd",
+    // "power-profiles-daemon",
+    // "temperature",
+    // "keyboard-state",
+    // "sway/language",
+    // "custom/power"
+    "tray",
+    "pulseaudio",
+    // "cpu",
+    // "memory",
+    "backlight",
+    "clock",
+    "clock#date",
+    "battery",
+    "battery#bat2"
+  ],
+  "idle_inhibitor": {
+    "format": "{icon}",
+    "format-icons": {
+      "activated": " ",
+      "deactivated": " "
+    }
+  },
+  "tray": {
+    // "icon-size": 21,
+    "spacing": 10,
+    "icons": {
+      "blueman": "bluetooth"
+      //   "TelegramDesktop": "$HOME/.local/share/icons/hicolor/16x16/apps/telegram.png"
+    }
+  },
+  "clock": {
+    "timezone": "America/Sao_Paulo",
+    "format": "{:%H:%M:%S}",
+    "interval": 1,
+    "tooltip": false
+  },
+  "clock#date": {
+    // "interval":
+    "format": "󰸗 {:%d-%m-%Y}",
+    "timezone": "America/Sao_Paulo",
+    // "timezones":
+    // "locale":
+    "min-length": 8,
+    // "max-length": 8,
+    // "rotate":
+    // "on-click":
+    // "on-click": "gnome-calendar",
+    // "on-click-middle":
+    // "on-click-right":
+    // "on-scroll-up":
+    // "on-scroll-down":
+    // "smooth-scrolling-threshold":
+    // "tooltip":
+    "tooltip-format": "{calendar}",
+    // "menu":
+    // "menu-file":
+    // "menu-actions":
+    // "expand":
+    "calendar": {
+      "mode": "year",
+      "mode-mon-col": 6,
+      // "week-pos":
+      // "on-scroll":
+      "format": {
+        "months": "<span alpha='100%'><b>{}</b></span>",
+        "days": "<span alpha='90%'>{}</span>",
+        // "weeks":
+        "weekdays": "<span alpha='80%'><i>{}</i></span>",
+        "today": "<span alpha='100%'><b><u>{}</u></b></span>"
+      }
+    },
+    "actions": {
+      "on-click": "mode"
+      // "on-scroll-up":
+      // "on-scroll-down":
+    }
+  },
+  "cpu": {
+    // "format": "{usage}% ",
+    "tooltip": false,
+    // "format": "󰍛 {usage}%",
+    "format": "CPU|{usage}%",
+    "format-warning": "󰀨 {usage}%",
+    "format-critical": "󰀨 {usage}%"
+  },
+  "memory": {
+    // "format": "{}% ",
+    // "format": " 󰘚 |{used:0.1f}GB",
+    // "format-warning": "󰀧 {percentage}%",
+    // "format-critical": "󰀧 {percentage}%",
+    "format": " 󰘚 | {used:0.1f} GB",
+    "interval": 3,
+    "states": {
+      "warning": 75,
+      "critical": 90
+    }
+  },
+  "temperature": {
+    // "thermal-zone": 2,
+    // "hwmon-path": "/sys/class/hwmon/hwmon2/temp1_input",
+    "critical-threshold": 80,
+    // "format-critical": "{temperatureC}°C {icon}",
+    "format": "{temperatureC}°C {icon}",
+    "format-icons": [
+      "",
+      "",
+      ""
+    ]
+  },
+  "backlight": {
+    // "device": "acpi_video1",
+    // "format": "BKL {percent}%",
+    "format": "{icon}|{percent}%",
+    "format-icons": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "battery": {
+    "states": {
+      // "good": 95,
+      "warning": 30,
+      "critical": 15
+    },
+    "format": "BAT|{capacity}%",
+    "format-full": "FULL",
+    "format-charging": "{capacity}%  ",
+    "format-plugged": "{capacity}%  ",
+    // "format": "{capacity}% {icon}",
+    // "format-full": "{capacity}% {icon}",
+    // "format-charging": "{capacity}%  ",
+    // "format-plugged": "{capacity}%  ",
+    // "format-alt": "{time} {icon}",
+    // "format-good": "", // An empty format will hide the module
+    // "format-full": "",
+    "format-icons": [
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "battery#bat2": {
+    "bat": "BAT2"
+  },
+  "power-profiles-daemon": {
+    "format": "{icon}",
+    "tooltip-format": "Power profile: {profile}\nDriver: {driver}",
+    "tooltip": true,
+    "format-icons": {
+      "default": " ",
+      "performance": " ",
+      "balanced": " ",
+      "power-saver": " "
+    }
+  },
+  "network": {
+    // "interface": "wlp2*", // (Optional) To force the use of this interface
+    "format-wifi": "{essid} ({signalStrength}%)", //  
+    "format-ethernet": "{ipaddr}/{cidr} ",
+    "tooltip-format": "{ifname} via {gwaddr}",
+    "format-linked": "{ifname} (No IP)",
+    "format-disconnected": "Disconnected",
+    "format-alt": "{ifname}: {ipaddr}/{cidr}"
+  },
+  "pulseaudio": {
+    // "scroll-step": 1, // %, can be a float
+    // "format": "{volume}% {icon} {format_source}",
+    "format": "OUT {volume}% || {format_source}",
+    "format-bluetooth": "{volume}% {icon} {format_source}",
+    "format-bluetooth-muted": "󰗿  {format_source}",
+    "format-muted": "  {format_source}",
+    // "format-source": "{volume}% ",
+    "format-source": "INP {volume}%",
+    "format-source-muted": " ",
+    "format-icons": {
+      "headphone": " ",
+      "hands-free": " ",
+      "headset": "󰗾 ",
+      "phone": " ",
+      "portable": " ",
+      "default": [
+        " ",
+        " ",
+        "  "
+      ]
+    },
+    "on-click": "pavucontrol"
+  },
+  "custom/media": {
+    "format": "{icon} {text}",
+    "return-type": "json",
+    "max-length": 40,
+    "format-icons": {
+      "spotify": "",
+      "default": "🎜"
+    },
+    "escape": true,
+    "exec": "$HOME/.config/waybar/mediaplayer.py 2> /dev/null" // Script in resources folder
+    // "exec": "$HOME/.config/waybar/mediaplayer.py --player spotify 2> /dev/null" // Filter player based on name
+  },
+  "custom/power": {
+    "format": "⏻ ",
+    "tooltip": false,
+    "menu": "on-click",
+    "menu-file": "$HOME/.config/waybar/power_menu.xml", // Menu file in resources folder
+    "menu-actions": {
+      "shutdown": "shutdown",
+      "reboot": "reboot",
+      "suspend": "systemctl suspend",
+      "hibernate": "systemctl hibernate"
+    }
+  },
+  "hyprland/workspaces": {
+    // "active-only":
+    // "hide-active":
+    // "all-outputs":
+    "format": "{icon}",
+    "format-icons": {
+      "active": "",
+      "default": ""
+    },
+    "persistent-workspaces": {
+      "*": 6
+    },
+    // "persistent-only":
+    // "show-special":
+    // "special-visible-only":
+    // "sort-by":
+    // "window-rewrite":
+    // "window-rewrite-default":
+    // "format-window-separator":
+    "workspace-taskbar": {
+      // "enable":
+      // "update-active-window":
+      // "format":
+      // "icon-size":
+      // "icon-theme":
+      // "orientation":
+      // "ignore-list":
+      // "on-click-window":
+    },
+    // "move-to-monitor":
+    // "ignore-workspaces":
+    "on-scroll-up": "hyprctl dispatch workspace +1",
+    "on-scroll-down": "hyprctl dispatch workspace -1",
+    // "expand":
+    "cursor": true
+  }
+}
