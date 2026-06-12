@@ -21,9 +21,9 @@ local volume_widget = require("config.widgets.audio.volume")
 local mic_widget = require("config.widgets.audio.mic")
 local brightness_widget = require("config.widgets.brightness-widgets.brightness")
 local battery_widget = require("config.widgets.battery")
-local gpu_widget = require("config.widgets.gpu")
+-- local gpu_widget = require("config.widgets.gpu")
 local cpu_widget = require("config.widgets.cpu")
-local mem_widget = require("config.widgets.mem")
+-- local mem_widget = require("config.widgets.mem")
 local color = require("config.styles.color")
 
 local dpi = require("beautiful.xresources").apply_dpi
@@ -44,7 +44,7 @@ beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 
 local SUPER = "Mod4"
 local ALT = "Mod1"
-local terminal = "terminator"
+local terminal = "kitty"
 local fileManager = "nautilus"
 local browser = "vivaldi-stable"
 
@@ -203,45 +203,45 @@ awful.screen.connect_for_each_screen(function(s)
 		},
 		layout = {
 			spacing = 10,
-			spacing_widget = {
-				{
-					forced_width = 5,
-					shape = gears.shape.circle,
-					widget = wibox.widget.separator,
-				},
-				valign = "center",
-				halign = "center",
-				widget = wibox.container.place,
-			},
-			layout = wibox.layout.flex.horizontal,
+			-- spacing_widget = {
+			-- 	{
+			-- 		forced_width = 5,
+			-- 		shape = gears.shape.circle,
+			-- 		widget = wibox.widget.separator,
+			-- 	},
+			-- 	valign = "center",
+			-- 	halign = "center",
+			-- 	widget = wibox.container.place,
+			-- },
+			-- layout = wibox.layout.flex.horizontal,
 		},
-		widget_template = {
-			{
-				{
-					{
-						{
-							id = "icon_role",
-							widget = wibox.widget.imagebox,
-						},
-						margins = 2,
-						widget = wibox.container.margin,
-					},
-					{
-						id = "text_role",
-						widget = wibox.widget.textbox,
-					},
-					layout = wibox.layout.fixed.horizontal,
-				},
-				left = 50,
-				right = 10,
-				widget = wibox.container.margin,
-			},
-			id = "background_role",
-			align = "center",
-			margin_right = 20,
-			right = 20,
-			widget = wibox.container.background,
-		},
+		-- widget_template = {
+		-- 	{
+		-- 		{
+		-- 			{
+		-- 				{
+		-- 					id = "icon_role",
+		-- 					widget = wibox.widget.imagebox,
+		-- 				},
+		-- 				margins = 2,
+		-- 				widget = wibox.container.margin,
+		-- 			},
+		-- 			{
+		-- 				id = "text_role",
+		-- 				widget = wibox.widget.textbox,
+		-- 			},
+		-- 			layout = wibox.layout.fixed.horizontal,
+		-- 		},
+		-- 		left = 50,
+		-- 		right = 10,
+		-- 		widget = wibox.container.margin,
+		-- 	},
+		-- 	id = "background_role",
+		-- 	align = "center",
+		-- 	margin_right = 20,
+		-- 	right = 20,
+		-- 	widget = wibox.container.background,
+		-- },
 	})
 
 	-- Create the wibox
@@ -280,8 +280,10 @@ awful.screen.connect_for_each_screen(function(s)
 			spacing = 5,
 			{ -- Left widgets
 				layout = wibox.layout.fixed.horizontal,
+				s.mylayoutbox,
 				mylauncher,
 				s.mytaglist,
+				widget_container({ widget = mykeyboardlayout }),
 				s.mypromptbox,
 			},
 		},
@@ -289,10 +291,9 @@ awful.screen.connect_for_each_screen(function(s)
 		{ -- Right widgets
 			layout = wibox.layout.fixed.horizontal(),
 			spacing = 5,
-			widget_container({ widget = mykeyboardlayout }),
 			widget_container({ widget = cpu_widget() }),
-			widget_container({ widget = mem_widget() }),
-			widget_container({ widget = gpu_widget }),
+			-- widget_container({ widget = mem_widget() }),
+			-- widget_container({ widget = gpu_widget }),
 			widget_container({ widget = volume_widget }),
 			widget_container({ widget = mic_widget }),
 			widget_container({
@@ -315,7 +316,6 @@ awful.screen.connect_for_each_screen(function(s)
 			}),
 			widget_container({ widget = mytextclock }),
 			wibox.widget.systray(),
-			s.mylayoutbox,
 		},
 	})
 end)
@@ -768,4 +768,4 @@ end)
 beautiful.useless_gap = 4
 
 -- Autostart applications
--- awful.spawn.with_shell("~/.config/awesome/autostart.sh")
+awful.spawn.with_shell("~/.config/awesome/autostart.sh")

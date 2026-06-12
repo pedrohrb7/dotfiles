@@ -8,3 +8,5 @@ function run {
 }
 
 run "nm-applet"
+run "blueman-applet"
+run "pasystray"
