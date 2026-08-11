@@ -4,10 +4,10 @@
 
 ## Packages
 
-ArchLinux base system
+VoidLinux base system
 
 - Awesome WM
-- Brave
+- Vivaldi
 - bat (a better cat)
 - DWM
 - eza (a better ls)
@@ -16,13 +16,13 @@ ArchLinux base system
 - Hyprland
 - i3
 - kitty
+- Terminator
 - lazygit
-- lazydocker (aur)
+- lazydocker 
 - neovim (smoothvim)
 - ripgrep (this allows find by word on nvim)
 - xclip (this package make system clipboard and nvim the same)
 - xorg-xclipboard
 - xorg-xbacklight
-- yay
 - yazi
 - zsh

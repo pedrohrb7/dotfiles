@@ -14,16 +14,21 @@ local theme = {}
 
 theme.font = "FiraCode Nerd Font 11"
 
-theme.bg_normal = color.transparent
+theme.bg_normal = color.background_dark
 theme.bg_focus = color.magenta
 theme.bg_urgent = color.red
 theme.bg_minimize = color.white
 theme.bg_systray = theme.bg_normal
 
-theme.fg_normal = color.black
+theme.fg_normal = color.gray_lighter
 theme.fg_focus = color.white
 theme.fg_urgent = color.white
 theme.fg_minimize = color.white
+
+theme.color_red = color.red
+theme.color_green = color.green
+theme.color_white = color.white
+theme.color_bg_alt = color.background_lighter
 
 theme.useless_gap = dpi(4)
 theme.border_width = dpi(1)

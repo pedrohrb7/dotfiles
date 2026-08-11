@@ -1,5 +1,5 @@
 -- If LuaRocks is installed, make sure that packages installed through it are
--- found (e.g. lgi). If LuaRocks is not installed,mykeyboardlayout do nothing.
+-- found (e.g. lgi). If LuaRocks is not installed, do nothing.
 pcall(require, "luarocks.loader")
 
 -- Error handling
@@ -24,9 +24,12 @@ local battery_widget = require("config.widgets.battery")
 -- local gpu_widget = require("config.widgets.gpu")
 local cpu_widget = require("config.widgets.cpu")
 -- local mem_widget = require("config.widgets.mem")
-local color = require("config.styles.color")
+local theme_manager = require("config.theme-manager")
 
 local dpi = require("beautiful.xresources").apply_dpi
+
+beautiful.init(theme_manager.path_for(theme_manager.current()))
+beautiful.useless_gap = 4
 
 -- Notification configuration
 naughty.config.defaults.border_width = dpi(3)
@@ -35,12 +38,16 @@ naughty.config.padding = dpi(16)
 naughty.config.defaults.margin = dpi(8)
 naughty.config.defaults.timeout = 5
 naughty.config.presets = {
-	normal = { timeout = 4, fg = color.red, bg = color.border_normal, border_color = color.green },
-	low = { timeout = 2, fg = color.white, bg = color.magenta, border_color = color.green },
-	critical = { border_width = 1, border_color = color.red, fg = color.border_normal, bg = color.red, timeout = 0 },
+	normal = { timeout = 4, fg = beautiful.color_red, bg = beautiful.border_normal, border_color = beautiful.color_green },
+	low = { timeout = 2, fg = beautiful.color_white, bg = beautiful.bg_focus, border_color = beautiful.color_green },
+	critical = {
+		border_width = 1,
+		border_color = beautiful.color_red,
+		fg = beautiful.border_normal,
+		bg = beautiful.color_red,
+		timeout = 0,
+	},
 }
-
-beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 
 local SUPER = "Mod4"
 local ALT = "Mod1"
@@ -157,8 +164,8 @@ awful.screen.connect_for_each_screen(function(s)
 
 	-- Create a promptbox for each screen
 	s.mypromptbox = awful.widget.prompt({
-		bg = color.background_lighter,
-		fg = color.green,
+		bg = beautiful.color_bg_alt,
+		fg = beautiful.color_green,
 		font = "FiraCode Nerd Font 10",
 	})
 
@@ -197,8 +204,8 @@ awful.screen.connect_for_each_screen(function(s)
 		buttons = tasklist_buttons,
 
 		style = {
-			bg_focus = color.red,
-			fg_normal = color.white,
+			bg_focus = beautiful.color_red,
+			fg_normal = beautiful.color_white,
 			align = "center",
 		},
 		layout = {
@@ -322,20 +329,24 @@ end)
 
 root.buttons(gears.table.join(awful.button({}, 4, awful.tag.viewnext), awful.button({}, 5, awful.tag.viewprev)))
 
-local kbdcfg = {}
-kbdcfg.cmd = "setxkbmap"
-kbdcfg.layout = { { "us", "" }, { "br", "" } }
-kbdcfg.current = 2 -- de is our default layout
-kbdcfg.widget = wibox.widget.textbox()
-kbdcfg.widget:set_text(" " .. kbdcfg.layout[kbdcfg.current][1] .. " ")
-kbdcfg.switch = function()
-	kbdcfg.current = kbdcfg.current % #kbdcfg.layout + 1
-	local t = kbdcfg.layout[kbdcfg.current]
-	kbdcfg.widget:set_text(" " .. t[1] .. " ")
-	os.execute(kbdcfg.cmd .. " " .. t[1] .. " " .. t[2])
-end
-
 local globalkeys = gears.table.join(
+	-- #############################################
+	-- Keyboard layout switch (us/br), both registered as XKB groups by autostart.sh
+	awful.key({ "Control", ALT }, "space", function()
+		local layout_names = { [0] = "us", [1] = "br" }
+		local group = (awesome.xkb_get_layout_group() + 1) % 2
+		awesome.xkb_set_layout_group(group)
+		naughty.notify({ title = "Keyboard layout", text = layout_names[group], timeout = 1.5 })
+	end, { description = "switch keyboard layout", group = "custom" }),
+	-- #############################################
+
+	-- #############################################
+	-- Theme switch
+	awful.key({ SUPER }, "t", function()
+		theme_manager.switch_next()
+	end, { description = "switch theme", group = "awesome" }),
+	-- #############################################
+
 	-- #############################################
 	-- Brightness widget
 	awful.key({}, "XF86MonBrightnessUp", function()
@@ -540,12 +551,6 @@ local clientkeys = gears.table.join(
 		c.maximized_horizontal = not c.maximized_horizontal
 		c:raise()
 	end, { description = "(un)maximize horizontally", group = "client" }),
-
-	-- ###############################
-	awful.key({ ALT }, "space", function()
-		kbdcfg.switch()
-	end, { description = "change keyboard laytout", group = "custom" }),
-	-- ###############################
 
 	-- ###############################
 	-- Send a test notification
@@ -763,9 +768,6 @@ end)
 client.connect_signal("unfocus", function(c)
 	c.border_color = beautiful.border_normal
 end)
-
---Gaps
-beautiful.useless_gap = 4
 
 -- Autostart applications
 awful.spawn.with_shell("~/.config/awesome/autostart.sh")
