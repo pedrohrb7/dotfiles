@@ -1,4 +1,4 @@
-"$schema" = "https://yazi-rs.github.io/schemas/theme.json"
+#:schema https://yazi-rs.github.io/schemas/yazi.json
 # #8ee4a4, #b53893
 # #89EAFF, #0B503C, 
 # #46586A, #9F3486,
