@@ -55,8 +55,8 @@ naughty.config.presets = {
 
 local SUPER = "Mod4"
 local ALT = "Mod1"
-local terminal = "terminator"
-local fileManager = "nautilus"
+local terminal = "kitty"
+local fileManager = "kitty --hold sh -c 'yazi'"
 local browser = "vivaldi-stable"
 
 beautiful.systray_icon_spacing = 8 -- Default SUPER.
@@ -141,7 +141,7 @@ awful.screen.connect_for_each_screen(function(s)
 	set_wallpaper(s)
 
 	-- local tags = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
-	local tags = { " 󰮯 ", "A", "W", "E", "S", "O", "M", "E" }
+	local tags = { " ", "A", "W", "E", "S", "O", "M", "E" }
 	awful.tag(tags, s, awful.layout.layouts[1])
 
 	-- Create a promptbox for each screen
