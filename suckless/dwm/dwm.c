@@ -194,6 +194,7 @@ struct Systray {
 
 /* function declarations */
 static void applyrules(Client *c);
+static void autostart_exec(void);
 static int applysizehints(Client *c, int *x, int *y, int *w, int *h,
                           int interact);
 static void arrange(Monitor *m);
@@ -332,6 +333,8 @@ static Display *dpy;
 static Drw *drw;
 static Monitor *mons, *selmon;
 static Window root, wmcheckwin;
+static pid_t *autostart_pids;
+static size_t autostart_len;
 
 /* configuration, allows nested code to access above variables */
 #include "config.h"
@@ -529,6 +532,14 @@ void cleanup(void) {
   Layout foo = {"", NULL};
   Monitor *m;
   size_t i;
+
+  for (i = 0; i < autostart_len; i++) {
+    if (autostart_pids[i] > 0) {
+      kill(autostart_pids[i], SIGTERM);
+      waitpid(autostart_pids[i], NULL, 0);
+    }
+  }
+  free(autostart_pids);
 
   view(&a);
   selmon->lt[selmon->sellt] = &foo;
@@ -1798,6 +1809,27 @@ void showhide(Client *c) {
   }
 }
 
+void autostart_exec(void) {
+  const char *const *p;
+  size_t i = 0;
+
+  for (p = autostart; *p; autostart_len++, p++)
+    while (*++p)
+      ;
+
+  autostart_pids = ecalloc(autostart_len, sizeof(pid_t));
+  for (p = autostart; *p; i++, p++) {
+    if ((autostart_pids[i] = fork()) == 0) {
+      setsid();
+      execvp(*p, (char *const *)p);
+      fprintf(stderr, "dwm: execvp %s failed\n", *p);
+      _exit(EXIT_FAILURE);
+    }
+    while (*++p)
+      ;
+  }
+}
+
 void spawn(const Arg *arg) {
   struct sigaction sa;
 
@@ -2425,6 +2457,7 @@ int main(int argc, char *argv[]) {
     die("dwm: cannot open display");
   checkotherwm();
   setup();
+  autostart_exec();
 #ifdef __OpenBSD__
   if (pledge("stdio rpath proc exec", NULL) == -1)
     die("pledge");

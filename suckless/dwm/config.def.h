@@ -27,7 +27,7 @@ static const char color5[] = "#444444";
 static const char color6[] = "#002b36";
 static const char color7[] = "#073642";
 static const char color8[] = "#222222";
-static const char color9[] = "#b53893";
+static const char color9[] = "#c0392b";
 static const char color10[] = "#174956";
 
 static const char *colors[][3] = {
@@ -81,8 +81,18 @@ static char dmenumon[2] =
 
 static const char *dmenucmd[] = {"rofi", "-show", "drun", NULL};
 static const char *termcmd[] = {"kitty", NULL};
-static const char *browsercmd[] = {"brave", NULL};
+static const char *browsercmd[] = {"vivaldi-stable", NULL};
 static const char *screenshotcmd[] = {"flameshot", "gui", NULL};
+
+/* autostart: NULL-terminated commands, list itself terminated by an extra NULL */
+static const char *const autostart[] = {
+    "picom", NULL,
+    "nm-applet", NULL,
+    "blueman-applet", NULL,
+    "pasystray", NULL,
+    "/home/phrb/.fehbg_dwm", NULL,
+    NULL /* terminate */
+};
 
 static const char *upbrightness[] = {"brightnessctl", "s", "5%+", NULL};
 static const char *downbrightness[] = {"brightnessctl", "s", "5%-", NULL};
