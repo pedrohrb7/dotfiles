@@ -12,5 +12,6 @@ function run {
 run "nm-applet"
 run "blueman-applet"
 run "pasystray"
+run "picom"
 
 "$HOME/.config/polybar/launch.sh" &
