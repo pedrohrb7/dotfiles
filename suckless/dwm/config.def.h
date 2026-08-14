@@ -80,17 +80,23 @@ static char dmenumon[2] =
     "0"; /* component of dmenucmd, manipulated in spawn() */
 
 static const char *dmenucmd[] = {"rofi", "-show", "drun", NULL};
-static const char *termcmd[] = {"kitty", NULL};
+static const char *termcmd[] = {"st", NULL};
 static const char *browsercmd[] = {"vivaldi-stable", NULL};
 static const char *screenshotcmd[] = {"flameshot", "gui", NULL};
 
-/* autostart: NULL-terminated commands, list itself terminated by an extra NULL */
+/* autostart: NULL-terminated commands, list itself terminated by an extra NULL
+ */
 static const char *const autostart[] = {
-    "picom", NULL,
-    "nm-applet", NULL,
-    "blueman-applet", NULL,
-    "pasystray", NULL,
-    "/home/phrb/.fehbg_dwm", NULL,
+    "picom",
+    NULL,
+    "nm-applet",
+    NULL,
+    "blueman-applet",
+    NULL,
+    "pasystray",
+    NULL,
+    "/home/phrb/.fehbg_dwm",
+    NULL,
     NULL /* terminate */
 };
 

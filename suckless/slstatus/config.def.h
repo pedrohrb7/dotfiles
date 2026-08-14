@@ -71,6 +71,7 @@ static const struct arg args[] = {
     // {run_command, "VOL: %s | ",
     // "~/.config/slstatus/components/get_volume.sh"},
     {datetime, "%s | ", "%F %T"},
+    {keymap, "KB: %s | ", NULL},
     {vol_perc, "%s | ", NULL},
     {mic_perc, "MIC: %s | ", NULL},
     {run_command, "BRI: %s | ",
