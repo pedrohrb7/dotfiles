@@ -29,7 +29,6 @@ local theme_manager = require("config.theme-manager")
 local dpi = require("beautiful.xresources").apply_dpi
 
 beautiful.init(theme_manager.path_for(theme_manager.current()))
-beautiful.useless_gap = 4
 
 -- Notification configuration
 naughty.config.defaults.border_width = dpi(3)
@@ -38,7 +37,12 @@ naughty.config.padding = dpi(16)
 naughty.config.defaults.margin = dpi(8)
 naughty.config.defaults.timeout = 5
 naughty.config.presets = {
-	normal = { timeout = 4, fg = beautiful.color_red, bg = beautiful.border_normal, border_color = beautiful.color_green },
+	normal = {
+		timeout = 4,
+		fg = beautiful.color_red,
+		bg = beautiful.border_normal,
+		border_color = beautiful.color_green,
+	},
 	low = { timeout = 2, fg = beautiful.color_white, bg = beautiful.bg_focus, border_color = beautiful.color_green },
 	critical = {
 		border_width = 1,
@@ -51,8 +55,8 @@ naughty.config.presets = {
 
 local SUPER = "Mod4"
 local ALT = "Mod1"
-local terminal = "terminator"
-local fileManager = "nautilus"
+local terminal = "kitty"
+local fileManager = "kitty --hold sh -c 'yazi'"
 local browser = "vivaldi-stable"
 
 beautiful.systray_icon_spacing = 8 -- Default SUPER.
@@ -125,28 +129,6 @@ local taglist_buttons = gears.table.join(
 	end)
 )
 
-local tasklist_buttons = gears.table.join(
-	awful.button({}, 1, function(c)
-		if c == client.focus then
-			c.minimized = true
-		else
-			c:emit_signal("request::activate", "tasklist", { raise = true })
-		end
-	end),
-
-	awful.button({}, 3, function()
-		awful.menu.client_list({ theme = { width = 250 } })
-	end),
-
-	awful.button({}, 4, function()
-		awful.client.focus.byidx(1)
-	end),
-
-	awful.button({}, 5, function()
-		awful.client.focus.byidx(-1)
-	end)
-)
-
 local function set_wallpaper(s)
 	awful.spawn.with_shell("~/.fehbg", false)
 end
@@ -158,8 +140,8 @@ awful.screen.connect_for_each_screen(function(s)
 	-- Wallpaper
 	set_wallpaper(s)
 
-	local tags = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
-	-- local tags = { " 󰮯 ", "A", "W", "E", "S", "O", "M", "E", " 󰊠 " }
+	-- local tags = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
+	local tags = { " ", "A", "W", "E", "S", "O", "M", "E" }
 	awful.tag(tags, s, awful.layout.layouts[1])
 
 	-- Create a promptbox for each screen
@@ -197,62 +179,40 @@ awful.screen.connect_for_each_screen(function(s)
 		buttons = taglist_buttons,
 	})
 
-	-- Create a tasklist widget
-	s.mytasklist = awful.widget.tasklist({
-		screen = s,
-		filter = awful.widget.tasklist.filter.currenttags,
-		buttons = tasklist_buttons,
+	-- Polybar replaces the native wibar. Kept in place (not deleted) behind
+	-- this flag: false hides the wibar AND skips creating the systray
+	-- widget, since instantiating it embeds the icons and claims the X11
+	-- systray manager selection even if the wibar itself is invisible,
+	-- which blocks polybar's own tray module from claiming it.
+	local show_native_wibar = false
 
-		style = {
-			bg_focus = beautiful.color_red,
-			fg_normal = beautiful.color_white,
-			align = "center",
-		},
-		layout = {
-			spacing = 10,
-			-- spacing_widget = {
-			-- 	{
-			-- 		forced_width = 5,
-			-- 		shape = gears.shape.circle,
-			-- 		widget = wibox.widget.separator,
-			-- 	},
-			-- 	valign = "center",
-			-- 	halign = "center",
-			-- 	widget = wibox.container.place,
-			-- },
-			-- layout = wibox.layout.flex.horizontal,
-		},
-		-- widget_template = {
-		-- 	{
-		-- 		{
-		-- 			{
-		-- 				{
-		-- 					id = "icon_role",
-		-- 					widget = wibox.widget.imagebox,
-		-- 				},
-		-- 				margins = 2,
-		-- 				widget = wibox.container.margin,
-		-- 			},
-		-- 			{
-		-- 				id = "text_role",
-		-- 				widget = wibox.widget.textbox,
-		-- 			},
-		-- 			layout = wibox.layout.fixed.horizontal,
-		-- 		},
-		-- 		left = 50,
-		-- 		right = 10,
-		-- 		widget = wibox.container.margin,
-		-- 	},
-		-- 	id = "background_role",
-		-- 	align = "center",
-		-- 	margin_right = 20,
-		-- 	right = 20,
-		-- 	widget = wibox.container.background,
-		-- },
-	})
+	-- Wibar geometry/spacing, themeable via beautiful.wibar_*; falls back to
+	-- the previous hardcoded values so themes that don't set them are
+	-- unaffected.
+	local wibar_height = beautiful.wibar_height or 28
+	local wibar_bg = beautiful.wibar_bg
+	local wibar_shape = beautiful.wibar_shape
+	local wibar_border_width = beautiful.wibar_border_width or 0
+	local wibar_border_color = beautiful.wibar_border_color or beautiful.border_normal
+	local wibar_spacing = beautiful.wibar_spacing or 5
+	local wibar_group_spacing = beautiful.wibar_group_spacing or 5
+	local wibar_widget_margin_lr = beautiful.wibar_widget_margin_lr or 0
+	local wibar_widget_margin_tb = beautiful.wibar_widget_margin_tb or 2
+	local wibar_widget_bg = beautiful.wibar_widget_bg
+	local wibar_widget_shape = beautiful.wibar_widget_shape
+	local wibar_widget_border_width = beautiful.wibar_widget_border_width
+	local wibar_widget_border_color = beautiful.wibar_widget_border_color
 
 	-- Create the wibox
-	s.mywibox = awful.wibar({ height = 28, position = "top", screen = s })
+	s.mywibox = awful.wibar({
+		height = wibar_height,
+		position = "top",
+		screen = s,
+		bg = wibar_bg,
+		shape = wibar_shape,
+		border_width = wibar_border_width,
+		border_color = wibar_border_color,
+	})
 
 	local widget_container = function(widget_args)
 		local args = widget_args or {}
@@ -260,31 +220,33 @@ awful.screen.connect_for_each_screen(function(s)
 		return wibox.widget({
 			{
 				args.widget,
-				-- left = args.left or 10,
-				top = args.top or 2,
-				bottom = args.bottom or 2,
-				-- right = args.right or 10,
+				left = args.left or wibar_widget_margin_lr,
+				right = args.right or wibar_widget_margin_lr,
+				top = args.top or wibar_widget_margin_tb,
+				bottom = args.bottom or wibar_widget_margin_tb,
 				widget = wibox.container.margin,
 			},
-			-- bg = args.bg or theme.bg_focus,
-			-- shape = args.shape or gears.shape.rounded_bar,
+			bg = args.bg or wibar_widget_bg,
+			shape = wibar_widget_shape,
+			shape_border_width = wibar_widget_bg and wibar_widget_border_width or nil,
+			shape_border_color = wibar_widget_bg and wibar_widget_border_color or nil,
 			shape_clip = true,
 			widget = wibox.container.background,
-
-			right = args.right or 10,
-			left = args.left or 10,
-			top = args.top or 2,
-			bottom = args.bottom or 2,
 		})
+	end
+
+	local mysystray = show_native_wibar and wibox.widget.systray() or nil
+	if mysystray then
+		mysystray:set_base_size(beautiful.wibar_systray_icon_size or dpi(16))
 	end
 
 	-- Add widgets to the wibox
 	s.mywibox:setup({
 		layout = wibox.layout.align.horizontal,
-		spacing = 5,
+		spacing = wibar_spacing,
 		{ -- Left widgets
 			layout = wibox.layout.fixed.horizontal,
-			spacing = 5,
+			spacing = wibar_group_spacing,
 			{ -- Left widgets
 				layout = wibox.layout.fixed.horizontal,
 				s.mylayoutbox,
@@ -294,10 +256,15 @@ awful.screen.connect_for_each_screen(function(s)
 				s.mypromptbox,
 			},
 		},
-		s.mytasklist, -- Middle widget
+		{ -- Middle widget: shrink-wrapped to its content width, full wibar height, always centered
+			widget_container({ widget = mytextclock }),
+			halign = "center",
+			fill_vertical = true,
+			widget = wibox.container.place,
+		},
 		{ -- Right widgets
 			layout = wibox.layout.fixed.horizontal(),
-			spacing = 5,
+			spacing = wibar_group_spacing,
 			widget_container({ widget = cpu_widget() }),
 			-- widget_container({ widget = mem_widget() }),
 			-- widget_container({ widget = gpu_widget }),
@@ -321,10 +288,15 @@ awful.screen.connect_for_each_screen(function(s)
 					display_notification = true,
 				}),
 			}),
-			widget_container({ widget = mytextclock }),
-			wibox.widget.systray(),
+			mysystray and {
+				mysystray,
+				valign = "center",
+				widget = wibox.container.place,
+			} or nil,
 		},
 	})
+
+	s.mywibox.visible = show_native_wibar
 end)
 
 root.buttons(gears.table.join(awful.button({}, 4, awful.tag.viewnext), awful.button({}, 5, awful.tag.viewprev)))

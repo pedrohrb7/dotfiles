@@ -173,7 +173,7 @@ local function worker(user_args)
 					halign = "center",
 					widget = wibox.container.place,
 				},
-				margins = (props.padding or 2) + (props.border_width or 0),
+				margins = (props.padding or 4) + (props.border_width or 0),
 				widget = wibox.container.margin,
 			},
 			shape = props.shape,
@@ -189,7 +189,8 @@ local function worker(user_args)
 
 	local cal = wibox.widget({
 		date = os.date("*t"),
-		font = "FiraCode Nerd Font 10",
+		font = "FiraCode Nerd Font 13",
+		spacing = 10,
 		fn_embed = decorate_cell,
 		long_weekdays = true,
 		start_sunday = start_sunday,
