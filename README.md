@@ -13,6 +13,7 @@ VoidLinux base system
 - bat (a better cat)
 - eza (a better ls)
 - FiraCode Nerd Font
+- MartianMono Nerd Font
 - fzf-git
 - kitty (on awesomewm)
 - st (on dwm)
