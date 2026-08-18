@@ -1,0 +1,17 @@
+---
+name: new-project
+description: Scaffold a new project's folder structure from the stack templates. Use when user says "new project", "scaffold a project", or "set up a new repo".
+disable-model-invocation: true
+---
+
+# New Project
+
+1. If this runs inside an existing git repo (e.g. adding a service to an established monorepo, not a brand new empty directory), check the current branch and its status against the remote. Ask the user to confirm: is this the branch the new structure should be scaffolded onto, and is it up to date? Don't proceed on a stale or wrong branch - wait for confirmation (or a pull/checkout) before creating anything. Skip this step entirely if there's no git repo yet.
+2. Ask which language project docs should be written in: English or Portuguese. This applies to prose only (root `.md` files, `docs/`, each service's `README.md`/`CLAUDE.md`) - code (identifiers, comments, commit messages) is always English regardless of the answer.
+3. Read `~/.claude/templates/project-root/STRUCTURE.md` and create that wrapper first: `docs/` (with a `modules/` and `sql/` subfolder) and `services/` with a `docker-compose.yml` - every project gets this, even a single-service one. Copy every root `.md` file (`CLAUDE.md`, `PRD.md`, `CONSTRAINTS.md`, `OPEN_QUESTIONS.md`, `TASKS.md`, `DEPLOY.md`, `DESIGN_SYSTEM.md`) from `~/.claude/templates/project-root/` as-is - they're filled-in skeletons, not stubs to rewrite from scratch. Record the answer from step 2 in `CLAUDE.md`'s "Documentation language" section, then write every doc's prose in that language. Fill `CLAUDE.md`, `PRD.md`, `CONSTRAINTS.md`, and `OPEN_QUESTIONS.md` from what the user has described so far, seed `TASKS.md`'s "Up next" with the first concrete steps, leave `DEPLOY.md` mostly blank until there's a real pipeline to document, and leave `DESIGN_SYSTEM.md`'s tables blank for the `design-system` skill to populate once there's a UI service to design.
+4. Ask which service(s) the project needs and which stack each one uses: backend (NestJS, Express+TypeORM, Express+Prisma, or Spring Boot), frontend (Node/TypeScript React), mobile (React Native), or a generic service (Go, Rust, Python).
+5. For each service, read the matching `~/.claude/templates/<stack>/STRUCTURE.md` and create it under `services/<service-name>/`, including its own `Dockerfile` (skip for React Native - not containerized). For the frontend and mobile stacks, copy `README.md` and `CLAUDE.md` from that stack's template folder as-is (filled-in skeletons) and fill in the stack/prerequisites/env var sections, writing the prose in the language chosen in step 2; for stacks without a README/CLAUDE skeleton yet, draft them following the same shape (stack, prerequisites, setup, run, test, build, env vars for the README; conventions, testing, gotchas, reference for the CLAUDE.md), same language rule.
+6. Confirm the project name and any stack-specific choices a template leaves open (framework, package manager, test runner) before generating.
+7. Create minimal real files (manifest, config, entry point, one example test per service) - not empty placeholders. Everything created must actually build/run. Code stays in English regardless of the documentation language chosen in step 2.
+8. Wire `services/docker-compose.yml` to bring up every service created, plus any infra they need (db, cache).
+9. Do not run `git init`, install dependencies, or commit anything - list those as next steps for the user to run themselves.
