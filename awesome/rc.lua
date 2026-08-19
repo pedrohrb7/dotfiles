@@ -667,6 +667,20 @@ awful.rules.rules = {
 		properties = { floating = true },
 	},
 
+	-- Polybar's calendar popup (scripts/calendar.sh): float it just below
+	-- the bar, horizontally centered, instead of wherever no_overlap picks.
+	{
+		rule = { class = "Yad", name = "Calendar" },
+		properties = {
+			floating = true,
+			ontop = true,
+			skip_taskbar = true,
+			placement = function(c)
+				awful.placement.top(c, { honor_workarea = true, margins = { top = 4 } })
+			end,
+		},
+	},
+
 	-- Add titlebars to normal clients and dialogs
 	{ rule_any = { type = { "normal", "dialog" } }, properties = { titlebars_enabled = false } },
 
