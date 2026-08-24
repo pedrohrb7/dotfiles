@@ -14,6 +14,8 @@ local theme = {}
 
 theme.font = "FiraCode Nerd Font 8"
 
+theme.wallpaper = os.getenv("HOME") .. "/.wallpaper"
+
 theme.bg_normal = color.background_dark
 theme.bg_focus = color.magenta
 theme.bg_urgent = color.red
