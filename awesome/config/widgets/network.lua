@@ -36,10 +36,15 @@ local function worker(args)
 			end
 		end
 
-		local eth_part = eth_icon .. (eth_connected and (" " .. eth_name) or " off")
-		local wifi_part = wifi_icon .. (wifi_connected and (" " .. ssid) or " off")
+		local parts = {}
+		if eth_connected then
+			table.insert(parts, eth_icon .. " " .. eth_name)
+		end
+		if wifi_connected then
+			table.insert(parts, wifi_icon .. " " .. ssid)
+		end
 
-		widget:set_text(eth_part .. "  " .. wifi_part)
+		widget:set_text(table.concat(parts, "  "))
 	end
 
 	widget:buttons(awful.util.table.join(awful.button({}, 1, function()
