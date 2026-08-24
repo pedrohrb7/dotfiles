@@ -1,2 +1,2 @@
-/home/phrb/.config/awesome/autostart.sh &
+setxkbmap -layout us,br
 exec awesome
