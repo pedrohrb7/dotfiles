@@ -152,8 +152,14 @@ function M.init()
 			buttons = tasklist_buttons,
 		})
 
-		-- Create the wibox
-		s.mywibox = awful.wibar({ position = "top", screen = s })
+		-- Create the wibox. bg/fg fall back to the library defaults
+		-- (bg_normal/fg_normal) when theme.wibar_bg/wibar_fg aren't set.
+		s.mywibox = awful.wibar({
+			position = "top",
+			screen = s,
+			bg = beautiful.wibar_bg,
+			fg = beautiful.wibar_fg,
+		})
 
 		-- Add widgets to the wibox
 		s.mywibox:setup({

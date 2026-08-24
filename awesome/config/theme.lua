@@ -14,13 +14,21 @@ local theme = {}
 
 theme.font = "FiraCode Nerd Font 8"
 
-theme.wallpaper = os.getenv("HOME") .. "/.wallpaper"
+-- Points at a symlink in $HOME so the actual wallpaper file/path stays
+-- untracked by git; swap it by repointing ~/.wallpaper, no config change
+-- needed. Falls back to awesome's own default wallpaper if that symlink
+-- is missing or broken.
+local home_wallpaper = os.getenv("HOME") .. "/.wallpaper"
+theme.wallpaper = gfs.file_readable(home_wallpaper) and home_wallpaper or (themes_path .. "default/background.png")
 
 theme.bg_normal = color.background_dark
-theme.bg_focus = color.magenta
+theme.bg_focus = color.primary
 theme.bg_urgent = color.red
 theme.bg_minimize = color.white
 theme.bg_systray = theme.bg_normal
+
+theme.wibar_bg = color.black
+theme.wibar_fg = color.gray_lighter
 
 theme.fg_normal = color.gray_lighter
 theme.fg_focus = color.white
@@ -34,13 +42,13 @@ theme.color_bg_alt = color.background_lighter
 
 theme.useless_gap = dpi(4)
 theme.border_width = dpi(1)
-theme.border_normal = color.border_normal
-theme.border_focus = color.magenta
+theme.border_normal = color.border_color
+theme.border_focus = color.primary
 theme.border_marked = color.border_marked
 
 local taglist_square_size = dpi(4)
 theme.taglist_fg_focus = color.white
-theme.taglist_bg_focus = color.magenta
+theme.taglist_bg_focus = color.primary
 theme.taglist_fg_occupied = color.border_focus
 theme.taglist_fg_empty = color.white
 
@@ -48,7 +56,7 @@ theme.taglist_squares_sel = theme_assets.taglist_squares_sel(taglist_square_size
 theme.taglist_squares_unsel = theme_assets.taglist_squares_unsel(taglist_square_size, theme.fg_normal)
 
 theme.notification_font = "FiraCode Nerd Font 9"
-theme.notification_bg = color.magenta
+theme.notification_bg = color.primary
 theme.notification_fg = color.black
 
 theme.menu_submenu_icon = themes_path .. "default/submenu.png"
