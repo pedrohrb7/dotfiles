@@ -13,9 +13,8 @@ local beautiful = require("beautiful")
 local menubar = require("menubar")
 
 local vars = require("config.vars")
-local theme_manager = require("config.theme-manager")
 
-beautiful.init(theme_manager.path_for(theme_manager.current()))
+beautiful.init(awful.util.get_configuration_dir() .. "config/theme.lua")
 
 require("config.notifications")
 

@@ -4,7 +4,6 @@ local gears = require("gears")
 local naughty = require("naughty")
 
 local vars = require("config.vars")
-local theme_manager = require("config.theme-manager")
 local brightness_widget = require("config.widgets.brightness-widgets.brightness")
 
 local SUPER = vars.SUPER
@@ -22,14 +21,6 @@ local globalkeys = gears.table.join(
 		awesome.xkb_set_layout_group(group)
 		naughty.notify({ title = "Keyboard layout", text = layout_names[group], timeout = 1.5 })
 	end, { description = "switch keyboard layout", group = "custom" }),
-	-- #############################################
-
-	-- #############################################
-	-- Theme switch
-  -- TODO: Change 
-	-- awful.key({ SUPER }, "t", function()
-	-- 	theme_manager.switch_next()
-	-- end, { description = "switch theme", group = "awesome" }),
 	-- #############################################
 
 	-- #############################################

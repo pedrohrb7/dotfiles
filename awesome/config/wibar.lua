@@ -18,7 +18,7 @@ local cpu_widget = require("config.widgets.cpu")
 
 local M = {}
 
-local function set_wallpaper(s)
+local function set_wallpaper()
 	awful.spawn.with_shell("~/.fehbg", false)
 end
 

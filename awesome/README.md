@@ -6,7 +6,7 @@ config/
   handle-errors.lua         -- notifica erros de startup/runtime (naughty)
   notifications.lua         -- presets e espaçamento do naughty
   vars.lua                  -- SUPER/ALT, terminal/browser/fileManager, ordem dos layouts
-  theme-manager.lua         -- lista/troca/persiste o tema ativo (config/themes/*)
+  theme.lua                 -- tema único (beautiful init)
   wibar.lua                 -- wibar por tela: tags, layoutbox, clock/calendar, widgets à direita
   keys/
     global.lua               -- atalhos globais (launchers, tags, layout, foco)
@@ -15,7 +15,6 @@ config/
   signals.lua                -- sinais de client (manage, titlebars, foco)
   autostart.lua              -- nm-applet/blueman-applet/pasystray/picom/pipewire
   widgets/                   -- widgets da wibar (battery, cpu, volume, mic, brightness, calendar)
-  themes/                    -- temas (default, matrix, neonpunk)
   styles/                    -- paleta de cores compartilhada
 ```
 
