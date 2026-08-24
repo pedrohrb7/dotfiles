@@ -5,37 +5,43 @@ pcall(require, "luarocks.loader")
 -- Error handling
 require("config.handle-errors")
 
-require("awful.hotkeys_popup.keys")
+-- Standard awesome library
+local awful = require("awful")
+
 require("awful.autofocus")
 
-local awful = require("awful")
+-- Enable hotkeys help widget for VIM and other apps
+-- when client with a matching name is opened:
+require("awful.hotkeys_popup.keys")
+
+-- {{{ Theme
 local beautiful = require("beautiful")
-local menubar = require("menubar")
-
-local vars = require("config.vars")
-
-beautiful.init(awful.util.get_configuration_dir() .. "config/theme.lua")
+beautiful.init(require("config.theme"))
+-- }}}
 
 require("config.notifications")
 
-beautiful.systray_icon_spacing = 8
-
-awful.layout.layouts = vars.layouts
-
--- Menubar configuration
-menubar.utils.terminal = vars.terminal
-
+-- {{{ Wibar
 require("config.wibar").init()
+-- }}}
 
--- Keys
-local globalkeys = require("config.keys.global")
+-- {{{ Key bindings
+globalkeys = require("config.keys.global")
 root.keys(globalkeys)
 
--- Rules
+local clientkeymaps = require("config.keys.client")
+clientkeys = clientkeymaps.clientkeys
+clientbuttons = clientkeymaps.clientbuttons
+-- }}}
+
+-- {{{ Rules
 awful.rules.rules = require("config.rules")
+-- }}}
 
--- Signals (client placement, titlebars, focus border)
+-- {{{ Signals
 require("config.signals")
+-- }}}
 
--- Autostart applications
+-- {{{ Autostart
 require("config.autostart").init()
+-- }}}

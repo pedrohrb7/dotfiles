@@ -21,6 +21,8 @@ VoidLinux base system
 - lazydocker
 - neovim (smoothvim)
 - ripgrep
+- pavucontrol
+- brightnessctl
 - xclip
 - xorg-xclipboard
 - xorg-xbacklight

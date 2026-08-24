@@ -10,10 +10,7 @@ local function run_once(prog, cmd)
 end
 
 function M.init()
-	run_once("nm-applet")
-	run_once("blueman-applet")
 	run_once("artix-pipewire-launcher")
-	run_once("pasystray")
 	run_once("picom")
 end
 

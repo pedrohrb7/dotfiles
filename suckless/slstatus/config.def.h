@@ -75,6 +75,6 @@ static const struct arg args[] = {
     {vol_perc, "%s | ", NULL},
     {mic_perc, "MIC: %s | ", NULL},
     {run_command, "BRI: %s | ",
-     "~/.config/slstatus/components/get_brightness.sh"},
+     "~/dotfiles/suckless/slstatus/components/get_brightness.sh"},
     {battery_perc, "BAT: %s | ", "BAT1"},
 };

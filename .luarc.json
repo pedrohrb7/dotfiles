@@ -1,0 +1,9 @@
+{
+    "diagnostics.globals": [
+        "vim",
+        "globalkeys",
+        "root",
+        "clientkeys",
+        "clientbuttons"
+    ]
+}

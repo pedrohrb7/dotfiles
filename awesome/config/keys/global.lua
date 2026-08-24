@@ -4,7 +4,6 @@ local gears = require("gears")
 local naughty = require("naughty")
 
 local vars = require("config.vars")
-local brightness_widget = require("config.widgets.brightness-widgets.brightness")
 
 local SUPER = vars.SUPER
 local ALT = vars.ALT
@@ -24,21 +23,21 @@ local globalkeys = gears.table.join(
 	-- #############################################
 
 	-- #############################################
-	-- Brightness widget
+	-- Brightness
 	awful.key({}, "XF86MonBrightnessUp", function()
-		brightness_widget:inc()
+		awful.spawn("brightnessctl set +2%", false)
 	end, { description = "increase brightness", group = "custom" }),
 
 	awful.key({}, "XF86MonBrightnessDown", function()
-		brightness_widget:dec()
+		awful.spawn("brightnessctl set 2%-", false)
 	end, { description = "decrease brightness", group = "custom" }),
 	--
 	-- Alternatively, keybindings to control brightness:
 	awful.key({ SUPER, "Shift" }, "g", function()
-		brightness_widget:inc()
+		awful.spawn("brightnessctl set +2%", false)
 	end),
 	awful.key({ SUPER, "Shift" }, "f", function()
-		brightness_widget:dec()
+		awful.spawn("brightnessctl set 2%-", false)
 	end),
 	-- #############################################
 
