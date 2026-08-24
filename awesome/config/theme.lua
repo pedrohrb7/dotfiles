@@ -14,10 +14,6 @@ local theme = {}
 
 theme.font = "FiraCode Nerd Font 8"
 
--- Points at a symlink in $HOME so the actual wallpaper file/path stays
--- untracked by git; swap it by repointing ~/.wallpaper, no config change
--- needed. Falls back to awesome's own default wallpaper if that symlink
--- is missing or broken.
 local home_wallpaper = os.getenv("HOME") .. "/.wallpaper"
 theme.wallpaper = gfs.file_readable(home_wallpaper) and home_wallpaper or (themes_path .. "default/background.png")
 
