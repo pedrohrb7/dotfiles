@@ -168,14 +168,19 @@ function M.init()
 				layout = wibox.layout.fixed.horizontal,
 				spacing = dpi(12),
 				s.mytaglist,
+				mykeyboardlayout,
+				mysystray,
 				s.mypromptbox,
 			},
 			s.mytasklist, -- Middle widget
 			{ -- Right widgets
 				layout = wibox.layout.fixed.horizontal,
 				spacing = dpi(12),
-				mykeyboardlayout,
-				mysystray,
+				wibox.widget({
+					forced_width = dpi(4),
+					widget = wibox.widget.separator,
+					color = beautiful.wibar_bg,
+				}),
 				mynetwork,
 				mybluetooth,
 				mybrightness,
