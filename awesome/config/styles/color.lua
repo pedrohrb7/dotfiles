@@ -17,14 +17,16 @@ local color = {
 	blue = "#7AA2F7",
 	magenta = "#BB9AF7",
 	cyan = "#7dcfff",
-
-	-- Borders.
-	border_color = "#2f404d",
-	border_focus = "#85ebd9",
-	border_marked = "#91231c",
+	slate = "#2f404d",
+	teal = "#85ebd9",
+	dark_red = "#91231c",
 }
 
 color.primary = color.magenta
 color.secondary = color.blue
+
+color.border_color = color.slate
+color.border_focus = color.teal
+color.border_marked = color.dark_red
 
 return color

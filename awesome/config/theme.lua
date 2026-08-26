@@ -18,18 +18,21 @@ local home_wallpaper = os.getenv("HOME") .. "/.wallpaper"
 theme.wallpaper = gfs.file_readable(home_wallpaper) and home_wallpaper or (themes_path .. "default/background.png")
 
 theme.bg_normal = color.background_dark
+theme.fg_normal = color.white
+
 theme.bg_focus = color.primary
+theme.fg_focus = color.black
+
 theme.bg_urgent = color.red
+theme.fg_urgent = color.white
+
 theme.bg_minimize = color.white
+theme.fg_minimize = color.white
+
 theme.bg_systray = theme.bg_normal
 
 theme.wibar_bg = color.black
 theme.wibar_fg = color.gray_lighter
-
-theme.fg_normal = color.gray_lighter
-theme.fg_focus = color.white
-theme.fg_urgent = color.white
-theme.fg_minimize = color.white
 
 theme.color_red = color.red
 theme.color_green = color.green
