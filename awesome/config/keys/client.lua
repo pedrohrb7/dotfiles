@@ -28,10 +28,6 @@ M.clientkeys = gears.table.join(
 		c:swap(awful.client.getmaster())
 	end, { description = "move to master", group = "client" }),
 
-	awful.key({ SUPER }, "o", function(c)
-		c:move_to_screen()
-	end, { description = "move to screen", group = "client" }),
-
 	awful.key({ SUPER }, "n", function(c)
 		-- The client currently has the input focus, so it cannot be
 		-- minimized, since minimized clients can't have the focus.

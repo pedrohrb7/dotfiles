@@ -26,8 +26,8 @@ theme.fg_focus = color.black
 theme.bg_urgent = color.red
 theme.fg_urgent = color.white
 
-theme.bg_minimize = color.white
-theme.fg_minimize = color.white
+theme.bg_minimize = color.yellow
+theme.fg_minimize = color.black
 
 theme.bg_systray = theme.bg_normal
 
