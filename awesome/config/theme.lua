@@ -5,6 +5,7 @@
 local theme_assets = require("beautiful.theme_assets")
 local xresources = require("beautiful.xresources")
 local dpi = xresources.apply_dpi
+local gears_shape = require("gears.shape")
 
 local gfs = require("gears.filesystem")
 local themes_path = gfs.get_themes_dir()
@@ -55,8 +56,19 @@ theme.taglist_squares_sel = theme_assets.taglist_squares_sel(taglist_square_size
 theme.taglist_squares_unsel = theme_assets.taglist_squares_unsel(taglist_square_size, theme.fg_normal)
 
 theme.notification_font = "FiraCode Nerd Font 9"
-theme.notification_bg = color.primary
-theme.notification_fg = color.black
+theme.notification_bg = color.background_lighter
+theme.notification_fg = color.white
+theme.notification_border_color = color.primary
+theme.notification_opacity = 0.95
+theme.notification_shape = function(cr, w, h)
+	gears_shape.rounded_rect(cr, w, h, dpi(8))
+end
+
+-- Baseline footprint for every notification; see config/notifications.lua for
+-- the taller/wider variant applied when a notification carries an icon/image.
+theme.notification_width = dpi(320)
+theme.notification_max_height = dpi(300)
+theme.notification_icon_size = dpi(48)
 
 theme.menu_submenu_icon = themes_path .. "default/submenu.png"
 theme.menu_height = dpi(30)
