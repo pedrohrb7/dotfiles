@@ -17,3 +17,5 @@
   Output no more than 3-4 lines of text before using tools.
 - Always read a file before editing it. Never overwrite files without reading them first.
 - Always validate if there is a documentation, if no then start to create a documentation for every change.
+
+@RTK.md
