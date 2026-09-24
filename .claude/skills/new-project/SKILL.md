@@ -1,7 +1,7 @@
 ---
 name: new-project
 description: Scaffold a new project's folder structure from the stack templates. Use when user says "new project", "scaffold a project", or "set up a new repo".
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # New Project
