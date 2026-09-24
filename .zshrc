@@ -193,6 +193,18 @@ fd() {
 }
 
 ########################################
+# ADB 
+alias adb-up='sudo adb kill-server && sudo adb start-server && adb devices'
+########################################
+
+########################################
+# Android SDK paths
+export ANDROID_HOME="$HOME/Android/Sdk"
+export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"
+export PATH="$PATH:$ANDROID_HOME/platform-tools"
+########################################
+
+########################################
 # SDKMAN (must stay at the end of the file)
 ########################################
 export SDKMAN_DIR="$HOME/.sdkman"
