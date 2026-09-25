@@ -1,7 +1,6 @@
 ---
 name: dep-audit
 description: Audit project dependencies for outdated, unmaintained, or vulnerable packages before shipping. Use when user says "audit deps", "check dependencies", or "security audit".
-disable-model-invocation: true
 ---
 
 # Dep Audit

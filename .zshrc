@@ -73,6 +73,11 @@ alias gpsb='git push bitbucket'
 alias gil='git log --decorate --graph --stat --all'
 
 ########################################
+# Rust settings (load)
+########################################
+. ~/.cargo/env
+
+########################################
 # General shortcuts
 ########################################
 alias ldocker='lazydocker'

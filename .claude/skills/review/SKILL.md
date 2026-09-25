@@ -1,7 +1,6 @@
 ---
 name: review
 description: Two-phase code review. Use when user says "review" or "code review".
-disable-model-invocation: true
 ---
 
 # Review

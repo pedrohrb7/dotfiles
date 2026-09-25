@@ -4,21 +4,21 @@
 
 Personal, explicit-invocation-only skills (`disable-model-invocation: true` - call with `/name`, never auto-triggered). Compose with each other the way `review` calls `codebase-standards`, or `tdd` calls `grill-me` and `scaffold`.
 
-| skill | purpose |
-|---|---|
-| `scaffold` | Placeholder files with correct types/exports/TODOs |
-| `code-simplify` | Remove unnecessary complexity/duplication, preserve behavior |
-| `codebase-standards` | Compare recent changes against the codebase's own conventions |
-| `grill-me` | Interview the user until a plan/design is fully resolved |
-| `review` | Two-phase review: feature correctness, then standards |
-| `tdd` | grill-me -> scaffold -> failing tests, then hand off to implement |
-| `bug-repro` | Reproduce a bug end-to-end before attempting a fix |
-| `docs` | Check/create/update documentation for the current change |
-| `pr-description` | Draft a PR description and changelog entry from a diff |
-| `dep-audit` | Audit dependencies for outdated/vulnerable packages |
-| `design-system` | Apply design tokens, hierarchy, and accessibility when building a layout |
-| `new-project` | Scaffold a new project's structure from `templates/` |
-| `onboard` | Document folder structure, patterns, and conventions of an existing project per service |
+| skill                | purpose                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| `scaffold`           | Placeholder files with correct types/exports/TODOs                                      |
+| `code-simplify`      | Remove unnecessary complexity/duplication, preserve behavior                            |
+| `codebase-standards` | Compare recent changes against the codebase's own conventions                           |
+| `grill-me`           | Interview the user until a plan/design is fully resolved                                |
+| `review`             | Two-phase review: feature correctness, then standards                                   |
+| `tdd`                | grill-me -> scaffold -> failing tests, then hand off to implement                       |
+| `bug-repro`          | Reproduce a bug end-to-end before attempting a fix                                      |
+| `docs`               | Check/create/update documentation for the current change                                |
+| `pr-description`     | Draft a PR description and changelog entry from a diff                                  |
+| `dep-audit`          | Audit dependencies for outdated/vulnerable packages                                     |
+| `design-system`      | Apply design tokens, hierarchy, and accessibility when building a layout                |
+| `new-project`        | Scaffold a new project's structure from `templates/`                                    |
+| `onboard`            | Document folder structure, patterns, and conventions of an existing project per service |
 
 `frontend-design` is not in this folder - it's the official `frontend-design:frontend-design` plugin (auto-invocation follows the plugin's own frontmatter, not the explicit-only convention above). `design-system` calls it for aesthetic direction (palette, type, layout concept) on greenfield UI, then keeps what it produces consistent (tokens, hierarchy, accessibility) afterward.
 

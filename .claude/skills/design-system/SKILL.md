@@ -1,7 +1,6 @@
 ---
 name: design-system
 description: Apply consistent design-system and UI/UX thinking when building or reviewing a layout - spacing/type scales, tokens, hierarchy, accessibility. Use when user says "design system", "layout", "UI/UX", or is building new screens or components.
-disable-model-invocation: true
 ---
 
 # Design System

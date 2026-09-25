@@ -1,7 +1,6 @@
 ---
 name: scaffold
 description: Create placeholder files with correct types, exports, and TODO stubs. Use when the user says "scaffold", "set up", "create stubs", or "generate boilerplate".
-disable-model-invocation: true
 ---
 
 # Scaffold

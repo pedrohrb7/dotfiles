@@ -1,7 +1,6 @@
 ---
 name: pr-description
 description: Draft a PR description and changelog entry from the current diff. Use when user says "PR description", "write the PR", or "changelog entry".
-disable-model-invocation: true
 ---
 
 # PR Description

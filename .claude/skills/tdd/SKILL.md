@@ -1,7 +1,6 @@
 ---
 name: tdd
 description: Test-Driven Development - from a feature description, collaboratively build a plan with grill-me, scaffold placeholder implementations, then write failing tests. Use when user says "tdd" or wants to develop with TDD.
-disable-model-invocation: true
 ---
 
 # TDD

@@ -1,7 +1,6 @@
 ---
 name: codebase-standards
 description: Scan codebase for patterns and compare recent changes against them. Use when user says "standards", "follow conventions", or "codebase style".
-disable-model-invocation: true
 ---
 
 # Codebase Standards

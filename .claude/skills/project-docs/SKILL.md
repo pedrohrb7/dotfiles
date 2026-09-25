@@ -1,7 +1,6 @@
 ---
 name: project-docs
 description: Scaffold the docs/ tree (concepts, plans, specs, backlog/bugs, backlog/refactor, requests) for a new project, and incrementally add new bug/refactor/plan/spec/concept entries from templates as the project evolves. Use when the user says "set up project docs", "log a bug", "add a refactor ticket", "write a plan for X", or "write a spec for X".
-disable-model-invocation: true
 ---
 
 # Project Docs
