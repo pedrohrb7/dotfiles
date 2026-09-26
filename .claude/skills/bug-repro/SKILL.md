@@ -1,7 +1,6 @@
 ---
 name: bug-repro
 description: Reproduce a bug end-to-end exactly as the end user would experience it before attempting any fix. Use when the user reports a bug, says "reproduce", or asks to fix an issue.
-disable-model-invocation: true
 ---
 
 # Bug Repro

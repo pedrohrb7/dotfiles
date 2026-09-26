@@ -73,6 +73,11 @@ alias gpsb='git push bitbucket'
 alias gil='git log --decorate --graph --stat --all'
 
 ########################################
+# Rust settings (load)
+########################################
+. ~/.cargo/env
+
+########################################
 # General shortcuts
 ########################################
 alias ldocker='lazydocker'
@@ -191,6 +196,18 @@ fd() {
   preview="git diff $@ --color=always -- {-1}"
   git diff $@ --name-only | fzf -m --ansi --preview $preview
 }
+
+########################################
+# ADB 
+alias adb-up='sudo adb kill-server && sudo adb start-server && adb devices'
+########################################
+
+########################################
+# Android SDK paths
+export ANDROID_HOME="$HOME/Android/Sdk"
+export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"
+export PATH="$PATH:$ANDROID_HOME/platform-tools"
+########################################
 
 ########################################
 # SDKMAN (must stay at the end of the file)

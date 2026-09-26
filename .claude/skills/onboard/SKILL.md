@@ -1,7 +1,6 @@
 ---
 name: onboard
 description: Build a structural and design-pattern understanding of an existing, already-running project - one doc per service (backend/frontend/mobile) plus root CLAUDE.md pointers. Use when starting on an unfamiliar existing codebase, or the user says "understand this project", "onboard me", or "map this codebase".
-disable-model-invocation: true
 ---
 
 # Onboard

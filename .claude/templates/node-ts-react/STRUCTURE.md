@@ -5,18 +5,18 @@ This is the contents of `services/frontend/` in the [project-root](../project-ro
 ```
 services/frontend/
   Dockerfile
-  README.md                    # how to run/test just this service (filled-in skeleton: see README.md in this template folder)
-  CLAUDE.md                    # service-specific agent instructions (stack conventions, gotchas) (filled-in skeleton: see CLAUDE.md in this template folder)
+  README.md                  # how to run/test just this service (filled-in skeleton: see README.md in this template folder)
+  CLAUDE.md                  # service-specific agent instructions (stack conventions, gotchas) (filled-in skeleton: see CLAUDE.md in this template folder)
   src/
     main.tsx                 # entrypoint, mounts <App/> - wiring only
     App.tsx                  # top-level routes/providers only, no page logic
-    routes/ (or pages/)      # one file per route, thin - composes components, no heavy logic
+    pages/                   # one file per route, thin - composes components, no heavy logic
+    ui/                      # generic, reusable, no business logic (the design-system primitives)
     components/
-      ui/                    # generic, reusable, no business logic (the design-system primitives)
       <feature>/             # feature-specific components, not meant to be reused elsewhere
     hooks/                   # reusable stateful logic extracted out of components
     lib/                     # api clients, formatting, pure utility functions
-    state/                   # global state (store/context), only for state that's truly cross-cutting
+    stores/                  # global state (store/context), only for state that's truly cross-cutting
     styles/
       tokens.css (or theme.ts)  # design tokens: spacing scale, type scale, color palette, breakpoints
     types/                   # shared types not owned by a single feature

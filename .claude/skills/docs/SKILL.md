@@ -1,7 +1,6 @@
 ---
 name: docs
 description: Check whether documentation exists for the code being changed, and create or update it to match. Use when user says "docs", "document this", or after finishing a feature or change.
-disable-model-invocation: true
 ---
 
 # Docs

@@ -12,13 +12,20 @@ services/backend/
     app.ts                      # express app assembly: global middleware, module routers, error handler - exported for tests without a live port
     config/
       env.ts                     # typed, validated environment config - fail fast on missing/invalid vars
-      data-source.ts              # TypeORM DataSource: connection options + entity/migration globs
-    common/                      # cross-cutting, app-wide - the Express equivalent of Nest's guards/interceptors/filters
-      middleware/
-        auth.middleware.ts
-        error-handler.middleware.ts    # central error -> HTTP response mapping
-        logging.middleware.ts
-      lib/                        # framework-agnostic utilities shared across modules
+    common/                      # cross-cutting, app-wide - the Express equivalent of Nest's guards/interceptors/filters/base dtos
+    infra/
+      database/
+        <database-type>                # Could be mysql, postgres, mongodb - if multiple, should create a folder for each database
+          data-source.ts              # TypeORM DataSource: connection options + entity/migration globs
+      queue/
+        <queue-client-name>/          # if using rabbitmq, for example, all configuration should live here
+      cache/
+        redis.ts                    # connection for redis (should exists only if project needed)
+    middleware/
+      auth.middleware.ts
+      error-handler.middleware.ts    # central error -> HTTP response mapping
+      logging.middleware.ts
+    lib/                        # framework-agnostic utilities shared across modules
     modules/                     # one folder per domain/feature, not per technical layer
       <feature>/
         <feature>.routes.ts       # composition root for this module: builds the repository -> services/actions -> controller chain and wires the router
@@ -63,9 +70,11 @@ services/backend/
     fixtures/                      # cross-module shared test data
   migrations/                      # TypeORM migrations, generated - never hand-edit an already-run one
   .env.example
+  .env.test
   package.json
   tsconfig.json
-  eslint.config.* / .prettierrc
+  eslint.config.*
+  .prettierrc
 ```
 
 ## Why this shape
