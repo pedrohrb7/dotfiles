@@ -17,3 +17,19 @@ config/
   styles/                    -- paleta de cores compartilhada
 ```
 
+## Layout do teclado (us/br)
+
+`Control + Alt + Space` alterna entre os grupos XKB `us` e `br`. Os dois layouts
+são definidos como padrão do servidor X em `/etc/X11/xorg.conf.d/00-keyboard.conf`:
+
+```
+Section "InputClass"
+    Identifier "system-keyboard"
+    MatchIsKeyboard "on"
+    Option "XkbLayout" "us,br"
+EndSection
+```
+
+Não use `setxkbmap` no `.xinitrc`/`.xprofile`: ele só altera o keymap em runtime,
+e qualquer teclado conectado depois (USB, Bluetooth) faz o Xorg voltar ao padrão
+do servidor, deixando só um grupo e quebrando a troca.
