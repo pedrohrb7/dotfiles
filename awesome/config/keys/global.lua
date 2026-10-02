@@ -7,7 +7,8 @@ local vars = require("config.vars")
 
 local SUPER = vars.SUPER
 local ALT = vars.ALT
-local terminal = vars.terminal
+local primary_terminal = vars.terminal
+local secondary_terminal = "terminator"
 local fileManager = vars.fileManager
 local browser = vars.browser
 
@@ -107,8 +108,12 @@ local globalkeys = gears.table.join(
 
 	-- Standard program
 	awful.key({ SUPER }, "Return", function()
-		awful.spawn(terminal)
-	end, { description = "open a terminal", group = "launcher" }),
+		awful.spawn(primary_terminal)
+	end, { description = "open kitty terminal", group = "launcher" }),
+
+	awful.key({ SUPER, "Shift" }, "Return", function()
+		awful.spawn(secondary_terminal)
+	end, { description = "open terminator", group = "launcher" }),
 
 	awful.key({ SUPER }, "b", function()
 		awful.spawn(browser)
