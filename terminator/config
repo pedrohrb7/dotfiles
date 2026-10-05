@@ -1,0 +1,26 @@
+[global_config]
+  close_button_on_tab = False
+[keybindings]
+[profiles]
+  [[default]]
+    background_color = "#002b36"
+    background_darkness = 0.95
+    background_type = transparent
+    background_image = None
+    font = MartianMono Nerd Font 10
+    foreground_color = "#839496"
+    show_titlebar = False
+    scrollbar_position = hidden
+    scrollback_infinite = True
+    palette = "#45475a:#f38ba8:#a6e3a1:#f9e2af:#89b4fa:#f5c2e7:#94e2d5:#bac2de:#585b70:#f38ba8:#a6e3a1:#f9e2af:#89b4fa:#f5c2e7:#94e2d5:#a6adc8"
+    use_system_font = False
+    title_use_system_font = False
+[layouts]
+  [[default]]
+    [[[window0]]]
+      type = Window
+      parent = ""
+    [[[child1]]]
+      type = Terminal
+      parent = window0
+[plugins]
