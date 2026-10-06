@@ -33,3 +33,12 @@ EndSection
 Não use `setxkbmap` no `.xinitrc`/`.xprofile`: ele só altera o keymap em runtime,
 e qualquer teclado conectado depois (USB, Bluetooth) faz o Xorg voltar ao padrão
 do servidor, deixando só um grupo e quebrando a troca.
+
+O greeter do LightDM com o indicador `~layout` (em
+`/etc/lightdm/lightdm-gtk-greeter.conf`) aplica um único layout no servidor X antes
+do login, e a sessão herda esse keymap com só um grupo. Por isso
+`config/keyboard.lua` confere os grupos ao iniciar o awesome e a cada sinal
+`xkb::map_changed`, e roda `setxkbmap -layout us,br` quando falta algum. Atenção:
+`setxkbmap -query` não serve para diagnosticar isso, porque mostra a propriedade
+`_XKB_RULES_NAMES` e não o keymap real. Use
+`awesome-client 'return awesome.xkb_get_group_names()'`, que deve conter `br:2`.

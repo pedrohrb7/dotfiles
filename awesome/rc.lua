@@ -25,6 +25,10 @@ require("config.notifications")
 require("config.wibar").init()
 -- }}}
 
+-- {{{ Keyboard layouts
+require("config.keyboard").init()
+-- }}}
+
 -- {{{ Key bindings
 globalkeys = require("config.keys.global")
 root.keys(globalkeys)

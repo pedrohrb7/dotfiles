@@ -1,9 +1,9 @@
 -- Global keybindings: launchers, tags, layout, client focus/swap, root binds.
 local awful = require("awful")
 local gears = require("gears")
-local naughty = require("naughty")
 
 local vars = require("config.vars")
+local keyboard = require("config.keyboard")
 
 local SUPER = vars.SUPER
 local ALT = vars.ALT
@@ -14,15 +14,8 @@ local browser = vars.browser
 
 local globalkeys = gears.table.join(
 	-- #############################################
-	-- Keyboard layout switch (us/br), both registered as XKB groups by
-	-- /etc/X11/xorg.conf.d/00-keyboard.conf (XkbLayout "us,br")
-	awful.key({ "Control", ALT }, "space", function()
-		local layout_names = { [0] = "us", [1] = "br" }
-		awesome.xkb_set_layout_group((awesome.xkb_get_layout_group() + 1) % 2)
-		-- Read back the active group: the switch is a no-op when only one layout is loaded
-		local group = awesome.xkb_get_layout_group()
-		naughty.notify({ title = "Keyboard layout", text = layout_names[group] or tostring(group), timeout = 1.5 })
-	end, { description = "switch keyboard layout", group = "custom" }),
+	-- Keyboard layout switch (us/br), see config/keyboard.lua
+	awful.key({ "Control", ALT }, "space", keyboard.toggle, { description = "switch keyboard layout", group = "custom" }),
 	-- #############################################
 
 	-- #############################################

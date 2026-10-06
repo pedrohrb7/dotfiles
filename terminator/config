@@ -1,4 +1,5 @@
 [global_config]
+  tab_position = bottom
   close_button_on_tab = False
 [keybindings]
 [profiles]
