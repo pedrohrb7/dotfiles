@@ -1,6 +1,6 @@
 ---
 name: project-docs
-description: Scaffold the docs/ tree (concepts, plans, specs, backlog/bugs, backlog/refactor, requests) for a new project, and incrementally add new bug/refactor/plan/spec/concept entries from templates as the project evolves. Use when the user says "set up project docs", "log a bug", "add a refactor ticket", "write a plan for X", or "write a spec for X".
+description: Scaffold the docs/ tree (concepts, plans, specs, backlog/bugs, backlog/refactor, requests) for a new project, and incrementally add new bug/refactor/plan/spec/concept entries from templates as the project evolves. Plans hold the product side (scope, business rules); specs hold the technical implementation. Use when the user says "set up project docs", "log a bug", "add a refactor ticket", "write a plan for X", or "write a spec for X".
 ---
 
 # Project Docs
@@ -17,6 +17,12 @@ docs/
 ├── specs/          (README.md, TEMPLATE.md, dated entries)
 └── requests/       (API projects only - README.md, API request collections)
 ```
+
+**Plans vs specs**: a plan is the product side - *what* is being built and the **business rules** it must follow (goal, context, scope, business rules, edge cases, product-level approach). A spec is the technical side - *how* it is built (design, data model, API contracts, components, alternatives, trade-offs, tests, implementation order, verification). A feature usually has one plan and one spec linked to each other through the **Related plan/spec** fields; a pure technical change (e.g. a large refactor) may have only a spec.
+
+Every folder README with dated entries (`backlog/bugs`, `backlog/refactor`, `plans`, `specs`) keeps an **Index** table of its entries with their **Status**, updated whenever an entry is created or changes status.
+
+**Evolving the structure**: when a project needs a new folder, section or convention in `docs/`, change this skill and `~/.claude/templates/docs-structure/` first (with the user's approval - it affects every project), then apply it to the project. Don't let a single project drift from the templates on its own.
 
 `PRD.md` and `CONSTRAINTS.md` are NOT part of this tree - they live at the repo root and are owned by the `new-project` skill (`~/.claude/templates/project-root/`). Never create `docs/PRD.md` or `docs/CONSTRAINTS.md`; if you need product requirements or constraints context, read them from the root instead.
 
@@ -45,5 +51,6 @@ Use whenever the user wants to file a bug, open a refactor ticket, write a plan,
    - Spec: `docs/specs/YYYY-MM-DD-<slug>-design.md` (today's date)
    - Concept: `docs/concepts/<slug>.md` (no date - concepts are evergreen and edited in place)
    - Request: add to or create a collection file under `docs/requests/`, and update its `README.md` if it's a new collection. If `docs/requests/` doesn't exist yet, that's expected for a non-API project - confirm the project now exposes an API before creating it (copy it from `~/.claude/templates/docs-structure/requests/`).
-4. Copy the matching `TEMPLATE.md` (skip for concepts and requests - they have none) to the new path and fill in every section from what's actually known. For a bug, this means reproducing it first (per the repro-before-reporting rule in `backlog/bugs/README.md`) - don't write speculative steps.
-5. Write prose in whatever language the rest of `docs/` already uses (check an existing entry, or the "Documentation language" note in `CLAUDE.md`); ask if neither is present.
+4. Copy the matching `TEMPLATE.md` (skip for concepts and requests - they have none) to the new path and fill in every section from what's actually known. For a bug, this means reproducing it first (per the repro-before-reporting rule in `backlog/bugs/README.md`) - don't write speculative steps. A section with nothing known says so explicitly ("not recorded", "none open") instead of being invented or left as the placeholder. For a plan, put business rules in **Business rules**, not in Approach; for a spec, put tests, order and checks in **Testing**, **Implementation order** and **Verification**. When a plan and a spec belong together, fill **Related plan/spec** in both.
+5. Add a row for the new entry to the folder README's **Index** (and update the row whenever the entry's status changes).
+6. Write prose in whatever language the rest of `docs/` already uses (check an existing entry, or the "Documentation language" note in `CLAUDE.md`); ask if neither is present.
