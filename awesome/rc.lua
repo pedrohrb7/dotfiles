@@ -21,6 +21,10 @@ beautiful.init(require("config.theme"))
 
 require("config.notifications")
 
+-- {{{ Low battery notifications
+require("config.battery").init()
+-- }}}
+
 -- {{{ Wibar
 require("config.wibar").init()
 -- }}}
@@ -30,12 +34,8 @@ require("config.keyboard").init()
 -- }}}
 
 -- {{{ Key bindings
-globalkeys = require("config.keys.global")
-root.keys(globalkeys)
-
-local clientkeymaps = require("config.keys.client")
-clientkeys = clientkeymaps.clientkeys
-clientbuttons = clientkeymaps.clientbuttons
+root.keys(require("config.keys.global"))
+-- Client keys/buttons are applied through the default rule in config/rules.lua
 -- }}}
 
 -- {{{ Rules

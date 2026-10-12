@@ -2,8 +2,8 @@
 local awful = require("awful")
 local beautiful = require("beautiful")
 
--- clientkeys/clientbuttons are set as globals by rc.lua (config.keys.client)
--- and applied to every client via the default rule.
+-- Applied to every client via the default rule
+local clientkeymaps = require("config.keys.client")
 
 return {
 	{
@@ -13,8 +13,8 @@ return {
 			border_color = beautiful.border_normal,
 			focus = awful.client.focus.filter,
 			raise = true,
-			keys = clientkeys,
-			buttons = clientbuttons,
+			keys = clientkeymaps.clientkeys,
+			buttons = clientkeymaps.clientbuttons,
 			screen = awful.screen.preferred,
 			placement = awful.placement.no_overlap + awful.placement.no_offscreen,
 		},

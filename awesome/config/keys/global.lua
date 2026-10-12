@@ -4,6 +4,7 @@ local gears = require("gears")
 
 local vars = require("config.vars")
 local keyboard = require("config.keyboard")
+local battery = require("config.battery")
 
 local SUPER = vars.SUPER
 local ALT = vars.ALT
@@ -15,7 +16,19 @@ local browser = vars.browser
 local globalkeys = gears.table.join(
 	-- #############################################
 	-- Keyboard layout switch (us/br), see config/keyboard.lua
-	awful.key({ "Control", ALT }, "space", keyboard.toggle, { description = "switch keyboard layout", group = "custom" }),
+	awful.key(
+		{ "Control", ALT },
+		"space",
+		keyboard.toggle,
+		{ description = "switch keyboard layout", group = "custom" }
+	),
+	-- #############################################
+
+	-- #############################################
+	-- Battery status notification, see config/battery.lua
+	awful.key({ SUPER, "Shift" }, "t", function()
+		battery.show()
+	end, { description = "show battery level", group = "custom" }),
 	-- #############################################
 
 	-- #############################################

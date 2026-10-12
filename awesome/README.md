@@ -2,9 +2,11 @@
 
 ```
 rc.lua                      -- carrega os módulos abaixo, nessa ordem
+.luarc.json                 -- lua-language-server: globais do awesome (C API) e lib em /usr/share/awesome/lib; ignora rc_default.lua
 config/
   handle-errors.lua         -- notifica erros de startup/runtime (naughty)
   notifications.lua         -- presets e espaçamento do naughty
+  battery.lua               -- avisos de bateria baixa/crítica (naughty, sem widget)
   vars.lua                  -- SUPER/ALT, terminal/browser/fileManager, ordem dos layouts
   theme.lua                 -- tema único (beautiful init)
   wibar.lua                 -- wibar por tela: tags, layoutbox, clock, systray (widgets padrão do awesome)
@@ -42,3 +44,36 @@ do login, e a sessão herda esse keymap com só um grupo. Por isso
 `setxkbmap -query` não serve para diagnosticar isso, porque mostra a propriedade
 `_XKB_RULES_NAMES` e não o keymap real. Use
 `awesome-client 'return awesome.xkb_get_group_names()'`, que deve conter `br:2`.
+
+## Avisos de bateria
+
+`config/battery.lua` lê `/sys/class/power_supply/*/uevent` a cada 60s e, enquanto
+descarrega, mostra uma notificação normal em 20% (`LOW`) e uma crítica fixa em 10%
+(`CRITICAL`), cada uma uma única vez. Ligar o carregador fecha o aviso e rearma os
+dois limites. Com mais de uma bateria, a porcentagem é a soma da energia de todas.
+
+No carregador, ao chegar em 100% (status `Full`, ou 100% com `Not charging` para
+fuel gauges que nunca reportam `Full`) aparece uma notificação de baixa prioridade
+(preset `low`), uma vez só; ela só rearma depois de desconectar o carregador. Se a
+bateria já estiver cheia quando o awesome inicia, nada é mostrado. Com limite de
+carga abaixo de 100% (ex.: ThinkPad em 80%) essa notificação nunca aparece.
+
+Não precisa instalar nenhum pacote: a leitura vem direto do sysfs do kernel (driver
+ACPI `battery`/`ac`, já presente no kernel do Void) e usa só `sh` e `cat`. Não
+depende de `acpi`, `upower` nem `acpid`.
+
+`Super+Shift+T` mostra sob demanda uma notificação com o nível atual e o estado
+(`Charging`, `Fully charged`, `On battery` ou `Plugged in, not charging`, este último
+quando há limite de carga no carregador) via `battery.show()`; apertar de novo
+substitui a anterior.
+
+Uma bateria que reporta 0% enquanto o notebook roda nela é tratada como leitura
+inválida (fuel gauge travado) e não gera aviso. Para testar sem descarregar, aponte
+o módulo para uevents falsos:
+
+```
+awesome-client "require('config.battery').init({ path = '/tmp/ps', timeout = 2 })"
+```
+
+onde `/tmp/ps/AC/uevent` e `/tmp/ps/BAT0/uevent` contêm linhas
+`POWER_SUPPLY_*` como as de `/sys/class/power_supply`.

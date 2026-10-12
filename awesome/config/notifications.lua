@@ -4,6 +4,7 @@ local beautiful = require("beautiful")
 local dpi = require("beautiful.xresources").apply_dpi
 local awful = require("awful")
 local gears = require("gears")
+local wibox = require("wibox")
 
 naughty.config.defaults.border_width = dpi(2)
 naughty.config.spacing = dpi(8)
@@ -77,9 +78,12 @@ local function enforce_min_height(notification)
 	end
 	notification.box:geometry({ y = y, height = MIN_HEIGHT })
 	notification.height = MIN_HEIGHT
+	-- Keep the content vertically centered in the stretched box
+	notification.box:set_widget(wibox.container.place(notification.box.widget, "left", "center"))
 end
 
 local notify = naughty.notify
+---@diagnostic disable-next-line: duplicate-set-field -- intentional wrap of the library function
 naughty.notify = function(args)
 	args = args or {}
 	apply_default_size(args)
