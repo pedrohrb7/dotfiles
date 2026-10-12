@@ -17,6 +17,10 @@ config/
   signals.lua                -- sinais de client (manage, titlebars, foco)
   autostart.lua              -- nm-applet/blueman-applet/pasystray/picom/pipewire
   styles/                    -- paleta de cores compartilhada
+.xinitrc                    -- carrega .Xresources, exporta XCURSOR_* e inicia o awesome
+.Xresources                 -- tema e tamanho do cursor (Xcursor.*)
+icons/default/index.theme   -- tema de cursor padrão do X11 (link em ~/.icons/default/)
+gtk-3.0/settings.ini        -- tema de cursor dos apps GTK (link em ~/.config/gtk-3.0/)
 ```
 
 ## Layout do teclado (us/br)
@@ -44,6 +48,45 @@ do login, e a sessão herda esse keymap com só um grupo. Por isso
 `setxkbmap -query` não serve para diagnosticar isso, porque mostra a propriedade
 `_XKB_RULES_NAMES` e não o keymap real. Use
 `awesome-client 'return awesome.xkb_get_group_names()'`, que deve conter `br:2`.
+
+## Cursor do mouse (Bibata Rainbow Modern)
+
+O cursor é o [Bibata Cursor Rainbow](https://github.com/ful1e5/Bibata_Cursor_Rainbow),
+variante `Bibata-Rainbow-Modern`, tamanho 24. O tema em si **não fica no repo**:
+extraído ele ocupa ~261 MB (o `.tar.gz` tem ~19 MB). Só as configs são versionadas.
+
+### Instalar em uma máquina nova
+
+1. Baixe `Bibata-Rainbow-Modern.tar.gz` na página de releases:
+   <https://github.com/ful1e5/Bibata_Cursor_Rainbow/releases>
+2. Extraia o tema e crie os links das configs:
+
+```sh
+mkdir -p ~/.icons/default ~/.config/gtk-3.0
+tar -xzf ~/Bibata-Rainbow-Modern.tar.gz -C ~/.icons   # cria ~/.icons/Bibata-Rainbow-Modern/
+
+ln -s ~/dotfiles/awesome/.xinitrc                  ~/.xinitrc
+ln -s ~/dotfiles/awesome/.Xresources               ~/.Xresources
+ln -s ~/dotfiles/awesome/icons/default/index.theme ~/.icons/default/index.theme
+ln -s ~/dotfiles/awesome/gtk-3.0/settings.ini      ~/.config/gtk-3.0/settings.ini
+```
+
+3. Saia do awesome e rode `startx` de novo. Apps que já estavam abertos só pegam o
+   cursor novo depois de reabertos.
+
+### Onde o tema é configurado
+
+| Arquivo                     | Quem lê                               |
+| --------------------------- | ------------------------------------- |
+| `.Xresources`               | X11/Xlib (`Xcursor.theme`, `Xcursor.size`), via `xrdb -merge` no `.xinitrc` |
+| `.xinitrc`                  | `XCURSOR_THEME`/`XCURSOR_SIZE` para apps que leem variáveis de ambiente |
+| `icons/default/index.theme` | tema "default" do libXcursor (fallback de qualquer app X11) |
+| `gtk-3.0/settings.ini`      | apps GTK 3                            |
+| `rc.lua`                    | `root.cursor("left_ptr")`: cursor no fundo da tela (sem ele aparece um "X") |
+
+Para trocar o tema ou o tamanho, altere o nome/número **nos quatro primeiros
+arquivos**. Para aplicar o `.Xresources` sem reiniciar o X, rode
+`xrdb -merge ~/.Xresources`.
 
 ## Avisos de bateria
 

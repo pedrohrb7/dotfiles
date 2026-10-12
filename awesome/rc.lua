@@ -19,6 +19,10 @@ local beautiful = require("beautiful")
 beautiful.init(require("config.theme"))
 -- }}}
 
+-- {{{ Root window cursor (theme comes from Xcursor.theme in ~/.Xresources)
+root.cursor("left_ptr")
+-- }}}
+
 require("config.notifications")
 
 -- {{{ Low battery notifications
