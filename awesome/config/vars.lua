@@ -7,7 +7,7 @@ M.SUPER = "Mod4"
 M.ALT = "Mod1"
 
 M.terminal = "kitty"
-M.fileManager = "kitty --hold sh -c 'yazi'"
+M.fileManager = "kitty yazi"
 M.browser = "vivaldi-stable"
 
 -- Table of layouts to cover with awful.layout.inc, order matters.
