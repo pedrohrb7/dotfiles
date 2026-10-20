@@ -12,6 +12,8 @@ end
 function M.init()
 	run_once("artix-pipewire-launcher")
 	run_once("picom")
+	-- Only if installed, so a machine without conky doesn't log an error.
+	run_once("conky", "command -v conky > /dev/null && conky --daemonize --pause=2")
 end
 
 return M

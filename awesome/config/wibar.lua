@@ -9,8 +9,10 @@ local vars = require("config.vars")
 local volume_widget = require("config.widgets.volume")
 local mic_widget = require("config.widgets.mic")
 local brightness_widget = require("config.widgets.brightness")
-local bluetooth_widget = require("config.widgets.bluetooth")
-local network_widget = require("config.widgets.network")
+-- Rede e Bluetooth fora da wibar: o conky mostra os dois (~/dotfiles/conky).
+-- Para voltar, descomentar aqui, a criação em M.init e a entrada no layout.
+-- local bluetooth_widget = require("config.widgets.bluetooth")
+-- local network_widget = require("config.widgets.network")
 
 local M = {}
 
@@ -61,8 +63,8 @@ function M.init()
 	local myvolume = volume_widget({ step = 5, timeout = 2 })
 	local mymic = mic_widget({ timeout = 2 })
 	local mybrightness = brightness_widget({ step = 5, timeout = 2 })
-	local mybluetooth = bluetooth_widget({ timeout = 5 })
-	local mynetwork = network_widget({ timeout = 5 })
+	-- local mybluetooth = bluetooth_widget({ timeout = 5 })
+	-- local mynetwork = network_widget({ timeout = 5 })
 
 	local taglist_buttons = gears.table.join(
 		awful.button({}, 1, function(t)
@@ -181,8 +183,8 @@ function M.init()
 					widget = wibox.widget.separator,
 					color = beautiful.wibar_bg,
 				}),
-				mynetwork,
-				mybluetooth,
+				-- mynetwork,
+				-- mybluetooth,
 				mybrightness,
 				mymic,
 				myvolume,

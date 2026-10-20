@@ -27,4 +27,5 @@ VoidLinux base system
 - xorg-xclipboard
 - xorg-xbacklight
 - yazi
+- conky (painel de sistema no awesome, ver conky/README.md)
 - zsh

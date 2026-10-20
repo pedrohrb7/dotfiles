@@ -1,9 +1,24 @@
 {
+    "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
     "diagnostics.globals": [
         "vim",
         "globalkeys",
-        "root",
         "clientkeys",
-        "clientbuttons"
-    ]
+        "clientbuttons",
+        "awesome",
+        "client",
+        "screen",
+        "root",
+        "tag",
+        "mouse",
+        "mousegrabber",
+        "keygrabber",
+        "selection",
+        "dbus",
+        "conky_window",
+        "conky_parse"
+    ],
+    "workspace.library": ["/usr/share/awesome/lib"],
+    "workspace.checkThirdParty": false,
+    "workspace.ignoreDir": ["awesome/rc_default.lua"]
 }

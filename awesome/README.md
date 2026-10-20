@@ -2,20 +2,22 @@
 
 ```
 rc.lua                      -- carrega os módulos abaixo, nessa ordem
-.luarc.json                 -- lua-language-server: globais do awesome (C API) e lib em /usr/share/awesome/lib; ignora rc_default.lua
+.luarc.json                 -- lua-language-server ao abrir só awesome/: globais do awesome (C API) e lib em /usr/share/awesome/lib; ignora rc_default.lua
+                            -- (abrindo ~/dotfiles, vale o ../.luarc.json, que repete esses globais e a lib)
 config/
   handle-errors.lua         -- notifica erros de startup/runtime (naughty)
   notifications.lua         -- presets e espaçamento do naughty
   battery.lua               -- avisos de bateria baixa/crítica (naughty, sem widget)
   vars.lua                  -- SUPER/ALT, terminal/browser/fileManager, ordem dos layouts
   theme.lua                 -- tema único (beautiful init)
-  wibar.lua                 -- wibar por tela: tags, layoutbox, clock, systray (widgets padrão do awesome)
+  wibar.lua                 -- wibar por tela: tags, layoutbox, clock, systray, brilho/mic/volume (rede e Bluetooth desativados: ficam no conky)
+  widgets/                  -- widgets da wibar (network.lua e bluetooth.lua ficam no repo, mas fora da wibar)
   keys/
     global.lua               -- atalhos globais (launchers, tags, layout, foco)
     client.lua                -- atalhos e botões por cliente (usados em rules.lua)
-  rules.lua                 -- awful.rules.rules (floating, titlebars, placement)
+  rules.lua                 -- awful.rules.rules (floating, titlebars, placement, conky fixo no desktop)
   signals.lua                -- sinais de client (manage, titlebars, foco)
-  autostart.lua              -- nm-applet/blueman-applet/pasystray/picom/pipewire
+  autostart.lua              -- pipewire/picom/conky (ver ../conky/README.md)
   styles/                    -- paleta de cores compartilhada
 .xinitrc                    -- carrega .Xresources, exporta XCURSOR_* e inicia o awesome
 .Xresources                 -- tema e tamanho do cursor (Xcursor.*)

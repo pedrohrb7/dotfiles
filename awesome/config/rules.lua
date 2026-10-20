@@ -68,6 +68,21 @@ return {
 		},
 	},
 
+	-- Conky (~/dotfiles/conky): part of the desktop, not a regular window.
+	-- Visible on every tag, kept below everything, never focused, no border,
+	-- out of the tasklist, and left where conky positions itself.
+	{
+		rule = { class = "Conky" },
+		properties = {
+			border_width = 0,
+			sticky = true,
+			below = true,
+			focusable = false,
+			skip_taskbar = true,
+			placement = function() end,
+		},
+	},
+
 	-- Add titlebars to normal clients and dialogs
 	{ rule_any = { type = { "normal", "dialog" } }, properties = { titlebars_enabled = false } },
 
