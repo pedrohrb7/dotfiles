@@ -8,7 +8,7 @@ Seções: sistema, CPU (gráfico, frequência, temperatura, uso por núcleo), me
 disco (`/`, `/mnt/data`, I/O e temperatura do NVMe), rede (Wi-Fi, Ethernet e VPN,
 cada uma só aparece quando tem IP), Bluetooth (um bloco por adaptador, dongle
 USB e interno, com os dispositivos conectados e a bateria de cada um quando o
-dispositivo informa), top processos (CPU e memória) e bateria.
+dispositivo informa), top 3 processos por CPU e top 3 por memória, e bateria.
 
 Clicar na seção Bluetooth abre o `blueman-manager`.
 
