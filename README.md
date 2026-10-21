@@ -2,6 +2,10 @@
 
 ![DWM screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/dwm_screen.png)
 
+## awesomewm
+
+![Awesome screenshot](https://raw.githubusercontent.com/pedrohrb7/dotfiles/refs/heads/main/awesome_screen.png)
+
 ## Packages
 
 VoidLinux base system
