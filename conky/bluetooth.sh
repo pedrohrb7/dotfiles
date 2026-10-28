@@ -30,11 +30,11 @@ printf '%s\n' "$adapters" | while read -r hci powered; do
 	fi
 
 	# Uma linha por dispositivo: nome (até 22 caracteres, "$" escapado como
-	# "$$" para o conky não interpretar) e bateria, separados por \037.
+	# "$$" para o conky não interpretar), bateria e endereço, separados por \037.
 	devices=$(printf '%s' "$objects" | jq -r --arg adapter "/org/bluez/$hci" --arg sep "$sep" '
 		.data[0][]
 		| select(.["org.bluez.Device1"].Adapter.data == $adapter and .["org.bluez.Device1"].Connected.data)
-		| "\(.["org.bluez.Device1"].Alias.data[0:22] | gsub("\\$"; "$$"))\($sep)\(.["org.bluez.Battery1"].Percentage.data // "")"')
+		| "\(.["org.bluez.Device1"].Alias.data[0:22] | gsub("\\$"; "$$"))\($sep)\(.["org.bluez.Battery1"].Percentage.data // "")\($sep)\(.["org.bluez.Device1"].Address.data)"')
 	count=$(printf '%s' "$devices" | grep -c .)
 
 	case $count in
@@ -45,7 +45,16 @@ printf '%s\n' "$adapters" | while read -r hci powered; do
 	printf '${color2}%s${alignr}${color5}Ligado${color2}  ·  %s${color}\n' "$label" "$status"
 
 	[ "$count" -eq 0 ] && continue
-	printf '%s\n' "$devices" | while IFS="$sep" read -r name battery; do
+	printf '%s\n' "$devices" | while IFS="$sep" read -r name battery address; do
+		# Controles de jogo (hid-playstation, hid-sony, hid-nintendo...) não
+		# reportam bateria ao BlueZ: o driver do kernel cria um power_supply
+		# com o endereço em minúsculas no nome.
+		if [ -z "$battery" ]; then
+			address=$(printf '%s' "$address" | tr '[:upper:]' '[:lower:]')
+			for capacity in /sys/class/power_supply/*"$address"/capacity; do
+				[ -r "$capacity" ] && battery=$(cat "$capacity") && break
+			done
+		fi
 		if [ -n "$battery" ]; then
 			color='${color0}'
 			[ "$battery" -le 20 ] && color='${color7}'

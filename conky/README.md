@@ -4,7 +4,8 @@ Painel de sistema fixo no desktop, coluna à direita abaixo da wibar do awesome.
 Template próprio (`conky.conf`, sintaxe Lua do conky 1.10+), com a paleta Tokyo
 Night de `awesome/config/styles/color.lua`.
 
-Seções: sistema, CPU (gráfico, frequência, temperatura, uso por núcleo), memória,
+Seções: sistema, CPU (gráfico, frequência, temperatura, uso por núcleo), GPU
+NVIDIA (modelo, clock, uso com gráfico, temperatura, VRAM), memória,
 disco (`/`, `/mnt/data`, I/O e temperatura do NVMe), rede (Wi-Fi, Ethernet e VPN,
 cada uma só aparece quando tem IP), Bluetooth (um bloco por adaptador, dongle
 USB e interno, com os dispositivos conectados e a bateria de cada um quando o
@@ -60,6 +61,21 @@ separados por espaço, então valores com espaço não podem ser argumento):
 | `template3` | linha do top por memória: `${template3 <n>}` |
 | `template4` | bloco de rede: `${template4 <interface>}` |
 
+## GPU
+
+O conky do Void não é compilado com suporte a NVIDIA (não há `${nvidia}`), então
+`gpu.lua` lê a placa com `nvidia-smi` (vem com o driver, pacote `nvidia`). Uma
+chamada por atualização do conky (~20 ms) serve todos os campos.
+
+| Em `conky.text`             | O quê                                                   |
+| --------------------------- | ------------------------------------------------------- |
+| `${lua gpu <campo>}`        | `ok` (1/0), `name`, `util`, `temp`, `clock` (MHz), `vram`, `vram_perc` |
+| `${lua_graph gpu_util ...}` | gráfico do uso da GPU (%)                               |
+| `${lua_bar gpu_vram}`       | barra da VRAM usada (%)                                 |
+
+Se o `nvidia-smi` não responder (driver não carregado), a seção mostra
+"nvidia-smi indisponível".
+
 ## Bluetooth e cliques
 
 | Arquivo         | O quê                                                                 |
@@ -77,6 +93,18 @@ rede, e a área clicável é calculada a partir do fim da janela: no clique, o
 `${lua_parse bluetooth}` e conta as linhas. A seção ocupa `bluetooth_lines` x
 `LINE_HEIGHT` (16 px para FiraCode Nerd Font size=9) logo acima dessas linhas.
 Assim a conta acompanha as seções que mudam de altura (bateria).
+
+### Bateria dos dispositivos
+
+A bateria vem do `org.bluez.Battery1`. Controles de jogo (DualShock 4 e
+clones via `hid-playstation`/`hid-sony`, Switch via `hid-nintendo`) não
+reportam ao BlueZ: o driver cria `/sys/class/power_supply/*<mac em
+minúsculas>`, e o `bluetooth.sh` lê o `capacity` de lá como fallback.
+
+Controle "conectado" sem bateria e sem funcionar como joystick: o BlueZ
+recusa HID clássico de dispositivo sem bond (`ClassicBondedOnly=true`, padrão
+em `/etc/bluetooth/input.conf`). Conferir `Bonded: yes` em
+`bluetoothctl info <mac>`; se for `no`, remover e parear de novo.
 
 Restrições: as seções abaixo do Bluetooth não podem ter gráficos (`*graph`
 deixa a linha mais alta que `LINE_HEIGHT`). Ao trocar a fonte, ajustar
