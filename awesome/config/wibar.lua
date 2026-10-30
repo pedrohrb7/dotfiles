@@ -62,7 +62,7 @@ function M.init()
 
 	local myvolume = volume_widget({ step = 5, timeout = 2 })
 	local mymic = mic_widget({ timeout = 2 })
-	local mybrightness = brightness_widget({ step = 5, timeout = 2 })
+	local mybrightness = brightness_widget({ step = 5 })
 	-- local mybluetooth = bluetooth_widget({ timeout = 5 })
 	-- local mynetwork = network_widget({ timeout = 5 })
 

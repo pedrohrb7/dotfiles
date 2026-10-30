@@ -1,1 +1,3 @@
-copy files to /etc/X11/xorg.conf.d/
+Não copie na mão: setup/hardware.sh instala em /etc/X11/xorg.conf.d/ só os
+confs que servem para a máquina (NVIDIA só onde há placa NVIDIA, com o BusID
+certo; touchpad só onde há touchpad). Ver setup/README.md.

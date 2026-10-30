@@ -5,11 +5,15 @@ Template próprio (`conky.conf`, sintaxe Lua do conky 1.10+), com a paleta Tokyo
 Night de `awesome/config/styles/color.lua`.
 
 Seções: sistema, CPU (gráfico, frequência, temperatura, uso por núcleo), GPU
-NVIDIA (modelo, clock, uso com gráfico, temperatura, VRAM), memória,
-disco (`/`, `/mnt/data`, I/O e temperatura do NVMe), rede (Wi-Fi, Ethernet e VPN,
-cada uma só aparece quando tem IP), Bluetooth (um bloco por adaptador, dongle
+(NVIDIA ou Intel: modelo, clock, uso com gráfico, temperatura e, na NVIDIA, VRAM),
+memória, disco (cada ponto de montagem, I/O e temperatura de cada disco), rede
+(Wi-Fi, Ethernet e VPN, cada uma só aparece quando tem IP), Bluetooth (um bloco por adaptador, dongle
 USB e interno, com os dispositivos conectados e a bateria de cada um quando o
-dispositivo informa), top 3 processos por CPU e top 3 por memória, e bateria.
+dispositivo informa), top 3 processos por CPU e top 3 por memória, e bateria
+(só em máquina com bateria).
+
+O mesmo `conky.conf` serve em qualquer máquina: o que depende do hardware é
+detectado ao rodar (ver [Detecção do hardware](#detecção-do-hardware)).
 
 Clicar na seção Bluetooth abre o `blueman-manager`.
 
@@ -63,18 +67,22 @@ separados por espaço, então valores com espaço não podem ser argumento):
 
 ## GPU
 
-O conky do Void não é compilado com suporte a NVIDIA (não há `${nvidia}`), então
-`gpu.lua` lê a placa com `nvidia-smi` (vem com o driver, pacote `nvidia`). Uma
-chamada por atualização do conky (~20 ms) serve todos os campos.
+`gpu.lua` escolhe a placa uma vez, ao carregar:
+
+| Backend | Quando                            | De onde vêm os valores |
+| ------- | --------------------------------- | ---------------------- |
+| NVIDIA  | `nvidia-smi` responde (driver carregado) | `nvidia-smi --query-gpu`: o conky do Void não é compilado com `${nvidia}`. Uma chamada (~20 ms) por atualização serve todos os campos |
+| Intel   | senão, se há iGPU Intel com i915 ou xe | sysfs, sem root: clock real (`rps_act_freq_mhz`), uso pela residência RC6 (100% menos a fração do intervalo em que a GPU dormiu), temperatura do pacote da CPU (`coretemp`; a iGPU não tem sensor próprio). Não há VRAM: a memória é a RAM, e as linhas de VRAM somem |
+
+No Acer com o optimus em modo integrado (NVIDIA desligada), a seção mostra a Intel.
 
 | Em `conky.text`             | O quê                                                   |
 | --------------------------- | ------------------------------------------------------- |
-| `${lua gpu <campo>}`        | `ok` (1/0), `name`, `util`, `temp`, `clock` (MHz), `vram`, `vram_perc` |
+| `${lua gpu <campo>}`        | `ok` (1/0), `name`, `util`, `temp`, `clock` (MHz), `has_vram` (1/0), `vram`, `vram_perc` |
 | `${lua_graph gpu_util ...}` | gráfico do uso da GPU (%)                               |
 | `${lua_bar gpu_vram}`       | barra da VRAM usada (%)                                 |
 
-Se o `nvidia-smi` não responder (driver não carregado), a seção mostra
-"nvidia-smi indisponível".
+Sem nenhuma das duas, a seção mostra "GPU não detectada".
 
 ## Bluetooth e cliques
 
@@ -112,7 +120,19 @@ deixa a linha mais alta que `LINE_HEIGHT`). Ao trocar a fonte, ajustar
 
 Dependências: `bluez`, `jq`, `blueman`.
 
-Valores específicos desta máquina (trocar em outra): interfaces `wlp2s0`,
-`enp3s0f1`, `tun0`; disco `nvme0n1`; ponto de montagem `/mnt/data`; bateria
-`BAT1`; sensores `hwmon coretemp` e `hwmon nvme`. Limites de alerta (vermelho):
-disco `/` >= 90%, bateria <= 20%.
+## Detecção do hardware
+
+`system.lua` gera as seções que mudam de máquina para máquina, com as
+variáveis do conky já apontando para os nomes certos. A detecção roda a cada
+10 s (`INTERVAL`), então um pendrive montado ou uma VPN aparecem sozinhos; os
+valores em si atualizam a cada `update_interval`.
+
+| Em `conky.text`       | O quê                                                                 |
+| --------------------- | --------------------------------------------------------------------- |
+| `${lua_parse disks}`  | cada partição montada de `/proc/mounts` (fora `/boot*`, `/efi`, `/var/lib/docker`, `/snap` e binds da mesma partição), e uma linha de I/O por disco com o rótulo `NVMe`, `SSD`, `HDD` ou `USB` (o nome do disco quando dois são do mesmo tipo) e a temperatura se o disco tiver hwmon (`nvme`, ou `drivetemp` para SATA) |
+| `${lua_parse network}`| Wi-Fi (`phy80211`), Ethernet (placa física: `docker0`, `veth*`, `br-*` ficam de fora) e VPN (`tun`/`tap`, `wg*`), cada uma dentro de `${if_up}` |
+| `${lua_parse battery}`| a seção BATERIA inteira, com a primeira bateria do próprio computador (`BAT0`, `BAT1`...); vazia sem bateria |
+
+Fixos no `conky.conf`: sensor da CPU `hwmon coretemp` e os quatro núcleos
+`cpu1`..`cpu4`. Limites de alerta (vermelho): ponto de montagem >= 90%,
+bateria <= 20%.

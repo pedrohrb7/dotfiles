@@ -1,0 +1,26 @@
+#!/bin/sh
+# Roda depois do perfil virtual "horizontal" (o fallback "default" quando não
+# há perfil salvo para os monitores conectados). O horizontal enfileira as
+# saídas na ordem do xrandr (HDMI-1 antes de DP-1), o que deixa um monitor novo
+# à esquerda do principal. Aqui o principal vai para a esquerda e os outros
+# ficam à direita dele, na ordem do xrandr. Ver setup/README.md.
+xrandr --query | awk '
+/ connected/ && match($0, /[0-9]+x[0-9]+\+[0-9]+\+[0-9]+/) {
+	split(substr($0, RSTART, RLENGTH), geo, /[x+]/)
+	if ($3 == "primary") {
+		primary = $1
+		x = geo[1]
+	} else {
+		outputs[++n] = $1
+		width[n] = geo[1]
+	}
+}
+END {
+	if (primary == "" || n == 0) exit 1
+	cmd = "xrandr --output " primary " --pos 0x0"
+	for (i = 1; i <= n; i++) {
+		cmd = cmd " --output " outputs[i] " --pos " x "x0"
+		x += width[i]
+	}
+	print cmd
+}' | sh

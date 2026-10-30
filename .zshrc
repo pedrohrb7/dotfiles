@@ -113,8 +113,17 @@ export PATH=$PATH:$ANDROID_HOME/tools/bin
 export PATH=$PATH:$ANDROID_HOME/platform-tools
 export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"
 
-export MESA_SHADER_CACHE_DIR=/home/phrb/.cache/mesa_shader_cache
-alias startemulator='__NV_PRIME_RENDER_OFFLOAD=1 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json emulator -avd rn_pixel -gpu host'
+export MESA_SHADER_CACHE_DIR="$HOME/.cache/mesa_shader_cache"
+# Android emulator on the GPU: PRIME offload to the NVIDIA card when its
+# driver is loaded (hybrid notebook), otherwise the default (Mesa) GPU.
+startemulator() {
+  if [ -e /proc/driver/nvidia/version ] && [ -f /usr/share/vulkan/icd.d/nvidia_icd.json ]; then
+    __NV_PRIME_RENDER_OFFLOAD=1 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json \
+      emulator -avd rn_pixel -gpu host "$@"
+  else
+    emulator -avd rn_pixel -gpu host "$@"
+  fi
+}
 
 ########################################
 # NVM
