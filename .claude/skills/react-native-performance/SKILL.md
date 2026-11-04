@@ -1,6 +1,6 @@
 ---
 name: react-native-performance
-description: Deep React Native performance — FPS profiling, bundle size, TTI measurement, native threading, memory leaks, and profiling tools.
+description: Deep React Native performance - FPS profiling, bundle size, TTI measurement, native threading, memory leaks, and profiling tools. Use when a React Native or Expo app is slow, janky, drops frames, starts slowly, uses too much memory or has a large bundle, or when the user asks to profile, measure or optimize RN performance.
 metadata:
   author: maikotrindade
   version: "2026.5.0"

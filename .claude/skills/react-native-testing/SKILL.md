@@ -1,6 +1,6 @@
 ---
 name: react-native-testing
-description: Deep React Native Testing Library (RNTL) reference — v13 (React 18 sync) and v14 (React 19 async), queries, userEvent, matchers, anti-patterns.
+description: Deep React Native Testing Library (RNTL) reference - v13 (React 18 sync) and v14 (React 19 async), queries, userEvent, matchers, anti-patterns. Use when writing, fixing or reviewing Jest unit/component tests for React Native or Expo code, or when the project depends on @testing-library/react-native.
 metadata:
   author: maikotrindade
   version: "2026.5.0"

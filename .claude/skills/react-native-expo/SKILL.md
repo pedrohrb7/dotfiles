@@ -1,6 +1,6 @@
 ---
 name: react-native-expo
-description: Expo toolchain for React Native — Expo Router, EAS Build/Update/Deploy, native modules, SDK upgrading, and Expo UI/data patterns.
+description: Expo toolchain for React Native - Expo Router, EAS Build/Update/Deploy, native modules, SDK upgrading, and Expo UI/data patterns. Use when working in an Expo project (app.json/app.config, eas.json, expo-router), setting up file-based routes or layouts, configuring EAS builds, OTA updates or deploys, writing Expo modules or config plugins, or upgrading the Expo SDK.
 metadata:
   author: maikotrindade
   version: "2026.5.0"
@@ -8,7 +8,7 @@ metadata:
 
 # React Native Expo
 
-> Targets Expo SDK 52–56, Expo Router v4, and EAS. For ecosystem libraries (state, Reanimated, React Navigation) see the `react-native` skill. For shadcn/ui-style components see the `react-native-reusables` skill.
+> Targets Expo SDK 52–56, Expo Router v4, and EAS. For ecosystem libraries (state, Reanimated, React Navigation) see the `react-native-ecosystem` skill. For shadcn/ui-style components see the `react-native-reusables` skill.
 
 Expo provides a full-stack toolchain on top of React Native: file-based routing via Expo Router, cloud build/deploy infrastructure via EAS, a native module authoring API, and a curated SDK of first-party libraries. This skill covers the Expo layer exclusively.
 
