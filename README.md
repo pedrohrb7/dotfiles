@@ -18,6 +18,23 @@ sozinho a cada sessão. Ver [setup/README.md](setup/README.md).
 ~/dotfiles/setup/hardware.sh
 ```
 
+## SSH agent
+
+O `.zshrc` sobe um único `ssh-agent` num socket fixo
+(`~/.ssh/agent/agent.sock`) e todo terminal novo reaproveita esse mesmo agent,
+então não precisa mais de `eval "$(ssh-agent -s)"`. O `~/.ssh/config` (fora do
+repo, por máquina) precisa ter:
+
+```
+Host *
+  IdentityFile ~/.ssh/private/id_ed25519
+  AddKeysToAgent yes
+```
+
+Assim a chave entra no agent sozinha no primeiro `ssh`/`git push`. A
+passphrase é pedida uma vez por boot, porque o agent guarda as chaves só em
+memória.
+
 ## Packages
 
 VoidLinux base system

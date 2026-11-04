@@ -73,6 +73,19 @@ alias gpsb='git push bitbucket'
 alias gil='git log --decorate --graph --stat --all'
 
 ########################################
+# SSH agent (one shared agent for every shell)
+########################################
+# Fixed socket path so every terminal talks to the same agent.
+# Keys are added on first use via "AddKeysToAgent yes" in ~/.ssh/config.
+export SSH_AUTH_SOCK="$HOME/.ssh/agent/agent.sock"
+ssh-add -l &>/dev/null
+if [ $? -eq 2 ]; then   # 2 = no reachable agent
+  mkdir -p -m 700 "${SSH_AUTH_SOCK:h}"
+  rm -f "$SSH_AUTH_SOCK"
+  ssh-agent -a "$SSH_AUTH_SOCK" >/dev/null
+fi
+
+########################################
 # Rust settings (load)
 ########################################
 . ~/.cargo/env
