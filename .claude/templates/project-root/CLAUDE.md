@@ -16,11 +16,22 @@ See `PRD.md` for the full product context.
 
 ## Running locally
 
+From the repo root:
+
 ```
-cd services && docker-compose up
+cp .env.example .env
+docker compose up --build
 ```
 
-<!-- Add anything beyond that single command: required .env setup, seed data, first-run migrations. -->
+<!-- Add anything beyond that: seed data, first-run migrations. Each service can also run on its own - see its README.md. -->
+
+## CI
+
+One GitHub Actions workflow per service in `.github/workflows/<service>.yml`, triggered only by changes under `services/<service>/`. Each runs lint, typecheck and tests, the production build, and the Docker image build. Pushes to `main` also publish the image to GHCR. Actions are pinned by commit SHA and updated by Dependabot; never replace a SHA with a tag. See `DEPLOY.md`.
+
+## Docs
+
+`docs/` follows the project-docs structure: `plans/` (product side, business rules) and `specs/` (technical side, implementation order), written with `@planner` and executed with `/implement`. Bugs and refactors go to `docs/backlog/`.
 
 ## Documentation language
 

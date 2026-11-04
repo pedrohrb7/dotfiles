@@ -1,0 +1,27 @@
+# Copied to .github/dependabot.yml. Keeps the SHA-pinned actions and every service's dependencies current.
+# new-project adds one block per service (and a docker block per containerized service) from the examples below.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # --- per service: copy, set the ecosystem and directory, delete the examples that don't apply ---
+  # package-ecosystem values: npm (Node, React, React Native), maven, gradle, gomod, cargo, uv
+  # - package-ecosystem: npm
+  #   directory: /services/<service>
+  #   schedule:
+  #     interval: weekly
+  #   groups:
+  #     minor-and-patch:
+  #       update-types: [minor, patch]
+  #
+  # --- per containerized service: base image updates for its Dockerfile ---
+  # - package-ecosystem: docker
+  #   directory: /services/<service>
+  #   schedule:
+  #     interval: weekly

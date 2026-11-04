@@ -1,0 +1,44 @@
+# React Native / Expo app. Copied to .github/workflows/__SERVICE__.yml with __SERVICE__ replaced by the
+# folder name under services/. Quality gate only: no app build and no image (the app is not containerized).
+name: __SERVICE__
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/__SERVICE__/**
+      - .github/workflows/__SERVICE__.yml
+  pull_request:
+    paths:
+      - services/__SERVICE__/**
+      - .github/workflows/__SERVICE__.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: services/__SERVICE__
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: services/__SERVICE__/.nvmrc
+          cache: npm
+          cache-dependency-path: services/__SERVICE__/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test

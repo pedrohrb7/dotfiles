@@ -100,7 +100,11 @@ Subagents cannot spawn subagents, so chains like `test-runner` -> `quality-fixer
 
 Reference docs for how a new project should be structured, one per stack, each a `STRUCTURE.md` with the folder tree plus a "why this shape" section explaining the reasoning (so it can be adapted, not followed blindly). Used by the `new-project` skill; also readable directly.
 
-`project-root` is the wrapper every new project gets: root-level `CLAUDE.md`/`PRD.md`/`TASKS.md`/`OPEN_QUESTIONS.md`/`CONSTRAINTS.md`/`DEPLOY.md`/`DESIGN_SYSTEM.md`, a `docs/` folder (module specs/plans, reference SQL), and a `services/` folder holding one subfolder per service plus `docker-compose.yml`.
+`project-root` is the monorepo wrapper every new project gets: root-level `CLAUDE.md`/`PRD.md`/`TASKS.md`/`OPEN_QUESTIONS.md`/`CONSTRAINTS.md`/`DEPLOY.md`/`DESIGN_SYSTEM.md`, a root `docker-compose.yml` (services on their `dev` Dockerfile target + infra with healthchecks) with `.env.example` and `gitignore.template`, a `docs/` folder built from `docs-structure/` (plans, specs, backlog - what `@planner`, `/implement` and the agents expect), a `services/` folder with one subfolder per service, and `.github/` with one workflow per service.
+
+`ci/` holds the GitHub Actions templates: one workflow per stack (`node.yml` for NestJS/Express/React, `react-native.yml`, `spring-maven.yml`/`spring-gradle.yml`, `go.yml`, `python.yml`, `rust.yml`), the reusable `_docker-image.yml`, and `dependabot.yml`. Each service's workflow runs only when `services/<service>/**` changes: `quality` (lint, typecheck, tests) and `build` in parallel, then `image` (Docker build, published to GHCR on pushes to `main`); mobile runs `quality` only. Every action is pinned by commit SHA and kept current by Dependabot. `ci/README.md` documents placeholders, variants (pnpm/yarn, test database) and what each service must provide.
+
+`new-project` accepts a one-line profile, e.g. `/new-project shop backend=nestjs frontend=react infra=postgres,redis ci=full docs=pt` (services, stacks, infra, `ci=full|check|none`, docs language), asks only for what is missing, and shows the tree for confirmation before writing anything.
 
 Each of the other templates describes the contents of one `services/<name>/` folder, not a repo root by itself: `node-nestjs-api`, `node-express-typeorm-api`, `node-express-prisma-api`, `spring-boot-api` (backend), `node-ts-react` (frontend), `react-native` (mobile), plus the generic `go`, `python`, `rust`.
 

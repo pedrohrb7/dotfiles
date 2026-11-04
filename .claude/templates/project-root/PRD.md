@@ -42,11 +42,11 @@
 
 ## Scope
 
-<!-- What ships in v1 vs later. Link to docs/modules/<module>/spec.md for the technical detail behind each piece rather than duplicating it here. -->
+<!-- What ships in v1 vs later. Link to the feature's plan (product detail) and spec (technical detail) in docs/ rather than duplicating them here. -->
 
-| Module | In v1? | Spec |
-|---|---|---|
-| | | `docs/modules/<module>/spec.md` |
+| Feature | In v1? | Plan | Spec |
+|---|---|---|---|
+| | | `docs/plans/<file>.md` | `docs/specs/<file>.md` |
 
 ## Constraints and open questions
 

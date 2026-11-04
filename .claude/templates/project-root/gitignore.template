@@ -1,0 +1,57 @@
+# Copied to the repo root as .gitignore (stored under another name so it does not apply inside the
+# dotfiles repo). new-project keeps the shared section plus the sections for the stacks in use.
+
+# --- shared ---
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+coverage/
+
+# --- node (NestJS, Express, React, React Native) ---
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# --- react-native / expo ---
+.expo/
+ios/Pods/
+android/.gradle/
+android/app/build/
+*.jks
+*.keystore
+!debug.keystore
+
+# --- java (Spring) ---
+target/
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+
+# --- go ---
+bin/
+*.test
+*.out
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# --- rust ---
+target/
