@@ -49,6 +49,39 @@ Xorg tentando esse driver antes de cair no modesetting, e não é erro.
 | `awesome/config/autostart.lua`         | inicia o PipeWire quando o socket não existe (`artix-pipewire-launcher` no Artix, `pipewire` no Void) |
 | `.zshrc` (`startemulator`)             | emulador Android com PRIME offload na NVIDIA só se o driver estiver carregado |
 
+## Webcam USB (DV20): câmera virtual "Webcam ampla"
+
+O modo 16:9 da webcam USB DV20 (Jieli, `1280x720`) é um recorte do sensor e
+deixa a imagem perto demais; o `640x480` mostra o campo inteiro. A câmera
+também liga com contraste, saturação e nitidez zerados.
+`setup/webcam-ampla.sh` instala o `v4l2loopback` (DKMS), cria a câmera virtual
+`/dev/video10` ("Webcam ampla") e o serviço runit `webcam-ampla`, que corrige
+os controles e roda um `ffmpeg` lendo o `640x480` e entregando `854x480` (16:9)
+com faixas pretas nas laterais. Não corta nada: cortar o 4:3 em cima e embaixo
+para virar 16:9 (`640x360`) deixava o rosto ocupando mais do quadro e voltava a
+parecer zoom.
+
+```sh
+~/dotfiles/setup/webcam-ampla.sh -n   # mostra o que faria
+~/dotfiles/setup/webcam-ampla.sh      # instala (pede sudo)
+~/dotfiles/setup/webcam-ampla.sh -r   # remove tudo
+ffplay /dev/video10                   # testar
+```
+
+No Meet/navegador, escolha a câmera "Webcam ampla". Com o serviço rodando, a
+webcam fica sempre ligada (LED aceso) e só a câmera virtual fica disponível
+para os apps. Desligar fora das reuniões: `sudo sv down webcam-ampla` (religar:
+`sudo sv up webcam-ampla`). Para não subir no boot:
+`sudo touch /etc/sv/webcam-ampla/down`. O `exclusive_caps=1` do módulo é o que
+faz o Chrome/Vivaldi listarem a câmera virtual: ela só aparece como câmera
+enquanto o serviço estiver escrevendo nela.
+
+A webcam às vezes trava mandando só quadros MJPEG corrompidos (`Dequeued v4l2
+buffer contains corrupted data`), e o `ffmpeg` fica esperando para sempre. Por
+isso o serviço, antes de começar, exige 5 quadros em 8 s; se não vierem, ele
+desconecta e reconecta a USB da webcam (`authorized` 0/1 no sysfs, o mesmo que
+tirar e pôr o cabo) e o runit tenta de novo.
+
 ## Conferir a aceleração
 
 ```sh
