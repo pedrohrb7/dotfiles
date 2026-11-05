@@ -73,6 +73,19 @@ alias gpsb='git push bitbucket'
 alias gil='git log --decorate --graph --stat --all'
 
 ########################################
+# SSH agent (one shared agent for every shell)
+########################################
+# Fixed socket path so every terminal talks to the same agent.
+# Keys are added on first use via "AddKeysToAgent yes" in ~/.ssh/config.
+export SSH_AUTH_SOCK="$HOME/.ssh/agent/agent.sock"
+ssh-add -l &>/dev/null
+if [ $? -eq 2 ]; then   # 2 = no reachable agent
+  mkdir -p -m 700 "${SSH_AUTH_SOCK:h}"
+  rm -f "$SSH_AUTH_SOCK"
+  ssh-agent -a "$SSH_AUTH_SOCK" >/dev/null
+fi
+
+########################################
 # Rust settings (load)
 ########################################
 . ~/.cargo/env
@@ -113,8 +126,17 @@ export PATH=$PATH:$ANDROID_HOME/tools/bin
 export PATH=$PATH:$ANDROID_HOME/platform-tools
 export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"
 
-export MESA_SHADER_CACHE_DIR=/home/phrb/.cache/mesa_shader_cache
-alias startemulator='__NV_PRIME_RENDER_OFFLOAD=1 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json emulator -avd rn_pixel -gpu host'
+export MESA_SHADER_CACHE_DIR="$HOME/.cache/mesa_shader_cache"
+# Android emulator on the GPU: PRIME offload to the NVIDIA card when its
+# driver is loaded (hybrid notebook), otherwise the default (Mesa) GPU.
+startemulator() {
+  if [ -e /proc/driver/nvidia/version ] && [ -f /usr/share/vulkan/icd.d/nvidia_icd.json ]; then
+    __NV_PRIME_RENDER_OFFLOAD=1 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json \
+      emulator -avd rn_pixel -gpu host "$@"
+  else
+    emulator -avd rn_pixel -gpu host "$@"
+  fi
+}
 
 ########################################
 # NVM

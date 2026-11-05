@@ -5,6 +5,7 @@ local gears = require("gears")
 local vars = require("config.vars")
 local keyboard = require("config.keyboard")
 local battery = require("config.battery")
+local brightness = require("config.brightness")
 
 local SUPER = vars.SUPER
 local ALT = vars.ALT
@@ -32,21 +33,21 @@ local globalkeys = gears.table.join(
 	-- #############################################
 
 	-- #############################################
-	-- Brightness
+	-- Brightness (backlight or monitor DDC/CI), see config/brightness.lua
 	awful.key({}, "XF86MonBrightnessUp", function()
-		awful.spawn("brightnessctl set +2%", false)
+		brightness.change(2)
 	end, { description = "increase brightness", group = "custom" }),
 
 	awful.key({}, "XF86MonBrightnessDown", function()
-		awful.spawn("brightnessctl set 2%-", false)
+		brightness.change(-2)
 	end, { description = "decrease brightness", group = "custom" }),
 	--
 	-- Alternatively, keybindings to control brightness:
 	awful.key({ SUPER, "Shift" }, "g", function()
-		awful.spawn("brightnessctl set +2%", false)
+		brightness.change(2)
 	end),
 	awful.key({ SUPER, "Shift" }, "f", function()
-		awful.spawn("brightnessctl set 2%-", false)
+		brightness.change(-2)
 	end),
 	-- #############################################
 

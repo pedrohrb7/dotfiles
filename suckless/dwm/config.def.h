@@ -95,7 +95,8 @@ static const char *const autostart[] = {
     NULL,
     "pasystray",
     NULL,
-    "/home/phrb/.fehbg_dwm",
+    /* execvp doesn't expand $HOME: go through sh; skip if feh never ran */
+    "sh", "-c", "[ -x \"$HOME/.fehbg_dwm\" ] && exec \"$HOME/.fehbg_dwm\"",
     NULL,
     NULL /* terminate */
 };

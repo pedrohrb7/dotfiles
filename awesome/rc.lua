@@ -29,6 +29,10 @@ require("config.notifications")
 require("config.battery").init()
 -- }}}
 
+-- {{{ Brightness (backlight or DDC/CI, shared by the wibar widget and the keys)
+require("config.brightness").init({ timeout = 2 })
+-- }}}
+
 -- {{{ Wibar
 require("config.wibar").init()
 -- }}}

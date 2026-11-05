@@ -4,11 +4,16 @@ Painel de sistema fixo no desktop, coluna à direita abaixo da wibar do awesome.
 Template próprio (`conky.conf`, sintaxe Lua do conky 1.10+), com a paleta Tokyo
 Night de `awesome/config/styles/color.lua`.
 
-Seções: sistema, CPU (gráfico, frequência, temperatura, uso por núcleo), memória,
-disco (`/`, `/mnt/data`, I/O e temperatura do NVMe), rede (Wi-Fi, Ethernet e VPN,
-cada uma só aparece quando tem IP), Bluetooth (um bloco por adaptador, dongle
+Seções: sistema, CPU (gráfico, frequência, temperatura, uso por núcleo), GPU
+(NVIDIA ou Intel: modelo, clock, uso com gráfico, temperatura e, na NVIDIA, VRAM),
+memória, disco (cada ponto de montagem, I/O e temperatura de cada disco), rede
+(Wi-Fi, Ethernet e VPN, cada uma só aparece quando tem IP), Bluetooth (um bloco por adaptador, dongle
 USB e interno, com os dispositivos conectados e a bateria de cada um quando o
-dispositivo informa), top 3 processos por CPU e top 3 por memória, e bateria.
+dispositivo informa), top 3 processos por CPU e top 3 por memória, e bateria
+(só em máquina com bateria).
+
+O mesmo `conky.conf` serve em qualquer máquina: o que depende do hardware é
+detectado ao rodar (ver [Detecção do hardware](#detecção-do-hardware)).
 
 Clicar na seção Bluetooth abre o `blueman-manager`.
 
@@ -60,6 +65,25 @@ separados por espaço, então valores com espaço não podem ser argumento):
 | `template3` | linha do top por memória: `${template3 <n>}` |
 | `template4` | bloco de rede: `${template4 <interface>}` |
 
+## GPU
+
+`gpu.lua` escolhe a placa uma vez, ao carregar:
+
+| Backend | Quando                            | De onde vêm os valores |
+| ------- | --------------------------------- | ---------------------- |
+| NVIDIA  | `nvidia-smi` responde (driver carregado) | `nvidia-smi --query-gpu`: o conky do Void não é compilado com `${nvidia}`. Uma chamada (~20 ms) por atualização serve todos os campos |
+| Intel   | senão, se há iGPU Intel com i915 ou xe | sysfs, sem root: clock real (`rps_act_freq_mhz`), uso pela residência RC6 (100% menos a fração do intervalo em que a GPU dormiu), temperatura do pacote da CPU (`coretemp`; a iGPU não tem sensor próprio). Não há VRAM: a memória é a RAM, e as linhas de VRAM somem |
+
+No Acer com o optimus em modo integrado (NVIDIA desligada), a seção mostra a Intel.
+
+| Em `conky.text`             | O quê                                                   |
+| --------------------------- | ------------------------------------------------------- |
+| `${lua gpu <campo>}`        | `ok` (1/0), `name`, `util`, `temp`, `clock` (MHz), `has_vram` (1/0), `vram`, `vram_perc` |
+| `${lua_graph gpu_util ...}` | gráfico do uso da GPU (%)                               |
+| `${lua_bar gpu_vram}`       | barra da VRAM usada (%)                                 |
+
+Sem nenhuma das duas, a seção mostra "GPU não detectada".
+
 ## Bluetooth e cliques
 
 | Arquivo         | O quê                                                                 |
@@ -78,13 +102,37 @@ rede, e a área clicável é calculada a partir do fim da janela: no clique, o
 `LINE_HEIGHT` (16 px para FiraCode Nerd Font size=9) logo acima dessas linhas.
 Assim a conta acompanha as seções que mudam de altura (bateria).
 
+### Bateria dos dispositivos
+
+A bateria vem do `org.bluez.Battery1`. Controles de jogo (DualShock 4 e
+clones via `hid-playstation`/`hid-sony`, Switch via `hid-nintendo`) não
+reportam ao BlueZ: o driver cria `/sys/class/power_supply/*<mac em
+minúsculas>`, e o `bluetooth.sh` lê o `capacity` de lá como fallback.
+
+Controle "conectado" sem bateria e sem funcionar como joystick: o BlueZ
+recusa HID clássico de dispositivo sem bond (`ClassicBondedOnly=true`, padrão
+em `/etc/bluetooth/input.conf`). Conferir `Bonded: yes` em
+`bluetoothctl info <mac>`; se for `no`, remover e parear de novo.
+
 Restrições: as seções abaixo do Bluetooth não podem ter gráficos (`*graph`
 deixa a linha mais alta que `LINE_HEIGHT`). Ao trocar a fonte, ajustar
 `LINE_HEIGHT` em `click.lua`.
 
 Dependências: `bluez`, `jq`, `blueman`.
 
-Valores específicos desta máquina (trocar em outra): interfaces `wlp2s0`,
-`enp3s0f1`, `tun0`; disco `nvme0n1`; ponto de montagem `/mnt/data`; bateria
-`BAT1`; sensores `hwmon coretemp` e `hwmon nvme`. Limites de alerta (vermelho):
-disco `/` >= 90%, bateria <= 20%.
+## Detecção do hardware
+
+`system.lua` gera as seções que mudam de máquina para máquina, com as
+variáveis do conky já apontando para os nomes certos. A detecção roda a cada
+10 s (`INTERVAL`), então um pendrive montado ou uma VPN aparecem sozinhos; os
+valores em si atualizam a cada `update_interval`.
+
+| Em `conky.text`       | O quê                                                                 |
+| --------------------- | --------------------------------------------------------------------- |
+| `${lua_parse disks}`  | cada partição montada de `/proc/mounts` (fora `/boot*`, `/efi`, `/var/lib/docker`, `/snap` e binds da mesma partição), e uma linha de I/O por disco com o rótulo `NVMe`, `SSD`, `HDD` ou `USB` (o nome do disco quando dois são do mesmo tipo) e a temperatura se o disco tiver hwmon (`nvme`, ou `drivetemp` para SATA) |
+| `${lua_parse network}`| Wi-Fi (`phy80211`), Ethernet (placa física: `docker0`, `veth*`, `br-*` ficam de fora) e VPN (`tun`/`tap`, `wg*`), cada uma dentro de `${if_up}` |
+| `${lua_parse battery}`| a seção BATERIA inteira, com a primeira bateria do próprio computador (`BAT0`, `BAT1`...); vazia sem bateria |
+
+Fixos no `conky.conf`: sensor da CPU `hwmon coretemp` e os quatro núcleos
+`cpu1`..`cpu4`. Limites de alerta (vermelho): ponto de montagem >= 90%,
+bateria <= 20%.

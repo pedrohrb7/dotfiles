@@ -1,0 +1,85 @@
+# Python service (uv). Copied to .github/workflows/__SERVICE__.yml with __SERVICE__ replaced by the
+# folder name under services/. See README.md in this folder for variants.
+name: __SERVICE__
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/__SERVICE__/**
+      - .github/workflows/__SERVICE__.yml
+      - .github/workflows/_docker-image.yml
+  pull_request:
+    paths:
+      - services/__SERVICE__/**
+      - .github/workflows/__SERVICE__.yml
+      - .github/workflows/_docker-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: services/__SERVICE__
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # infra:postgres - uncomment when integration tests need a database.
+    # services:
+    #   postgres:
+    #     image: postgres:18-alpine
+    #     env:
+    #       POSTGRES_USER: app
+    #       POSTGRES_PASSWORD: app
+    #       POSTGRES_DB: app_test
+    #     ports: ["5432:5432"]
+    #     options: >-
+    #       --health-cmd "pg_isready -U app" --health-interval 5s --health-timeout 5s --health-retries 10
+    # env:
+    #   DATABASE_URL: postgresql://app:app@localhost:5432/app_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          working-directory: services/__SERVICE__
+          enable-cache: true
+          cache-dependency-glob: services/__SERVICE__/uv.lock
+      - run: uv sync --locked --all-extras --dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy .
+      - run: uv run pytest
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          working-directory: services/__SERVICE__
+          enable-cache: true
+          cache-dependency-glob: services/__SERVICE__/uv.lock
+      - run: uv build
+
+  # ci=full only. Remove this job for ci=check.
+  image:
+    needs: [quality, build]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/_docker-image.yml
+    with:
+      service: __SERVICE__
+      push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}

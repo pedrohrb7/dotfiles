@@ -24,7 +24,7 @@ npm install
 npm run dev
 ```
 
-Serves at `http://localhost:<port>`. Or from the project root: `cd services && docker-compose up frontend`.
+Serves at `http://localhost:<port>`. Or from the project root: `docker compose up frontend`.
 
 ## Testing
 

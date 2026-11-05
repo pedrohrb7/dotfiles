@@ -8,6 +8,7 @@ config/
   handle-errors.lua         -- notifica erros de startup/runtime (naughty)
   notifications.lua         -- presets e espaçamento do naughty
   battery.lua               -- avisos de bateria baixa/crítica (naughty, sem widget)
+  brightness.lua            -- brilho: backlight (brightnessctl) ou monitor por DDC/CI (ddcutil), usado pelo widget e pelas teclas
   vars.lua                  -- SUPER/ALT, terminal/browser/fileManager, ordem dos layouts
   theme.lua                 -- tema único (beautiful init)
   wibar.lua                 -- wibar por tela: tags, layoutbox, clock, systray, brilho/mic/volume (rede e Bluetooth desativados: ficam no conky)
@@ -15,9 +16,9 @@ config/
   keys/
     global.lua               -- atalhos globais (launchers, tags, layout, foco)
     client.lua                -- atalhos e botões por cliente (usados em rules.lua)
-  rules.lua                 -- awful.rules.rules (floating, titlebars, placement, conky fixo no desktop)
+  rules.lua                 -- awful.rules.rules (floating, titlebars, placement, conky fixo no desktop e sem tag, para não marcar a tag 1 como ocupada)
   signals.lua                -- sinais de client (manage, titlebars, foco)
-  autostart.lua              -- pipewire/picom/conky (ver ../conky/README.md)
+  autostart.lua              -- layout de monitores (autorandr, ver ../setup/README.md), pipewire (se o socket não existe)/picom/conky (ver ../conky/README.md)
   styles/                    -- paleta de cores compartilhada
 .xinitrc                    -- carrega .Xresources, exporta XCURSOR_* e inicia o awesome
 .Xresources                 -- tema e tamanho do cursor (Xcursor.*)
@@ -28,15 +29,20 @@ gtk-3.0/settings.ini        -- tema de cursor dos apps GTK (link em ~/.config/gt
 ## Layout do teclado (us/br)
 
 `Control + Alt + Space` alterna entre os grupos XKB `us` e `br`. Os dois layouts
-são definidos como padrão do servidor X em `/etc/X11/xorg.conf.d/00-keyboard.conf`:
+são definidos como padrão do servidor X em `/etc/X11/xorg.conf.d/00-keyboard.conf`,
+instalado por `setup/hardware.sh` a partir de `xorg_config/keyboard.conf`:
 
 ```
 Section "InputClass"
     Identifier "system-keyboard"
     MatchIsKeyboard "on"
     Option "XkbLayout" "us,br"
+    Option "XkbModel" "pc105+inet"
+    Option "XkbOptions" "terminate:ctrl_alt_bksp"
 EndSection
 ```
+
+Vale a partir do próximo início do X (logout ou reboot).
 
 Não use `setxkbmap` no `.xinitrc`/`.xprofile`: ele só altera o keymap em runtime,
 e qualquer teclado conectado depois (USB, Bluetooth) faz o Xorg voltar ao padrão
@@ -122,3 +128,27 @@ awesome-client "require('config.battery').init({ path = '/tmp/ps', timeout = 2 }
 
 onde `/tmp/ps/AC/uevent` e `/tmp/ps/BAT0/uevent` contêm linhas
 `POWER_SUPPLY_*` como as de `/sys/class/power_supply`.
+
+## Brilho
+
+`config/brightness.lua` detecta o backend uma vez, ao iniciar o awesome, e é
+usado pelo widget da wibar (scroll, 5%) e pelas teclas `XF86MonBrightnessUp/Down`
+e `Super+Shift+G/F` (2%):
+
+| Backend     | Quando                                         | Como                                  |
+| ----------- | ---------------------------------------------- | ------------------------------------- |
+| `backlight` | existe `/sys/class/backlight/*` (notebook)     | `brightnessctl`, lido a cada 2 s      |
+| `ddc`       | senão, `ddcutil detect` acha um monitor        | `ddcutil --bus N getvcp/setvcp 10`, lido a cada 30 s (cada leitura passa pelo I2C do monitor) |
+| `none`      | nenhum dos dois                                | widget escondido, teclas sem efeito   |
+
+O DDC/CI é lento (~100-300 ms por comando) e o monitor recusa comandos
+sobrepostos: as chamadas rodam uma de cada vez, e vários passos seguidos de
+scroll ou tecla viram uma única escrita do último valor. O widget mostra o
+valor novo na hora. Instalação do `ddcutil` e do `i2c-dev`: `setup/hardware.sh`
+(ver `../setup/README.md`).
+
+Conferir o backend detectado:
+
+```
+awesome-client 'local b = require("config.brightness") return b.backend, b.get()'
+```

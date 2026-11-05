@@ -6,29 +6,43 @@
 
 | Environment | URL | Deploys from | Purpose |
 |---|---|---|---|
-| Local | `services/docker-compose.yml` | - | Development |
+| Local | `docker compose up` (root `docker-compose.yml`) | working tree | Development |
 | Staging | | | |
 | Production | | | |
 
+## CI and images
+
+Each service has its own workflow in `.github/workflows/<service>.yml`, triggered only by changes under `services/<service>/` (or the workflow itself).
+
+| Job | Runs | When |
+|---|---|---|
+| `quality` | lint, typecheck, tests | PRs and pushes to `main` |
+| `build` | production build | PRs and pushes to `main` |
+| `image` | Docker build (reusable `_docker-image.yml`) | after `quality` and `build` pass |
+| publish | push to `ghcr.io/<owner>/<repo>-<service>` with tags `sha-<short sha>` and `latest` | pushes to `main` only |
+
+<!-- Mobile apps run `quality` only. Remove rows for services that don't exist. -->
+
 ## Deploying a service
 
-<!-- One subsection per service that ships independently. If every service deploys together, one section is enough - say so. -->
+<!-- One subsection per service that ships independently. Deployment is not automated by the template: the published image is the hand-off point. Document here how an image tag reaches each environment once that exists. -->
 
 ### `services/<name>`
 
+- Image: `ghcr.io/<owner>/<repo>-<name>:sha-<short sha>`
 - Trigger:
-- Pipeline: <link to the CI config that runs it>
-- Steps a human takes, if any beyond "merge to `<branch>`":
+- Pipeline: `.github/workflows/<name>.yml`
+- Steps a human takes, if any beyond "merge to `main`":
 
 ## Secrets and config
 
-<!-- Where secrets actually live (vault/secrets manager/CI env vars) - never in this file, never committed. How to add a new one for a new service or integration. -->
+<!-- Where secrets actually live (vault/secrets manager/GitHub Actions secrets and environments) - never in this file, never committed. How to add a new one for a new service or integration. Local values live in .env (from .env.example). -->
 
 -
 
 ## Rollback
 
-<!-- Concrete steps per service. "Revert the commit and redeploy" is a valid answer if that's genuinely how it works - just say so instead of leaving this blank. -->
+<!-- Concrete steps per service. Redeploying the previous `sha-` image tag is a valid answer if that's genuinely how it works - just say so instead of leaving this blank. -->
 
 -
 

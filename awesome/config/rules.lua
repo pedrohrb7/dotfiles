@@ -71,6 +71,9 @@ return {
 	-- Conky (~/dotfiles/conky): part of the desktop, not a regular window.
 	-- Visible on every tag, kept below everything, never focused, no border,
 	-- out of the tasklist, and left where conky positions itself.
+	-- It also belongs to no tag (sticky alone keeps it visible), otherwise the
+	-- taglist shows the tag it was mapped on as occupied. awful re-tags clients
+	-- left without tags (after the rules, on screen changes), hence the signal.
 	{
 		rule = { class = "Conky" },
 		properties = {
@@ -81,6 +84,12 @@ return {
 			skip_taskbar = true,
 			placement = function() end,
 		},
+		callback = function(c)
+			c:tags({})
+			c:connect_signal("tagged", function()
+				c:tags({})
+			end)
+		end,
 	},
 
 	-- Add titlebars to normal clients and dialogs
