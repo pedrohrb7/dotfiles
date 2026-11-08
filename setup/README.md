@@ -20,7 +20,7 @@ sessão. Se instalou driver ou microcódigo, reinicie o computador.
 | --------------------------- | -------------------------------------------------------------------- |
 | sempre                      | programas que o awesome e o conky chamam (`pamixer`, `jq`, `blueman`, `rofi`, `flameshot`, `autorandr`...), `mesa-dri`, `vulkan-loader` e as ferramentas de diagnóstico `glxinfo` (`mesa-demos`), `vulkaninfo` (`Vulkan-Tools`) e `vainfo` (`libva-utils`) |
 | GPU Intel                   | `mesa-vulkan-intel` (Vulkan), `intel-media-driver` (VA-API: vídeo por hardware no navegador/mpv), `intel-gpu-tools` (`intel_gpu_top`) |
-| GPU NVIDIA                  | `nvidia`, `nvidia-libs-32bit` e os confs de `xorg_config/` em `/etc/X11/xorg.conf.d/`, com o `BusID` da máquina |
+| GPU NVIDIA                  | driver (`<série>` e `<série>-libs-32bit`, ver [NVIDIA](#nvidia-prime-offload)) e `xorg_config/10-nvidia-drm-outputclass.conf` em `/etc/X11/xorg.conf.d/`; um `10-optimus-manager.conf` (NVIDIA como principal) vira `.bak` |
 | sem NVIDIA                  | renomeia para `.bak` os confs da NVIDIA que estiverem em `/etc/X11/xorg.conf.d/`: sem a placa, o X não inicia com eles |
 | GPU AMD                     | `mesa-vulkan-radeon`, `mesa-vaapi`                                   |
 | CPU Intel                   | `intel-ucode` e gera o initramfs de novo (`xbps-reconfigure -f linuxX.Y`) |
@@ -30,7 +30,30 @@ sessão. Se instalou driver ou microcódigo, reinicie o computador.
 | touchpad                    | `xorg_config/70-touchpad-settings.conf` (tap para clicar)            |
 
 Os pacotes da NVIDIA e o `intel-ucode` vêm dos repositórios nonfree; o script
-instala `void-repo-nonfree` (e o multilib, para `nvidia-libs-32bit`) antes.
+instala `void-repo-nonfree` (e o multilib, para o `-libs-32bit`) antes.
+
+## NVIDIA (PRIME offload)
+
+Num notebook híbrido (Acer Nitro: Intel + GTX 1050) a Intel desenha a tela e
+a NVIDIA fica disponível sob demanda: o `10-nvidia-drm-outputclass.conf` não
+tem `PrimaryGPU`, e a NVIDIA aparece como provider `NVIDIA-G0`. Para rodar um
+programa nela:
+
+```sh
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia programa
+xrandr --listproviders   # modesetting + NVIDIA-G0
+```
+
+Série do driver:
+
+| Situação                                  | Pacote      |
+| ----------------------------------------- | ----------- |
+| já existe uma série instalada (`nvidia`, `nvidia580`, `nvidia470`, `nvidia390`) | mantém essa: trocar de série é decisão manual |
+| Turing em diante (GTX 16xx, RTX; device ID >= `0x1e00`) | `nvidia`    |
+| Maxwell, Pascal (GTX 1050 do Acer), Volta | `nvidia580` (o `nvidia` atual não suporta mais) |
+| Kepler e anteriores                       | o script para e pede para instalar `nvidia470`/`nvidia390` à mão |
+
+Device ID: `cat /sys/bus/pci/devices/0000:01:00.0/device` (ou `lspci -nn`).
 
 Na Intel o Xorg usa o driver `modesetting` embutido (glamor + DRI3), que é o
 recomendado. Não instale o `xf86-video-intel`: é legado e pior nas gerações

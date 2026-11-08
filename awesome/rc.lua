@@ -54,6 +54,10 @@ awful.rules.rules = require("config.rules")
 require("config.signals")
 -- }}}
 
+-- {{{ Screen hotplug (windows of a disconnected monitor go to a free tag)
+require("config.screens").init()
+-- }}}
+
 -- {{{ Autostart
 require("config.autostart").init()
 -- }}}

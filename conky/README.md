@@ -1,18 +1,18 @@
 # conky
 
-Painel de sistema fixo no desktop, coluna à direita abaixo da wibar do awesome.
-Template próprio (`conky.conf`, sintaxe Lua do conky 1.10+), com a paleta Tokyo
-Night de `awesome/config/styles/color.lua`.
+Painel de sistema fixo no desktop, em duas colunas abaixo da wibar do awesome,
+uma em cada lado da tela. Template próprio (sintaxe Lua do conky 1.10+), com a
+paleta Tokyo Night de `awesome/config/styles/color.lua`.
 
-Seções: sistema, CPU (gráfico, frequência, temperatura, uso por núcleo), GPU
-(NVIDIA ou Intel: modelo, clock, uso com gráfico, temperatura e, na NVIDIA, VRAM),
-memória, disco (cada ponto de montagem, I/O e temperatura de cada disco), rede
-(Wi-Fi, Ethernet e VPN, cada uma só aparece quando tem IP), Bluetooth (um bloco por adaptador, dongle
-USB e interno, com os dispositivos conectados e a bateria de cada um quando o
-dispositivo informa), top 3 processos por CPU e top 3 por memória, e bateria
-(só em máquina com bateria).
+| Arquivo      | O quê                                                                 |
+| ------------ | --------------------------------------------------------------------- |
+| `right.conf` | coluna da direita: CPU (gráfico, frequência, temperatura, uso por núcleo), GPU (NVIDIA ou Intel: modelo, clock, uso com gráfico, temperatura e, na NVIDIA, VRAM), memória, disco (cada ponto de montagem, I/O e temperatura de cada disco) e bateria (só em máquina com bateria) |
+| `left.conf`  | coluna da esquerda: sistema, rede (Wi-Fi, Ethernet e VPN, cada uma só aparece quando tem IP), Bluetooth (um bloco por adaptador, dongle USB e interno, com os dispositivos conectados e a bateria de cada um quando o dispositivo informa), top 3 processos por CPU e top 3 por memória |
+| `common.lua` | o que as duas compartilham: janela, tamanho, fonte, intervalo, paleta e templates |
 
-O mesmo `conky.conf` serve em qualquer máquina: o que depende do hardware é
+Cada coluna é uma instância do conky (`conky -c <arquivo>`).
+
+O mesmo par de arquivos serve em qualquer máquina: o que depende do hardware é
 detectado ao rodar (ver [Detecção do hardware](#detecção-do-hardware)).
 
 Clicar na seção Bluetooth abre o `blueman-manager`.
@@ -24,8 +24,14 @@ sudo xbps-install -S conky
 ln -s ~/dotfiles/conky ~/.config/conky
 ```
 
-O awesome inicia o conky sozinho (`awesome/config/autostart.lua`, só se o binário
-existir). Para iniciar na mão: `conky --daemonize`.
+O awesome inicia as duas colunas sozinho (`awesome/config/autostart.lua`, só se
+o binário existir). Cada uma é conferida pelo próprio arquivo (`pgrep -f`), então
+um restart do awesome sobe só a que estiver faltando. Para iniciar na mão:
+
+```sh
+conky -c ~/.config/conky/right.conf --daemonize
+conky -c ~/.config/conky/left.conf --daemonize
+```
 
 ## Fixo no desktop, não como janela
 
@@ -33,8 +39,10 @@ Dois lados garantem isso:
 
 | Onde                          | O quê                                                                 |
 | ----------------------------- | --------------------------------------------------------------------- |
-| `conky.conf`                  | `own_window_type = "desktop"` e hints `undecorated,below,sticky,skip_taskbar,skip_pager` |
+| `common.lua`                  | `own_window_type = "desktop"` e hints `undecorated,below,sticky,skip_taskbar,skip_pager` |
 | `awesome/config/rules.lua`    | regra `class = "Conky"`: `sticky`, `below`, `focusable = false`, sem borda, fora da tasklist, sem placement do awesome |
+
+As duas janelas usam a classe `Conky` e entram na mesma regra.
 
 Resultado: aparece em todas as tags, fica atrás das janelas, não recebe foco e
 não aparece na tasklist. Cliques chegam ao conky quando não há janela por cima
@@ -45,13 +53,18 @@ A transparência (`own_window_argb_*`) depende do picom. O autostart usa
 
 ## Editar
 
-Recarregar: o conky relê o `conky.conf` sozinho ao salvar. Se não, `pkill conky && conky --daemonize`.
+Recarregar: cada instância relê o próprio `right.conf`/`left.conf` sozinha ao
+salvar. O `common.lua` não é observado: depois de editá-lo, salvar os dois
+`.conf` (ou `pkill -x conky` e iniciar de novo, ver [Instalar](#instalar)).
 
-Estrutura do arquivo:
+Estrutura:
 
-- `conky.config`: janela, posição (`alignment`, `gap_x`, `gap_y`, largura), fonte,
-  intervalo, paleta (`color0`..`color7`) e templates.
-- `conky.text`: o layout. `${colorN}` muda a cor, `${goto X}` vai para a coluna X
+- `common.lua`: `BASE` com janela, `gap_x`/`gap_y`, largura, fonte, intervalo,
+  paleta (`color0`..`color7`) e templates. `config(overrides)` devolve `BASE`
+  com as chaves da coluna por cima.
+- `right.conf`/`left.conf`: `conky.config` com só o que é da coluna
+  (`alignment`, `own_window_title`, `lua_load` e, na esquerda,
+  `lua_mouse_hook`), e `conky.text`, o layout da coluna. `${colorN}` muda a cor, `${goto X}` vai para a coluna X
   em pixels, `${alignr}` alinha à direita.
 
 Templates (`${templateN arg1 arg2}`, os argumentos substituem `\1`, `\2`; são
@@ -95,12 +108,13 @@ Sem nenhuma das duas, a seção mostra "GPU não detectada".
 ### Cliques
 
 O conky (compilado com "Mouse events", ver `conky -v`) chama `conky_on_mouse`
-com as coordenadas relativas à janela. A seção Bluetooth fica logo abaixo da
+com as coordenadas relativas à janela. Só a coluna da esquerda (`left.conf`)
+carrega o `click.lua` e o `lua_mouse_hook`. A seção Bluetooth fica logo abaixo da
 rede, e a área clicável é calculada a partir do fim da janela: no clique, o
-`click.lua` lê o `conky.text`, renderiza com `conky_parse` o trecho depois de
+`click.lua` lê o `conky.text` do `left.conf`, renderiza com `conky_parse` o trecho depois de
 `${lua_parse bluetooth}` e conta as linhas. A seção ocupa `bluetooth_lines` x
 `LINE_HEIGHT` (16 px para FiraCode Nerd Font size=9) logo acima dessas linhas.
-Assim a conta acompanha as seções que mudam de altura (bateria).
+Assim a conta acompanha as seções abaixo dele, se mudarem de altura.
 
 ### Bateria dos dispositivos
 
@@ -123,7 +137,8 @@ Dependências: `bluez`, `jq`, `blueman`.
 ## Detecção do hardware
 
 `system.lua` gera as seções que mudam de máquina para máquina, com as
-variáveis do conky já apontando para os nomes certos. A detecção roda a cada
+variáveis do conky já apontando para os nomes certos. As duas colunas carregam
+o `system.lua`, cada uma usa as seções que mostra. A detecção roda a cada
 10 s (`INTERVAL`), então um pendrive montado ou uma VPN aparecem sozinhos; os
 valores em si atualizam a cada `update_interval`.
 
@@ -133,6 +148,6 @@ valores em si atualizam a cada `update_interval`.
 | `${lua_parse network}`| Wi-Fi (`phy80211`), Ethernet (placa física: `docker0`, `veth*`, `br-*` ficam de fora) e VPN (`tun`/`tap`, `wg*`), cada uma dentro de `${if_up}` |
 | `${lua_parse battery}`| a seção BATERIA inteira, com a primeira bateria do próprio computador (`BAT0`, `BAT1`...); vazia sem bateria |
 
-Fixos no `conky.conf`: sensor da CPU `hwmon coretemp` e os quatro núcleos
+Fixos no `right.conf`: sensor da CPU `hwmon coretemp` e os quatro núcleos
 `cpu1`..`cpu4`. Limites de alerta (vermelho): ponto de montagem >= 90%,
 bateria <= 20%.

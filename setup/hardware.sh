@@ -46,12 +46,25 @@ gpu_devices() {
 
 has_gpu() { gpu_devices | grep -q "^$1 "; }
 
-# 0000:01:00.0 (hex) -> PCI:1:0:0 (decimal), formato do BusID do Xorg.
-busid() {
-	addr=$(gpu_devices | awk -v v="$1" '$1 == v { print $2; exit }')
-	[ -n "$addr" ] || return 1
-	bdf=${addr#*:} # 01:00.0
-	printf 'PCI:%d:%d:%d\n' "0x${bdf%%:*}" "0x$(echo "$bdf" | cut -d: -f2 | cut -d. -f1)" "0x${bdf##*.}"
+# Pacote do driver NVIDIA. A série já instalada vale (trocar de série é decisão
+# manual). Sem nenhuma, escolhe pelo device ID da placa: o "nvidia" atual só
+# suporta Turing (GTX 16xx/RTX) em diante; Maxwell, Pascal (ex.: GTX 1050 do
+# Acer Nitro) e Volta ficam no nvidia580. Kepler e anteriores (IDs abaixo de
+# 0x1340, onde Fermi e Kepler se misturam) não são escolhidos sozinhos.
+NVIDIA_SERIES="nvidia nvidia580 nvidia470 nvidia390"
+nvidia_pkg() {
+	for pkg in $NVIDIA_SERIES; do
+		installed "$pkg" && echo "$pkg" && return 0
+	done
+	addr=$(gpu_devices | awk '$1 == "0x10de" { print $2; exit }')
+	id=$(($(cat "/sys/bus/pci/devices/$addr/device")))
+	if [ "$id" -ge $((0x1e00)) ]; then
+		echo nvidia
+	elif [ "$id" -ge $((0x1340)) ]; then
+		echo nvidia580
+	else
+		return 1
+	fi
 }
 
 # Bateria do próprio computador (scope "Device" é de periférico Bluetooth).
@@ -96,7 +109,13 @@ PKGS="$PKGS mesa-dri vulkan-loader mesa-demos Vulkan-Tools libva-utils"
 # O driver do Xorg fica o modesetting embutido: o xf86-video-intel é legado.
 [ $INTEL = 1 ] && PKGS="$PKGS mesa-vulkan-intel intel-media-driver intel-gpu-tools"
 [ $AMD = 1 ] && PKGS="$PKGS mesa-vulkan-radeon mesa-vaapi"
-[ $NVIDIA = 1 ] && PKGS="$PKGS nvidia nvidia-libs-32bit"
+if [ $NVIDIA = 1 ]; then
+	if ! NVIDIA_PKG=$(nvidia_pkg); then
+		echo "Placa NVIDIA antiga (Kepler ou anterior): instale nvidia470 ou nvidia390 à mão e rode de novo." >&2
+		exit 1
+	fi
+	PKGS="$PKGS $NVIDIA_PKG $NVIDIA_PKG-libs-32bit"
+fi
 
 case "$(cpu_vendor)" in
 GenuineIntel) PKGS="$PKGS intel-ucode" ;;
@@ -113,10 +132,10 @@ for pkg in $PKGS; do
 	installed "$pkg" || MISSING="$MISSING $pkg"
 done
 
-# nvidia, nvidia-libs-32bit e intel-ucode vêm dos repositórios nonfree.
+# O driver NVIDIA (e o -libs-32bit) e o intel-ucode vêm dos repositórios nonfree.
 NONFREE=""
-case " $MISSING " in *" nvidia "* | *" intel-ucode "*) installed void-repo-nonfree || NONFREE="void-repo-nonfree" ;; esac
-case " $MISSING " in *" nvidia-libs-32bit "*) installed void-repo-multilib-nonfree || NONFREE="$NONFREE void-repo-multilib void-repo-multilib-nonfree" ;; esac
+case " $MISSING " in *" ${NVIDIA_PKG:-nvidia} "* | *" intel-ucode "*) installed void-repo-nonfree || NONFREE="void-repo-nonfree" ;; esac
+case " $MISSING " in *"-libs-32bit "*) installed void-repo-multilib-nonfree || NONFREE="$NONFREE void-repo-multilib void-repo-multilib-nonfree" ;; esac
 
 say "Pacotes"
 if [ -n "$NONFREE" ]; then
@@ -140,21 +159,25 @@ esac
 say "Xorg ($XORG_DIR)"
 as_root mkdir -p "$XORG_DIR"
 
-NVIDIA_CONFS="10-nvidia-drm-outputclass.conf 10-optimus-manager.conf"
+NVIDIA_CONF=10-nvidia-drm-outputclass.conf
+# Confs que põem a NVIDIA como GPU principal (instalados por versões antigas
+# deste script ou pelo optimus-manager). Viram .bak: o modo usado é o PRIME
+# offload, ver setup/README.md.
+NVIDIA_PRIMARY_CONFS="10-optimus-manager.conf"
+backup() {
+	[ -e "$XORG_DIR/$1" ] && as_root mv "$XORG_DIR/$1" "$XORG_DIR/$1.bak"
+	true
+}
 if [ $NVIDIA = 1 ]; then
-	as_root install -m644 "$DOTFILES/xorg_config/10-nvidia-drm-outputclass.conf" "$XORG_DIR/"
-	# BusID do conf é o do Acer Nitro; usa os endereços desta máquina.
-	tmp=$(mktemp)
-	sed -e "/Identifier \"nvidia\"/,/EndSection/s/BusID \".*\"/BusID \"$(busid 0x10de)\"/" \
-		-e "/Identifier \"integrated\"/,/EndSection/s/BusID \".*\"/BusID \"$(busid 0x8086 || echo PCI:0:2:0)\"/" \
-		"$DOTFILES/xorg_config/10-optimus-manager.conf" > "$tmp"
-	as_root install -m644 "$tmp" "$XORG_DIR/10-optimus-manager.conf"
-	rm -f "$tmp"
+	# PRIME offload: a Intel (modesetting) desenha a tela e a NVIDIA roda só o
+	# que pedir (__NV_PRIME_RENDER_OFFLOAD=1). Num desktop só com a NVIDIA ela é
+	# a única GPU, e o mesmo conf serve.
+	cmp -s "$DOTFILES/xorg_config/$NVIDIA_CONF" "$XORG_DIR/$NVIDIA_CONF" ||
+		as_root install -m644 "$DOTFILES/xorg_config/$NVIDIA_CONF" "$XORG_DIR/"
+	for conf in $NVIDIA_PRIMARY_CONFS; do backup "$conf"; done
 else
 	# Confs da NVIDIA sem a placa impedem o X de iniciar.
-	for conf in $NVIDIA_CONFS; do
-		[ -e "$XORG_DIR/$conf" ] && as_root mv "$XORG_DIR/$conf" "$XORG_DIR/$conf.bak"
-	done
+	for conf in $NVIDIA_CONF $NVIDIA_PRIMARY_CONFS; do backup "$conf"; done
 	echo "  sem NVIDIA: o Xorg usa o modesetting sozinho, nenhum conf de vídeo necessário"
 fi
 
@@ -166,7 +189,7 @@ if ! cmp -s "$DOTFILES/xorg_config/keyboard.conf" "$KEYBOARD"; then
 	as_root install -m644 "$DOTFILES/xorg_config/keyboard.conf" "$KEYBOARD"
 fi
 
-if has_touchpad; then
+if has_touchpad && ! cmp -s "$DOTFILES/xorg_config/70-touchpad-settings.conf" "$XORG_DIR/70-touchpad-settings.conf"; then
 	as_root install -m644 "$DOTFILES/xorg_config/70-touchpad-settings.conf" "$XORG_DIR/"
 fi
 
