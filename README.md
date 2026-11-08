@@ -38,6 +38,18 @@ Assim a chave entra no agent sozinha no primeiro `ssh`/`git push`. A
 passphrase é pedida uma vez por boot, porque o agent guarda as chaves só em
 memória.
 
+## Clipboard via SSH
+
+O neovim (smoothvim) usa OSC 52 quando roda dentro de uma sessão SSH: o `y`
+no nvim remoto vai direto para o clipboard do host, sem xclip no servidor.
+Para colar no remoto algo copiado no host, use `Ctrl+Shift+V` no kitty.
+
+Para funcionar dentro do tmux, o `.tmux.conf` usa `set-clipboard on` e
+`terminal-features ',xterm-kitty:clipboard'`. O mesmo `.tmux.conf` precisa
+estar no servidor se o tmux rodar lá. O st (dwm) não suporta OSC 52 sem patch.
+
+Detalhes no README do smoothvim (seção "Clipboard over SSH").
+
 ## Packages
 
 VoidLinux base system

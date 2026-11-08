@@ -1,15 +1,21 @@
--- Conky: painel de sistema preso ao desktop (coluna à direita, abaixo da wibar).
--- Paleta Tokyo Night, a mesma de awesome/config/styles/color.lua.
+-- Configuração compartilhada pelas duas colunas do conky (right.conf e
+-- left.conf): janela, fonte, desenho, atualização, paleta Tokyo Night (a mesma
+-- de awesome/config/styles/color.lua) e templates. Cada coluna chama
+-- config(overrides) com o que é só dela (alinhamento, lua_load, mouse hook).
 -- Referência das variáveis: `man conky` ou https://conky.cc/variables
+--
+-- O conky só recarrega sozinho o arquivo passado em -c: depois de editar este,
+-- salvar right.conf e left.conf (ou reiniciar o conky).
 
-conky.config = {
+local M = {}
+
+local BASE = {
 	-- Janela: tipo "desktop" + hints fazem o conky ficar no fundo, em todas as
 	-- tags, sem decoração e fora da tasklist. A regra "Conky" em
 	-- awesome/config/rules.lua garante o mesmo do lado do awesome.
 	own_window = true,
 	own_window_type = "desktop",
 	own_window_class = "Conky",
-	own_window_title = "conky",
 	own_window_hints = "undecorated,below,sticky,skip_taskbar,skip_pager",
 
 	-- Fundo semitransparente, formato #AARRGGBB: AA é a opacidade
@@ -17,8 +23,7 @@ conky.config = {
 	-- No conky 1.24+ own_window_argb_visual/argb_value não funcionam mais.
 	own_window_colour = "#a61a1b26",
 
-	-- Posição e tamanho
-	alignment = "top_right",
+	-- Posição e tamanho: alignment fica em cada coluna. gap_y deixa a wibar livre.
 	gap_x = 12,
 	gap_y = 36,
 	minimum_width = 260,
@@ -50,13 +55,6 @@ conky.config = {
 	no_buffers = true,
 	if_up_strictness = "address",
 
-	-- Lua: gpu.lua lê a GPU (NVIDIA ou Intel), system.lua gera as seções que
-	-- dependem do hardware (disco, rede, bateria), bluetooth.lua gera a seção
-	-- Bluetooth, click.lua trata os cliques (clicar na seção Bluetooth abre o
-	-- blueman-manager)
-	lua_load = "~/.config/conky/gpu.lua ~/.config/conky/system.lua ~/.config/conky/bluetooth.lua ~/.config/conky/click.lua",
-	lua_mouse_hook = "on_mouse",
-
 	-- Paleta (color0..color9 são usadas em conky.text como ${colorN})
 	default_color = "a9b1d6", -- texto (gray_lighter)
 	color0 = "ffffff", -- valores em destaque
@@ -85,47 +83,16 @@ ${downspeedgraph \1 22,125 73daca 73daca}${goto 149}${upspeedgraph \1 22,125 e0a
 ${color2}Total ${color}${totaldown \1}${goto 149}${color2}Total ${color}${totalup \1}]],
 }
 
-conky.text = [[
-${template0 󰌢 SISTEMA}
-${template1 Host ${nodename}}
-${template1 Kernel ${kernel}}
-${template1 Uptime ${uptime_short}}
+-- BASE com as chaves de overrides por cima.
+function M.config(overrides)
+	local result = {}
+	for k, v in pairs(BASE) do
+		result[k] = v
+	end
+	for k, v in pairs(overrides) do
+		result[k] = v
+	end
+	return result
+end
 
-${template0 󰘚 CPU}
-${color2}${execi 86400 awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo | sed -E 's/\((R|TM)\)//g; s/ CPU.*//; s/^Intel //'}${alignr}${color0}${freq_g 1} GHz
-${color2}Uso${alignr}${color0}${cpu cpu0}%${color2}  ·  ${color0}${hwmon coretemp temp 1}°C
-${cpugraph cpu0 22,260 7aa2f7 bb9af7}
-${color2}C1 ${color}${cpu cpu1}%${goto 75}${color4}${cpubar cpu1 4,64}${goto 149}${color2}C2 ${color}${cpu cpu2}%${goto 210}${color4}${cpubar cpu2 4,64}
-${color2}C3 ${color}${cpu cpu3}%${goto 75}${color4}${cpubar cpu3 4,64}${goto 149}${color2}C4 ${color}${cpu cpu4}%${goto 210}${color4}${cpubar cpu4 4,64}
-
-${template0 󰢮 GPU}
-${if_match ${lua gpu ok} == 1}${color2}${lua gpu name}${alignr}${color0}${lua gpu clock} MHz
-${color2}Uso${alignr}${color0}${lua gpu util}%${color2}  ·  ${color0}${lua gpu temp}°C
-${lua_graph gpu_util 22,260 7aa2f7 bb9af7 100}
-${if_match ${lua gpu has_vram} == 1}${color2}VRAM${alignr}${color0}${lua gpu vram}${color2}  ${color}${lua gpu vram_perc}%
-${color4}${lua_bar gpu_vram}
-${endif}${else}${color2}GPU não detectada
-${endif}
-${template0 󰍛 MEMÓRIA}
-${color2}RAM${alignr}${color0}${mem} / ${memmax}${color2}  ${color}${memperc}%
-${color4}${membar}
-${color2}Swap${alignr}${color0}${swap} / ${swapmax}${color2}  ${color}${swapperc}%
-${color4}${swapbar}
-
-${template0 󰋊 DISCO}
-${lua_parse disks}
-
-${template0 󰖩 REDE}
-${lua_parse network}
-${template0 󰂯 BLUETOOTH}
-${lua_parse bluetooth}
-
-${template0 󰉹 PROCESSOS}
-${color2}CPU${goto 160}%CPU${alignr}%MEM
-${template2 1}
-${template2 2}
-${template2 3}
-${color2}MEMÓRIA${goto 160}RES${alignr}%MEM
-${template3 1}
-${template3 2}
-${template3 3}${lua_parse battery}]]
+return M
