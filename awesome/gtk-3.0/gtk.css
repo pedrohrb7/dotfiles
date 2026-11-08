@@ -1,0 +1,4 @@
+/* User GTK3 CSS. Symlinked to ~/.config/gtk-3.0/gtk.css. */
+
+/* Terminator tabs (relative to ~/.config/gtk-3.0 -> ~/.config/terminator) */
+@import url("../terminator/tabs.css");

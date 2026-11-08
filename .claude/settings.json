@@ -1,22 +1,4 @@
 {
-  "enabledPlugins": {
-    "frontend-design@claude-plugins-official": false,
-    "skill-creator@claude-plugins-official": false,
-    "code-simplifier@claude-plugins-official": false,
-    "claude-md-management@claude-plugins-official": false,
-    "feature-dev@claude-plugins-official": false,
-    "security-guidance@claude-plugins-official": true,
-    "typescript-lsp@claude-plugins-official": true,
-    "lua-lsp@claude-plugins-official": true
-  },
-  "extraKnownMarketplaces": {
-    "obsidian-skills": {
-      "source": {
-        "source": "github",
-        "repo": "kepano/obsidian-skills"
-      }
-    }
-  },
   "permissions": {
     "allow": [
       "Bash(cd *)",
@@ -49,9 +31,6 @@
     ],
     "defaultMode": "auto"
   },
-  "timeFormat": "24-hour",
-  "theme": "dark",
-  "useAutoModeDuringPlan": false,
   "skillOverrides": {
     "archify": "off",
     "codebase-standards": "off",
@@ -64,5 +43,35 @@
     "scaffold": "off",
     "tdd": "off",
     "code-simplify": "off"
-  }
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": false,
+    "skill-creator@claude-plugins-official": false,
+    "code-simplifier@claude-plugins-official": false,
+    "claude-md-management@claude-plugins-official": false,
+    "feature-dev@claude-plugins-official": false,
+    "security-guidance@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "lua-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "obsidian-skills": {
+      "source": {
+        "source": "github",
+        "repo": "kepano/obsidian-skills"
+      }
+    }
+  },
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "xhigh"
+    }
+  },
+  "timeFormat": "24-hour",
+  "theme": "dark",
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true,
+  "useAutoModeDuringPlan": false
 }

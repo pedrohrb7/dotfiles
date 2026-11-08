@@ -37,6 +37,28 @@ recomendado. Não instale o `xf86-video-intel`: é legado e pior nas gerações
 atuais. A linha `(EE) Failed to load module "intel"` no `Xorg.0.log` é só o
 Xorg tentando esse driver antes de cair no modesetting, e não é erro.
 
+## VSCode
+
+O `vscode` do repositório do Void é um build próprio, sem o marketplace da
+Microsoft. Aqui usamos o tarball oficial em `/opt/vscode`, que o `.zshrc` já
+põe no PATH (`/opt/vscode/bin/code`).
+
+```sh
+~/dotfiles/setup/vscode.sh -n   # mostra o que faria
+~/dotfiles/setup/vscode.sh      # instala ou atualiza (pede a senha do sudo)
+```
+
+O tarball não se atualiza sozinho: para atualizar, rode o script de novo. Ele
+compara a versão instalada com a última da API de update da Microsoft, confere
+o sha256 do download e troca o `/opt/vscode` inteiro de uma vez. Também cria
+`~/.local/share/applications/code.desktop` (menu/rofi) e
+`code-url-handler.desktop`, registrado para links `vscode://` (login do GitHub
+e da Microsoft pelas extensões). As configurações e extensões ficam em
+`~/.config/Code` e `~/.vscode`, fora do `/opt`, então sobrevivem à troca.
+
+As dependências (`nss`, `gtk+3`, `alsa-lib`, `libsecret`, `libxkbfile`,
+`xdg-utils`) já vêm com o sistema base deste setup.
+
 ## O que se adapta sozinho em cada sessão
 
 | Onde                                   | Como                                                              |

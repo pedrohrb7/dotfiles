@@ -23,7 +23,7 @@ alias nvn='NVIM_APPNAME=nvim_core nvim'
 # Oh My Zsh
 ########################################
 export ZSH=$HOME/.oh-my-zsh
-ZSH_THEME="flazz"
+ZSH_THEME="agnoster"
 plugins=(git sdk zsh-autosuggestions zsh-syntax-highlighting)
 source $ZSH/oh-my-zsh.sh
 

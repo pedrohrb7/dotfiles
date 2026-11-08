@@ -18,6 +18,9 @@ sozinho a cada sessão. Ver [setup/README.md](setup/README.md).
 ~/dotfiles/setup/hardware.sh
 ```
 
+O VSCode oficial vai para `/opt/vscode` com `setup/vscode.sh` (instala e
+atualiza). Ver [setup/README.md](setup/README.md#vscode).
+
 ## SSH agent
 
 O `.zshrc` sobe um único `ssh-agent` num socket fixo
@@ -43,6 +46,7 @@ VoidLinux base system
 - DWM
 - i3
 - Vivaldi
+- VSCode (oficial, em /opt/vscode via setup/vscode.sh)
 - bat (a better cat)
 - eza (a better ls)
 - FiraCode Nerd Font
