@@ -1,0 +1,20 @@
+  #!/bin/bash
+
+  # Bus D-Bus da sessão, exportado para todo app filho do awesome. Sem
+  # DBUS_SESSION_BUS_ADDRESS o bus só existe por X11 autolaunch, que o gvfs não usa:
+  # Nautilus/Thunar caem no VFS local e sftp:// e ftp:// dão "Operation not supported".
+  # Tem que vir antes do gnome-keyring, que senão cria o bus por autolaunch.
+  if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-launch >/dev/null 2>&1; then
+    eval "$(dbus-launch --sh-syntax --exit-with-x11)"
+  fi
+
+  eval $(gnome-keyring-daemon --start)
+  export SSH_AUTH_SOCK
+  export GNOME_KEYRING_PID
+  export GNOME_KEYRING_CONTROL
+
+  # Serviços ativados pelo D-Bus (gvfsd-sftp, xdg-desktop-portal) herdam o agente SSH e o display
+  dbus-update-activation-environment DISPLAY XAUTHORITY SSH_AUTH_SOCK
+
+  picom &
+  pgrep -x slstatus >/dev/null || slstatus &

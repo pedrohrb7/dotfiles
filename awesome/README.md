@@ -22,6 +22,7 @@ config/
   autostart.lua              -- layout de monitores (autorandr, ver ../setup/README.md), pipewire (se o socket não existe)/picom/conky (ver ../conky/README.md), Nautilus como app padrão de pastas (inode/directory no ~/.config/mimeapps.list, senão o mimeinfo.cache do sistema escolhe o kitty e abre um terminal)
   styles/                    -- paleta de cores compartilhada
 .xinitrc                    -- carrega .Xresources, exporta XCURSOR_* e inicia o awesome
+.xprofile                   -- lido pelo LightDM antes do awesome: bus D-Bus da sessão, gnome-keyring, picom, slstatus (link em ~/.xprofile)
 .Xresources                 -- tema e tamanho do cursor (Xcursor.*)
 icons/default/index.theme   -- tema de cursor padrão do X11 (link em ~/.icons/default/)
 gtk-3.0/settings.ini        -- tema de cursor dos apps GTK (link em ~/.config/gtk-3.0/)
@@ -75,6 +76,7 @@ mkdir -p ~/.icons/default ~/.config/gtk-3.0
 tar -xzf ~/Bibata-Rainbow-Modern.tar.gz -C ~/.icons   # cria ~/.icons/Bibata-Rainbow-Modern/
 
 ln -s ~/dotfiles/awesome/.xinitrc                  ~/.xinitrc
+ln -s ~/dotfiles/awesome/.xprofile                 ~/.xprofile
 ln -s ~/dotfiles/awesome/.Xresources               ~/.Xresources
 ln -s ~/dotfiles/awesome/icons/default/index.theme ~/.icons/default/index.theme
 ln -s ~/dotfiles/awesome/gtk-3.0/settings.ini      ~/.config/gtk-3.0/settings.ini
@@ -96,6 +98,53 @@ ln -s ~/dotfiles/awesome/gtk-3.0/settings.ini      ~/.config/gtk-3.0/settings.in
 Para trocar o tema ou o tamanho, altere o nome/número **nos quatro primeiros
 arquivos**. Para aplicar o `.Xresources` sem reiniciar o X, rode
 `xrdb -merge ~/.Xresources`.
+
+## Sessão D-Bus (sftp/ftp no Nautilus e no Thunar)
+
+O LightDM roda `/etc/lightdm/Xsession`, que faz `source` do `~/.xprofile` e depois
+`exec awesome`. Nada nesse caminho inicia um bus D-Bus de sessão. Sem o
+`dbus-launch` no `.xprofile`, o primeiro programa que precisa do bus (o
+`gnome-keyring-daemon --start`) cria um por **X11 autolaunch**, e
+`DBUS_SESSION_BUS_ADDRESS` nunca é exportada para o awesome e os filhos dele.
+
+A maioria dos apps acha esse bus pelo autolaunch, mas o módulo cliente do gvfs não:
+sem a variável, o GIO cai no VFS local (`GLocalVfs`) e `sftp://`, `ftp://`, `smb://`
+etc. dão `Operation not supported` no Nautilus, no Thunar e no `gio`, mesmo com o
+`gvfs` instalado e o `gvfsd` rodando.
+
+Por isso o `.xprofile`, antes do `gnome-keyring-daemon`:
+
+1. roda `dbus-launch --sh-syntax --exit-with-x11` e exporta o endereço (o bus morre
+   junto com o X);
+2. depois do keyring, roda `dbus-update-activation-environment DISPLAY XAUTHORITY
+   SSH_AUTH_SOCK`, para os serviços ativados pelo bus (`gvfsd-sftp`) usarem o agente
+   SSH e o display da sessão.
+
+Vale a partir do próximo login. Conferir:
+
+```
+echo $DBUS_SESSION_BUS_ADDRESS    # deve ter unix:path=...
+gio info sftp://usuario@host/     # "not mounted" está certo; "Operation not supported" é o bug
+```
+
+Para corrigir uma sessão já aberta sem relogar, injete o endereço do bus que existe
+(o do `gvfsd`) no ambiente do awesome e reabra os gerenciadores. Vale só para apps
+abertos pelo awesome dali em diante; terminais já abertos continuam sem a variável:
+
+```
+BUS=$(tr '\0' '\n' < /proc/$(pgrep -x gvfsd)/environ | sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p')
+DBUS_SESSION_BUS_ADDRESS=$BUS awesome-client "require('lgi').GLib.setenv('DBUS_SESSION_BUS_ADDRESS', '$BUS', true)"
+pkill -x thunar; pkill -x nautilus
+```
+
+Para conectar: `Ctrl+L` e `sftp://usuario@host/` ou `ftp://host/`, nos dois
+gerenciadores. No Nautilus também há *Outros locais* > *Conectar ao servidor*.
+Favoritos em `~/.config/gtk-3.0/bookmarks` (arquivo local, fora do repo) aparecem
+na barra lateral de ambos.
+
+Servidor com IPv6 quebrado (ex.: `ftp.gnu.org` na porta 21) faz o gvfs esperar o
+timeout de TCP do IPv6 (~2 min) antes de tentar o IPv4. Isso é do servidor, não da
+sessão: `curl -4`/`curl -6 ftp://host/` mostra a diferença.
 
 ## Monitor conectado/desconectado
 
