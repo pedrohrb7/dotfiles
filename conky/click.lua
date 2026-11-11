@@ -1,4 +1,4 @@
--- Cliques no conky (lua_mouse_hook = "on_mouse" em conky.conf).
+-- Cliques no conky (lua_mouse_hook = "on_mouse" em left.conf).
 -- Coordenadas do evento são relativas à janela do conky.
 -- O conky procura funções globais com prefixo conky_.
 ---@diagnostic disable: lowercase-global
@@ -6,17 +6,18 @@
 -- A área clicável da seção Bluetooth é medida a partir do fim da janela: o
 -- texto de conky.text abaixo dela é renderizado com conky_parse no momento do
 -- clique e as linhas são contadas, então a conta acompanha as seções que mudam
--- de altura (bateria). As seções abaixo do Bluetooth não podem ter gráficos,
+-- de altura. As seções abaixo do Bluetooth não podem ter gráficos,
 -- que deixam a linha mais alta que LINE_HEIGHT.
 local LINE_HEIGHT = 16 -- altura de uma linha com FiraCode Nerd Font size=9
 local MARGIN = 14 -- border_inner_margin
-local CONF = os.getenv("HOME") .. "/.config/conky/conky.conf"
+local CONF = os.getenv("HOME") .. "/.config/conky/left.conf"
 local MARKER = "${lua_parse bluetooth}"
 
 -- Trecho de conky.text depois da seção Bluetooth. O conky recarrega o Lua ao
--- salvar conky.conf, então basta ler uma vez.
+-- salvar left.conf, então basta ler uma vez. O env herda _G porque o conf usa
+-- dofile/os para carregar common.lua.
 local function text_below_bluetooth()
-	local env = { conky = {} }
+	local env = setmetatable({ conky = {} }, { __index = _G })
 	local chunk = loadfile(CONF, "t", env)
 	if chunk == nil or not pcall(chunk) or type(env.conky.text) ~= "string" then
 		return nil

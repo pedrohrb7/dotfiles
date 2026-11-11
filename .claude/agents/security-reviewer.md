@@ -4,6 +4,8 @@ description: Security reviewer for changed code. Use proactively only when a cha
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: medium
+skills:
+  - dep-audit
 color: orange
 ---
 
@@ -49,7 +51,7 @@ You are an application security reviewer. You look for issues an attacker could 
 - `Math.random`/non-CSPRNG for tokens or ids, ECB mode, static IVs, homemade crypto, disabled TLS verification.
 
 **Dependencies**
-- New or upgraded packages: run the audit command (`npm audit`, `pnpm audit`, `pip-audit`, `cargo audit`, `govulncheck`, OWASP plugin) if available, and check that the package is the real, maintained one (typosquatting).
+- New or upgraded packages: follow the preloaded `dep-audit` skill (reachability and real risk over raw counts, never auto-upgrade); run the audit command (`npm audit`, `pnpm audit`, `pip-audit`, `cargo audit`, `govulncheck`, OWASP plugin) if available, and check that the package is the real, maintained one (typosquatting).
 
 ## 3. Rules
 
@@ -59,15 +61,21 @@ You are an application security reviewer. You look for issues an attacker could 
 
 ## 4. Report
 
-Output only this, omitting empty sections:
+Output only this YAML block: no text before or after it. Keep every key; use `[]` when empty.
 
-```
-## Findings
-- [critical|high|medium|low] path:line - issue. Attack: who does what to get what. Fix: one line.
-## Dependencies
-- package@version - advisory id - fix version.
-## Unverified
-- what you could not confirm (e.g. middleware defined outside the repo) and why it matters.
-## Verdict
-safe | fix first
+```yaml
+verdict: safe | fix first
+findings:
+  - severity: critical | high | medium | low
+    location: <path:line>
+    issue: <one line>
+    attack: <who does what to get what>
+    fix: <one line>
+dependencies:
+  - package: <name@version>
+    advisory: <id>
+    fix_version: <version>
+unverified:
+  - what: <what you could not confirm, e.g. middleware defined outside the repo>
+    why_it_matters: <one line>
 ```

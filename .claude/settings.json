@@ -1,22 +1,4 @@
 {
-  "enabledPlugins": {
-    "frontend-design@claude-plugins-official": false,
-    "skill-creator@claude-plugins-official": false,
-    "code-simplifier@claude-plugins-official": false,
-    "claude-md-management@claude-plugins-official": false,
-    "feature-dev@claude-plugins-official": false,
-    "security-guidance@claude-plugins-official": true,
-    "typescript-lsp@claude-plugins-official": true,
-    "lua-lsp@claude-plugins-official": true
-  },
-  "extraKnownMarketplaces": {
-    "obsidian-skills": {
-      "source": {
-        "source": "github",
-        "repo": "kepano/obsidian-skills"
-      }
-    }
-  },
   "permissions": {
     "allow": [
       "Bash(cd *)",
@@ -45,24 +27,130 @@
       "Bash(rtk git status *)",
       "Bash(rtk git log *)",
       "Bash(rtk git diff *)",
-      "Bash(rtk git show *)"
+      "Bash(rtk git show *)",
+      "Read(~/.claude/**)",
+      "Edit(~/.claude/**)",
+      "Read(~/dotfiles/.claude/**)",
+      "Edit(~/dotfiles/.claude/**)",
+      "Bash(docker compose ps)",
+      "Bash(docker compose ps *)",
+      "Bash(docker compose logs *)",
+      "Bash(docker compose port *)",
+      "Bash(docker compose config)",
+      "Bash(docker compose config *)",
+      "Bash(docker compose images)",
+      "Bash(docker compose images *)",
+      "Bash(docker ps)",
+      "Bash(docker ps *)",
+      "Bash(docker logs *)",
+      "Bash(docker inspect *)",
+      "Bash(docker port *)",
+      "Bash(docker images)",
+      "Bash(docker images *)"
+    ],
+    "deny": [
+      "Bash(docker compose up)",
+      "Bash(docker compose up *)",
+      "Bash(docker compose down)",
+      "Bash(docker compose down *)",
+      "Bash(docker compose start)",
+      "Bash(docker compose start *)",
+      "Bash(docker compose stop)",
+      "Bash(docker compose stop *)",
+      "Bash(docker compose restart)",
+      "Bash(docker compose restart *)",
+      "Bash(docker compose rm)",
+      "Bash(docker compose rm *)",
+      "Bash(docker compose kill)",
+      "Bash(docker compose kill *)",
+      "Bash(docker compose pull)",
+      "Bash(docker compose pull *)",
+      "Bash(docker compose create)",
+      "Bash(docker compose create *)",
+      "Bash(docker compose run *)",
+      "Bash(docker compose exec *)",
+      "Bash(docker run *)",
+      "Bash(docker start *)",
+      "Bash(docker stop *)",
+      "Bash(docker restart *)",
+      "Bash(docker rm *)",
+      "Bash(docker kill *)",
+      "Bash(docker exec *)"
+    ],
+    "ask": [
+      "Edit(~/.claude/settings*.json)",
+      "Edit(~/dotfiles/.claude/settings*.json)"
     ],
     "defaultMode": "auto"
   },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*(creenshot|rowser|laywright|hrome|omputer|imulator|mulator|napshot)",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "timeout": 10 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": false,
+    "skill-creator@claude-plugins-official": false,
+    "code-simplifier@claude-plugins-official": false,
+    "claude-md-management@claude-plugins-official": false,
+    "feature-dev@claude-plugins-official": false,
+    "security-guidance@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "lua-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "obsidian-skills": {
+      "source": {
+        "source": "github",
+        "repo": "kepano/obsidian-skills"
+      }
+    }
+  },
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "high"
+    }
+  },
   "timeFormat": "24-hour",
   "theme": "dark",
-  "useAutoModeDuringPlan": false,
-  "skillOverrides": {
-    "archify": "off",
-    "codebase-standards": "off",
-    "dep-audit": "off",
-    "design-system": "off",
-    "docs": "off",
-    "grill-me": "off",
-    "pr-description": "off",
-    "review": "off",
-    "scaffold": "off",
-    "tdd": "off",
-    "code-simplify": "off"
-  }
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true,
+  "useAutoModeDuringPlan": false
 }

@@ -20,16 +20,33 @@ pkill -u "$USER" -x wireplumber; pkill -u "$USER" -x pipewire
 if command -v artix-pipewire-launcher > /dev/null; then exec artix-pipewire-launcher; fi
 exec pipewire]]
 
+local FILE_MANAGER_DESKTOP = "org.gnome.Nautilus.desktop"
+
 function M.init()
-	-- Screen layout: the autorandr profile matching the connected monitors
-	-- (~/.config/autorandr), or all of them side by side when none matches. X
-	-- falls back to the monitor's preferred mode (1024x768 on DP-1) otherwise.
-	-- Hotplug is handled by autorandr's udev rule, which runs the same command.
-	awful.spawn.with_shell("command -v autorandr > /dev/null && autorandr --change --default default")
+	-- Screen layout (autorandr). Later plugs and unplugs are handled by
+	-- config/screens.lua, which runs the same command.
+	require("config.screens").apply_layout()
 	awful.spawn.with_shell(PIPEWIRE)
 	run_once("picom")
-	-- Only if installed, so a machine without conky doesn't log an error.
-	run_once("conky", "command -v conky > /dev/null && conky --daemonize --pause=2")
+	-- Folders (xdg-open, "open folder" in other apps) go to Nautilus. Without
+	-- this, the system mimeinfo.cache picks kitty-open.desktop first and opens a
+	-- terminal. Written to ~/.config/mimeapps.list only when it differs.
+	awful.spawn.with_shell(string.format(
+		'command -v nautilus > /dev/null && [ "$(xdg-mime query default inode/directory)" != %s ] && xdg-mime default %s inode/directory',
+		FILE_MANAGER_DESKTOP,
+		FILE_MANAGER_DESKTOP
+	))
+	-- One conky per column (~/dotfiles/conky/right.conf and left.conf), each
+	-- checked by its own config, so an awesome restart brings back only the one
+	-- that is missing. "^conky" keeps pgrep from matching this shell's command
+	-- line. Only if installed, so a machine without conky doesn't log an error.
+	for _, conf in ipairs({ "right.conf", "left.conf" }) do
+		awful.spawn.with_shell(string.format(
+			'command -v conky > /dev/null && { pgrep -u "$USER" -f "^conky -c [^ ]*/%s" > /dev/null || conky -c "$HOME/.config/conky/%s" --daemonize --pause=2; }',
+			conf,
+			conf
+		))
+	end
 end
 
 return M

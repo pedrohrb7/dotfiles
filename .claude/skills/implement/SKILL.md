@@ -1,81 +1,139 @@
 ---
 name: implement
-description: Implement an approved technical spec task by task by orchestrating the stack agents, test-runner, quality-fixer and the reviewers. Use when the user says "/implement <spec>", "implement this spec" or "start development of the plan".
-disable-model-invocation: true
-argument-hint: <docs/specs/file.md> [tasks 2-4] [--step]
+description: Implement an approved spec task by task by orchestrating the stack agents, test-runner, quality-fixer, the reviewers, docs-writer and backlog-keeper, with a resumable run state and an optional --tdd mode (tests written first against stubs). Use when the user says "/implement <feature>", "podemos seguir com a implementação", "pode implementar", "vamos implementar", "segue com a implementação", "implement this spec", "start development of the plan", or "go" right after approving a spec. Verifies first that the plan and spec are approved, and never guesses which spec when several qualify.
+argument-hint: <docs/features/<slug>/ or docs/specs/file.md> [tasks 2-4] [--step] [--tdd]
 ---
 
 # Implement a spec
 
-You are the orchestrator. Delegate the work to subagents and keep this conversation lean.
+You coordinate. Delegate the work to subagents and keep this conversation lean.
 
 - Do not write feature code yourself. Delegate it to the stack agents.
-- Pass file paths to subagents, not file contents. They read the spec themselves.
-- Never commit. Never use the em dash; use "-".
+- Pass file paths to subagents, not file contents. They read the spec and the log themselves.
+- Never commit or push. Never use the em dash; use "-".
 
 Arguments: `$ARGUMENTS`
 
 ## 1. Resolve the target
 
-- **Spec**: the path in the arguments. If there is none, list the specs in the current project's `docs/specs/` whose status is `Draft` or `Approved` and ask the user which one to implement. Look only inside the current project (the git root, or the working directory). Never search the rest of the filesystem. If the project has no specs, say so in one line and suggest `@planner` to write one.
-- **Tasks**: an optional range or list (`tasks 2-4`, `task 3`). The default is every task in **Implementation order** not already marked `(done)`.
-- **`--step`**: pause after each task and wait for the user's approval before starting the next one. Without it, run all tasks and pause only on blockers.
+1. **Layout and paths.** Resolve them with the `project-docs` skill (**Layouts and path resolution**): the docs layout, and the feature's plan, spec and implementation log paths. Never hard-code `docs/plans`, `docs/specs` or `docs/features`. In a `legacy` project with no layout declared, make the one-time migration offer that section describes before anything else.
+2. **Which spec**, in this order, and look only inside the current project (the git root, or the working directory):
+   1. the feature folder or spec path in the arguments;
+   2. the feature or spec named in the conversation;
+   3. the only spec with status `Approved` (from `docs/features/README.md`, or the specs Index in `legacy`).
 
-## 2. Preflight
+   If none of these resolves to exactly one spec, list the candidates (`Draft` or `Approved`) with their status and ask which one. Never pick between several. If the project has no spec, say so in one line and suggest `@specker` (or `@planner` when there is no plan either).
+3. **Tasks**: an optional range or list (`tasks 2-4`, `task 3`). The default is every task in **Implementation order** not already done (`Status: done` in a structured task block, or a ` (done)` suffix in an older free-form list).
+4. **`--step`**: pause after each task and wait for the user's approval before starting the next one. Without it, run all tasks and pause only on blockers, scope requests and the questions below.
+5. **`--tdd`** (opt-in, also "com TDD" in the user's phrase): each task's tests are written first, against stubs, and confirmed red by assertion before the stack agent implements (section 5). Record `"tdd": true` in the run state so a resume keeps the mode.
 
-1. Read the spec and its **Related plan**. Read only those two documents; leave the code to the subagents.
-2. **Status**: if the spec is still `Draft`, running `/implement` counts as approval. Set it to `Approved` and update the specs Index.
-3. **Open questions**: if the spec or plan has open questions that block a selected task, ask the user (one `AskUserQuestion` call) before starting.
+## 2. Preconditions
+
+Check them before touching anything, in one `AskUserQuestion` call when there is more than one thing to ask:
+
+1. **Plan**: it must be `Approved`. A refactor spec without a plan (its **Source** is a backlog entry) skips this check. A `Draft` plan: stop and say it needs approval first (or that asking `@specker` for the spec approves it).
+2. **Spec**: `Approved` or `In progress` proceeds. A `Draft` spec:
+   - invoked explicitly as `/implement`: that counts as approval;
+   - invoked from a phrase ("podemos seguir com a implementação"): ask "the spec is still Draft - approve it and start?". A yes counts as approval.
+
+   Set an approved spec to `Approved` and update the Index.
+3. **Open questions**: if the spec or plan has open questions that block a selected task, ask the user before starting.
 4. **Working tree**: run `git status`. If there are uncommitted changes unrelated to this spec, ask the user whether to continue. The reviewers diff the whole working tree, so they would mix those changes with this work.
-5. **Task list**: build the list. Each task has:
-   - its number and title;
-   - its stack (from the task text, or inferred from its files: `package.json` with Nest/Express means `backend-node`, `pom.xml`/`build.gradle` means `backend-spring`, `go.mod` means `backend-go`, `Cargo.toml` means `backend-rust`, `pyproject.toml` means `backend-python`, React web means `frontend-react`, React Native/Expo means `mobile-react-native`);
-   - its dependencies and its done criteria.
+5. **Run state ignored by git**: `git check-ignore -q .claude/runs/<slug>.json`. If it would be tracked, ask the user once whether to add `.claude/runs/` to `.gitignore`; if they decline, keep the run state anyway and mention it in the final report.
 
-   Show the list to the user in a short table, then start.
+## 3. Run state
 
-## 3. Per task
+The run state lives in `.claude/runs/<slug>.json` at the project root (`<slug>` is the feature folder name, or the legacy spec file name without date and suffix). It is how a run resumes, how budgets are enforced and how hooks and an external orchestrator observe the run. Write it after every step that changes it.
+
+```json
+{
+  "feature": "docs/features/<slug>/",
+  "spec": "<spec path>",
+  "log": "<log path>",
+  "phase": "implement | review | verify | document | done",
+  "started_at": "<ISO timestamp>",
+  "updated_at": "<ISO timestamp>",
+  "current_task": 3,
+  "tasks": { "1": "done", "2": "done", "3": "in_progress", "4": "pending" },
+  "allowed_paths": { "3": ["services/api/src/orders/**"] },
+  "approved_scope": [
+    { "task": 3, "action": "edit", "target": "<path or command>", "reason": "...", "decision": "approved | denied", "at": "<ISO timestamp>" }
+  ],
+  "budget": { "fix_rounds": { "3": 1 }, "full_gate_runs": 0, "review_rounds": 0 },
+  "agent_calls": [{ "agent": "backend-node", "task": 1, "result": "done", "at": "<ISO timestamp>" }]
+}
+```
+
+- **Start**: if the file exists with `phase` other than `done`, this is a resume: show where the run stopped (phase, done tasks, pending scope decisions) and continue from there, without repeating done tasks. Otherwise create it.
+- **Budgets**: at most 2 fix rounds per task, 1 full gate per run (plus one re-run after review fixes), 1 review round (plus 1 only when blockers were fixed). When a budget runs out, stop and ask the user.
+- **End**: set `phase: done` when the final report is delivered. Never delete the file.
+
+## 4. Build the task list
+
+A structured task block gives every field directly (**Stack**, **Files**, **Depends on**, **Done when**, **Status**). For an older free-form list, derive them from the task text. Each task has:
+- its number and title;
+- its stack (from **Stack**, or inferred from its files: `package.json` with Nest/Express means `backend-node`, `pom.xml`/`build.gradle` means `backend-spring`, `go.mod` means `backend-go`, `Cargo.toml` means `backend-rust`, `pyproject.toml` means `backend-python`, React web means `frontend-react`, React Native/Expo means `mobile-react-native`);
+- its `allowed_paths` (from **Files**, or the files the task text names, plus scope approved earlier in `approved_scope`);
+- its dependencies and its done criteria.
+
+Show the list to the user in a short table, set the spec to `In progress` when the first task starts, then go.
+
+## 5. Per task
+
+0. **TDD first (only with `--tdd`).** Before step 1, for this task:
+   1. Delegate to the stack agent with `phase: scaffold`, the task and its `allowed_paths`: stubs that compile, no logic, no tests.
+   2. Delegate to `test-writer` in **tdd mode**, with the spec's Testing section for this task, its `Done when` and the stub files. It writes the tests and does not touch the stubs.
+   3. Run the new test files through `test-runner` with scope `files`. Every failure must have `failure_kind: assertion`. A `compile`, `import` or `runtime` failure sends the task back to scaffold once (with the failures); a test that passes goes back to `test-writer` once. Still wrong after that: stop and ask the user.
+   4. In step 1, say `TDD: on` and list the test files: the stack agent makes them pass without editing them.
 
 1. **Implement.** Delegate to the stack agent with this prompt shape:
 
-   > Implement task N of `<spec path>` (plan: `<plan path>`). Only this task: `<task title>`. Done criteria: `<criteria>`. Earlier tasks in this spec already changed: `<files from previous reports>`. Follow the spec's Design and Testing sections for this task.
+   > phase: implement. Implement task N of `<spec path>` (plan: `<plan path>`, implementation log: `<log path>`). Only this task: `<task title>`. Done criteria: `<criteria>`. allowed_paths: `<list>`. Read the implementation log first: it holds the files, decisions and assumptions of earlier tasks. Follow the spec's Design and Testing sections for this task.
 
    Independent tasks that touch different services may run in parallel, as separate agents in the same message. Run tasks that share files or depend on each other in order.
 
-2. **Check.** Delegate to `test-runner`, scoped to the packages or services the task touched.
+2. **Scope requests.** If a report ends with `result: blocked` and `scope_requests`, collect the requests of every agent that stopped (parallel ones included) and ask the user once, one `AskUserQuestion` call, each request with its reason. Record each decision in `approved_scope`. Then resume the same agent with `SendMessage`, keeping its context: approved targets join that task's `allowed_paths`; denied ones are stated, so the agent finishes without them (`partial`) or declares a blocker.
 
-3. **Fix.** If `test-runner` reports failures, delegate to `quality-fixer` with the failure list, then run `test-runner` again. After 2 rounds that are still failing, stop and ask the user.
+3. **Check.** Delegate to `test-runner` with scope `task`, limited to the packages or services the task touched.
 
-4. **Tests.** If the stack agent's report says the changed behavior has no tests, delegate to `test-writer` for that task's files.
+4. **Fix.** If `test-runner` reports failures, delegate to `quality-fixer` with the failure list, then run `test-runner` again. After 2 rounds still failing, stop and ask the user.
 
-5. **Mark done.** Append ` (done)` to the task line in the spec's **Implementation order**, so an interrupted run can resume.
+5. **Tests.** If the stack agent's report says the changed behavior has no tests, delegate to `test-writer` for that task's files.
 
-6. **Collect.** From the agents' reports, keep the assumptions made, the new env vars and migrations, and the backlog entries logged.
+6. **Mark done.** Set the task's `Status: done` (or append ` (done)` to the line of an older free-form list), and `tasks[N] = "done"` in the run state. These and the spec status are the only edits you make to the spec.
 
-7. **Pause** here if `--step` was given: show a 3-5 line summary of the task and wait for the user.
+7. **Collect and log.** The agents end with a YAML report. Keep `decisions`, `assumptions`, `migrations`, `env_vars`, `needs_docs`, `manual_checks`, `local_checks` and `out_of_scope_issues` for the final report, and append the task's block to the implementation log (create it from the log template on the first task of the feature; start a new `## Run <date>` section on each run): files, decisions, assumptions, approved scope, migrations/env vars, docs pending. The next task reads it from there.
 
-## 4. Review (once, after all selected tasks)
+8. **Pause** here if `--step` was given: show a 3-5 line summary of the task and wait for the user.
 
-1. Delegate to `code-reviewer` (scope: the working tree).
+## 6. Review (once, after all selected tasks)
+
+1. Set `phase: review`. Delegate to `code-reviewer` (scope: the working tree, and the spec and log paths).
 2. If any task touched authentication, authorization, API endpoints, user input, uploads, queries, secrets or dependencies, delegate to `security-reviewer` in parallel with the code reviewer.
 3. **Fix the findings.**
-   - Send blocker and major bugs, and critical, high or medium security findings, to the owning stack agent with the exact findings. Then run `test-runner` again.
+   - Send blocker and major bugs, and critical, high or medium security findings, to the owning stack agent with the exact findings and the task's `allowed_paths`. Then run `test-runner` (scope `task`) again.
    - Run `code-reviewer` once more, only if blockers were fixed. Never loop more than once.
-   - Minor findings and standards notes: fix them in the same round if they are in this change's code. Otherwise they go to the backlog, like the agents' out-of-scope issues.
+   - Minor findings and standards notes: fix them in the same round if they are in this change's code. Otherwise add them to the collected `out_of_scope_issues`.
+   - The reviewers' `needs_docs` join the collected `needs_docs`.
 
-## 5. Verify
+## 7. Verify and close
 
-1. Run the commands from the spec's **Verification** section through `test-runner`.
-2. For manual checks (UI, flows): run them yourself if the tooling is available (dev server, browser, simulator). Otherwise list them for the user.
-3. If every selected task is `(done)` and verification passes, set the spec to `Implemented` and update the specs Index. Otherwise leave it `Approved`.
+1. Set `phase: verify`. Run the final gate once through `test-runner` with scope `full`, plus any suite the spec's **Verification** section names explicitly.
+2. **Manual checks** (UI, flows, restarts, requests that could not run): never run them yourself - no browser, dev server, simulator or screenshots, and no starting or restarting services. Consolidate the agents' `manual_checks` and the spec's manual verification steps into one checklist for the user. If the user explicitly asks for a visual check, delegate those states to `ui-verifier`.
+3. **Documentation.** Set `phase: document`. Delegate to `docs-writer` once, with the consolidated `needs_docs`, the spec and log paths, and the files changed. It checks each need against the code and writes the doc files; nobody else edits docs. Its `out_of_scope_issues` join the collected ones; a `needs_input` question goes to the user before closing.
+4. **Backlog.** Send every collected `out_of_scope_issues` to `backlog-keeper` in a single call, in run-batch mode, each with its source (feature, task, agent). Do not write backlog entries yourself.
+5. If every task of the spec is done and verification passes, set the spec to `Implemented`, set its plan to `Implemented` too (when there is one), and update the Index. Otherwise leave the spec `In progress`. Set the run state's `phase: done`.
 
-## 6. Final report to the user
+## 8. Final report to the user
 
 Keep it short:
 - tasks completed, and tasks remaining;
 - files changed, grouped by service (one line per file);
 - migrations and new env vars;
 - check results, and review findings fixed and still open;
+- `local_checks` results (request, status, pass/fail/skipped);
+- scope requests approved or denied;
 - assumptions the agents made that the user should confirm;
-- backlog entries logged (paths);
-- next step: the documentation pass (plan status, README, `docs/` coherence).
+- backlog entries created or updated (paths, from `backlog-keeper`);
+- documentation updated (paths, from `docs-writer`) and the needs it skipped, with the reason;
+- **Para validar localmente**: the consolidated manual checklist, as `- [ ]` items.

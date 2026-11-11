@@ -20,7 +20,7 @@ sessão. Se instalou driver ou microcódigo, reinicie o computador.
 | --------------------------- | -------------------------------------------------------------------- |
 | sempre                      | programas que o awesome e o conky chamam (`pamixer`, `jq`, `blueman`, `rofi`, `flameshot`, `autorandr`...), `mesa-dri`, `vulkan-loader` e as ferramentas de diagnóstico `glxinfo` (`mesa-demos`), `vulkaninfo` (`Vulkan-Tools`) e `vainfo` (`libva-utils`) |
 | GPU Intel                   | `mesa-vulkan-intel` (Vulkan), `intel-media-driver` (VA-API: vídeo por hardware no navegador/mpv), `intel-gpu-tools` (`intel_gpu_top`) |
-| GPU NVIDIA                  | `nvidia`, `nvidia-libs-32bit` e os confs de `xorg_config/` em `/etc/X11/xorg.conf.d/`, com o `BusID` da máquina |
+| GPU NVIDIA                  | driver (`<série>` e `<série>-libs-32bit`, ver [NVIDIA](#nvidia-prime-offload)) e `xorg_config/10-nvidia-drm-outputclass.conf` em `/etc/X11/xorg.conf.d/`; um `10-optimus-manager.conf` (NVIDIA como principal) vira `.bak` |
 | sem NVIDIA                  | renomeia para `.bak` os confs da NVIDIA que estiverem em `/etc/X11/xorg.conf.d/`: sem a placa, o X não inicia com eles |
 | GPU AMD                     | `mesa-vulkan-radeon`, `mesa-vaapi`                                   |
 | CPU Intel                   | `intel-ucode` e gera o initramfs de novo (`xbps-reconfigure -f linuxX.Y`) |
@@ -30,12 +30,57 @@ sessão. Se instalou driver ou microcódigo, reinicie o computador.
 | touchpad                    | `xorg_config/70-touchpad-settings.conf` (tap para clicar)            |
 
 Os pacotes da NVIDIA e o `intel-ucode` vêm dos repositórios nonfree; o script
-instala `void-repo-nonfree` (e o multilib, para `nvidia-libs-32bit`) antes.
+instala `void-repo-nonfree` (e o multilib, para o `-libs-32bit`) antes.
+
+## NVIDIA (PRIME offload)
+
+Num notebook híbrido (Acer Nitro: Intel + GTX 1050) a Intel desenha a tela e
+a NVIDIA fica disponível sob demanda: o `10-nvidia-drm-outputclass.conf` não
+tem `PrimaryGPU`, e a NVIDIA aparece como provider `NVIDIA-G0`. Para rodar um
+programa nela:
+
+```sh
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia programa
+xrandr --listproviders   # modesetting + NVIDIA-G0
+```
+
+Série do driver:
+
+| Situação                                  | Pacote      |
+| ----------------------------------------- | ----------- |
+| já existe uma série instalada (`nvidia`, `nvidia580`, `nvidia470`, `nvidia390`) | mantém essa: trocar de série é decisão manual |
+| Turing em diante (GTX 16xx, RTX; device ID >= `0x1e00`) | `nvidia`    |
+| Maxwell, Pascal (GTX 1050 do Acer), Volta | `nvidia580` (o `nvidia` atual não suporta mais) |
+| Kepler e anteriores                       | o script para e pede para instalar `nvidia470`/`nvidia390` à mão |
+
+Device ID: `cat /sys/bus/pci/devices/0000:01:00.0/device` (ou `lspci -nn`).
 
 Na Intel o Xorg usa o driver `modesetting` embutido (glamor + DRI3), que é o
 recomendado. Não instale o `xf86-video-intel`: é legado e pior nas gerações
 atuais. A linha `(EE) Failed to load module "intel"` no `Xorg.0.log` é só o
 Xorg tentando esse driver antes de cair no modesetting, e não é erro.
+
+## VSCode
+
+O `vscode` do repositório do Void é um build próprio, sem o marketplace da
+Microsoft. Aqui usamos o tarball oficial em `/opt/vscode`, que o `.zshrc` já
+põe no PATH (`/opt/vscode/bin/code`).
+
+```sh
+~/dotfiles/setup/vscode.sh -n   # mostra o que faria
+~/dotfiles/setup/vscode.sh      # instala ou atualiza (pede a senha do sudo)
+```
+
+O tarball não se atualiza sozinho: para atualizar, rode o script de novo. Ele
+compara a versão instalada com a última da API de update da Microsoft, confere
+o sha256 do download e troca o `/opt/vscode` inteiro de uma vez. Também cria
+`~/.local/share/applications/code.desktop` (menu/rofi) e
+`code-url-handler.desktop`, registrado para links `vscode://` (login do GitHub
+e da Microsoft pelas extensões). As configurações e extensões ficam em
+`~/.config/Code` e `~/.vscode`, fora do `/opt`, então sobrevivem à troca.
+
+As dependências (`nss`, `gtk+3`, `alsa-lib`, `libsecret`, `libxkbfile`,
+`xdg-utils`) já vêm com o sistema base deste setup.
 
 ## O que se adapta sozinho em cada sessão
 
@@ -48,6 +93,39 @@ Xorg tentando esse driver antes de cair no modesetting, e não é erro.
 | `autorandr/` (`~/.config/autorandr`)   | layout de monitores: aplica o perfil salvo que bate com os monitores conectados (pelo EDID), no login e a cada vez que um monitor é conectado/desconectado. Ver [Monitores](#monitores-autorandr) |
 | `awesome/config/autostart.lua`         | inicia o PipeWire quando o socket não existe (`artix-pipewire-launcher` no Artix, `pipewire` no Void) |
 | `.zshrc` (`startemulator`)             | emulador Android com PRIME offload na NVIDIA só se o driver estiver carregado |
+
+## Webcam USB (DV20): câmera virtual "Webcam ampla"
+
+O modo 16:9 da webcam USB DV20 (Jieli, `1280x720`) é um recorte do sensor e
+deixa a imagem perto demais; o `640x480` mostra o campo inteiro. A câmera
+também liga com contraste, saturação e nitidez zerados.
+`setup/webcam-ampla.sh` instala o `v4l2loopback` (DKMS), cria a câmera virtual
+`/dev/video10` ("Webcam ampla") e o serviço runit `webcam-ampla`, que corrige
+os controles e roda um `ffmpeg` lendo o `640x480` e entregando `854x480` (16:9)
+com faixas pretas nas laterais. Não corta nada: cortar o 4:3 em cima e embaixo
+para virar 16:9 (`640x360`) deixava o rosto ocupando mais do quadro e voltava a
+parecer zoom.
+
+```sh
+~/dotfiles/setup/webcam-ampla.sh -n   # mostra o que faria
+~/dotfiles/setup/webcam-ampla.sh      # instala (pede sudo)
+~/dotfiles/setup/webcam-ampla.sh -r   # remove tudo
+ffplay /dev/video10                   # testar
+```
+
+No Meet/navegador, escolha a câmera "Webcam ampla". Com o serviço rodando, a
+webcam fica sempre ligada (LED aceso) e só a câmera virtual fica disponível
+para os apps. Desligar fora das reuniões: `sudo sv down webcam-ampla` (religar:
+`sudo sv up webcam-ampla`). Para não subir no boot:
+`sudo touch /etc/sv/webcam-ampla/down`. O `exclusive_caps=1` do módulo é o que
+faz o Chrome/Vivaldi listarem a câmera virtual: ela só aparece como câmera
+enquanto o serviço estiver escrevendo nela.
+
+A webcam às vezes trava mandando só quadros MJPEG corrompidos (`Dequeued v4l2
+buffer contains corrupted data`), e o `ffmpeg` fica esperando para sempre. Por
+isso o serviço, antes de começar, exige 5 quadros em 8 s; se não vierem, ele
+desconecta e reconecta a USB da webcam (`authorized` 0/1 no sysfs, o mesmo que
+tirar e pôr o cabo) e o runit tenta de novo.
 
 ## Conferir a aceleração
 

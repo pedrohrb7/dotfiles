@@ -44,9 +44,9 @@
 
 <!-- What ships in v1 vs later. Link to the feature's plan (product detail) and spec (technical detail) in docs/ rather than duplicating them here. -->
 
-| Feature | In v1? | Plan | Spec |
-|---|---|---|---|
-| | | `docs/plans/<file>.md` | `docs/specs/<file>.md` |
+| Feature | In v1? | Docs |
+|---|---|---|
+| | | `docs/features/<slug>/` |
 
 ## Constraints and open questions
 

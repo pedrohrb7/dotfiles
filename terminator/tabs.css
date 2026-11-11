@@ -1,0 +1,80 @@
+/*
+ * Terminator tabs - compact, Catppuccin Mocha.
+ * Loaded by ~/.config/gtk-3.0/gtk.css (awesome/gtk-3.0/gtk.css) via @import.
+ * Scoped to Terminator windows only.
+ */
+
+@define-color tab_bar     #181825; /* mantle   */
+@define-color tab_active  #1e1e2e; /* base     */
+@define-color tab_hover   #313244; /* surface0 */
+@define-color tab_fg      #6c7086; /* overlay0 */
+@define-color tab_fg_on   #cdd6f4; /* text     */
+@define-color tab_accent  #cba6f7; /* mauve    */
+
+.terminator-terminal-window notebook > header {
+  background: @tab_bar;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  min-height: 0;
+}
+
+.terminator-terminal-window notebook > header > tabs {
+  margin: 0;
+  padding: 0;
+}
+
+.terminator-terminal-window notebook > header tab {
+  min-height: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 12px;
+  border: none;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  color: @tab_fg;
+  font-size: 9pt;
+}
+
+.terminator-terminal-window notebook > header tab:hover {
+  background: @tab_hover;
+  color: @tab_fg_on;
+  box-shadow: none;
+}
+
+.terminator-terminal-window notebook > header tab:checked {
+  background: @tab_active;
+  color: @tab_fg_on;
+  box-shadow: inset 0 2px @tab_accent;
+}
+
+.terminator-terminal-window notebook > header.top tab:checked {
+  box-shadow: inset 0 -2px @tab_accent;
+}
+
+.terminator-terminal-window notebook > header tab label {
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+}
+
+.terminator-terminal-window notebook > header tab button {
+  min-height: 0;
+  min-width: 0;
+  margin: 0 0 0 4px;
+  padding: 0;
+}
+
+.terminator-terminal-window notebook > header > arrow {
+  min-height: 0;
+  min-width: 14px;
+  padding: 0;
+  margin: 0;
+  color: @tab_fg;
+}
+
+.terminator-terminal-window notebook > stack:not(:only-child) {
+  border: none;
+}

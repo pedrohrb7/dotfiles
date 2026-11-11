@@ -2,7 +2,7 @@
 -- ${lua_parse network} e ${lua_parse battery} em conky.text.
 -- Cada função detecta o que existe na máquina (pontos de montagem, discos,
 -- interfaces de rede, bateria) e devolve o texto da seção com as variáveis do
--- conky já apontando para os nomes certos, então o mesmo conky.conf serve em
+-- conky já apontando para os nomes certos, então os mesmos .conf servem em
 -- qualquer máquina. A detecção roda a cada INTERVAL segundos; os valores em si
 -- (uso, velocidade, carga) são atualizados pelo conky a cada update_interval.
 -- O conky procura funções globais com prefixo conky_.
