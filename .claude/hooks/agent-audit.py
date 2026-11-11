@@ -15,7 +15,9 @@ SubagentStop (record). Reads the hook payload (JSON) from stdin.
 What it classifies (see agent-workflow.md, sections 13 and 14):
 - Bash commands: tests (narrow/full/load), lint, typecheck, docker (read/build/lifecycle),
   git (commit/push), requests (local/external);
-- file writes: inside or outside the active run's allowed_paths (from .claude/runs/<slug>.json);
+- file writes: inside or outside the active run's allowed_paths (from .claude/runs/<slug>.json),
+  docs and backlog files, and the project's DESIGN_SYSTEM.md (written only by design-director
+  and the main session);
 - browser and screenshot tools.
 
 Commands, file contents and tool outputs are not stored, only a truncated command line and paths.
@@ -45,8 +47,18 @@ IMPLEMENTERS = {
 # Agents that must never write files.
 READ_ONLY_AGENTS = {"ui-verifier", "test-runner", "code-reviewer", "security-reviewer", "Explore", "Plan"}
 
-# Documentation files outside docs/ that only docs-writer edits.
+# Documentation files outside the docs roots (agent-audit.json `docs_roots`) that only docs-writer edits.
 DOC_FILES = {"README.md", "CHANGELOG.md", ".env.example", "DEPLOY.md"}
+
+# A project's DESIGN_SYSTEM.md: created by design-director, maintained by the main session following
+# the design-system skill. Protected by file name (case-insensitive) anywhere in the repo, so a
+# project root that is a subfolder of the git root (monorepo) is covered too.
+DESIGN_SYSTEM_NAME = "design_system.md"
+DESIGN_SYSTEM_WRITERS = {"design-director", "main"}
+
+
+def is_design_system(path: str) -> bool:
+    return PurePosixPath(str(path).replace("\\", "/")).name.casefold() == DESIGN_SYSTEM_NAME
 
 # Paths an implementer may always write, whatever its task's Files say.
 ALWAYS_ALLOWED = [
@@ -107,6 +119,33 @@ def load_config() -> dict:
         return json.loads(CONFIG_PATH.read_text())
     except Exception:
         return {"mode": "audit"}
+
+
+DEFAULT_DOCS_ROOTS = ["docs/"]
+
+
+def docs_roots(config: dict) -> list[str]:
+    """Docs roots from the config (`docs_roots`), normalized to `a/b/`; invalid or missing -> ["docs/"]."""
+    try:
+        raw = config.get("docs_roots")
+        if not isinstance(raw, list):
+            return list(DEFAULT_DOCS_ROOTS)
+        roots: list[str] = []
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            r = item.strip().replace("\\", "/")
+            while r.startswith("./"):
+                r = r[2:]
+            r = r.lstrip("/").rstrip("/")
+            if not r or r == "." or ".." in r.split("/"):
+                continue
+            r += "/"
+            if r not in roots:
+                roots.append(r)
+        return roots or list(DEFAULT_DOCS_ROOTS)
+    except Exception:
+        return list(DEFAULT_DOCS_ROOTS)
 
 
 def strip_prefixes(segment: str) -> str:
@@ -238,7 +277,8 @@ def matches(rel: str, patterns: list[str]) -> bool:
     return False
 
 
-def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response) -> dict:
+def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roots: list[str] | None = None) -> dict:
+    roots = roots or DEFAULT_DOCS_ROOTS
     out: dict = {"path": path_str}
     path = Path(path_str)
     if not path.is_absolute():
@@ -246,22 +286,31 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response) -> 
     root = git_root(path.parent if path.parent.exists() else Path(cwd or "."))
     if not root:
         out["in_run"] = False
+        if actor == "design-director" and not is_design_system(path_str):
+            out["flags"] = ["design_director_write_outside"]
         return out
     try:
         rel = str(path.resolve().relative_to(root.resolve()))
     except Exception:
         rel = str(path)
     out["rel"] = rel
-    out["area"] = "docs" if rel.startswith("docs/") else "run-state" if rel.startswith(".claude/runs/") else "code"
+    out["area"] = "docs" if rel.startswith(tuple(roots)) else "run-state" if rel.startswith(".claude/runs/") else "code"
     created = isinstance(response, dict) and response.get("type") == "create"
     flags = []
-    if rel.endswith(".md") and out["area"] != "docs" and (created or tool == "Write") and not rel.endswith(("README.md", "CLAUDE.md", "CHANGELOG.md")):
+    is_ds = is_design_system(rel)
+    if (rel.endswith(".md") and out["area"] != "docs" and (created or tool == "Write")
+            and not rel.endswith(("README.md", "CLAUDE.md", "CHANGELOG.md"))
+            and not (is_ds and actor == "design-director")):
         flags.append("md_outside_docs")
+    if is_ds and actor not in DESIGN_SYSTEM_WRITERS:
+        flags.append("design_system_write_by_other")
+    if actor == "design-director" and not is_ds:
+        flags.append("design_director_write_outside")
     if actor in IMPLEMENTERS and (out["area"] == "docs" or Path(rel).name in DOC_FILES):
         flags.append("docs_write_by_implementer")
     if actor in READ_ONLY_AGENTS:
         flags.append("write_by_readonly_agent")
-    if rel.startswith("docs/backlog/") and actor not in {"backlog-keeper", "unknown"}:
+    if rel.startswith(tuple(r + "backlog/" for r in roots)) and actor not in {"backlog-keeper", "unknown"}:
         flags.append("backlog_write_by_other")
 
     run = active_run(root)
@@ -275,6 +324,7 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response) -> 
             allowed += [
                 s.get("target", "") for s in run.get("approved_scope", [])
                 if str(s.get("task")) == task and s.get("decision", "approved") == "approved"
+                and not is_design_system(s.get("target", ""))  # never enters allowed paths
             ]
             in_scope = matches(rel, allowed + ALWAYS_ALLOWED)
             out["in_scope"] = in_scope
@@ -294,9 +344,11 @@ WHY = {
     "git_push": "pushes need the user's explicit authorization in the current conversation",
     "out_of_scope_write": "this path is outside the task's allowed_paths and its approved scope",
     "suite_by_non_runner": "whole suites run only through test-runner; run only the tests of the files you touched",
-    "md_outside_docs": "notes, summaries and other .md files outside docs/ are not created; documentation needs go to needs_docs",
+    "md_outside_docs": "notes, summaries and other .md files outside the docs roots (docs/ by default) are not created; documentation needs go to needs_docs",
     "docs_write_by_implementer": "documentation files are written only by docs-writer; list the need in needs_docs",
-    "backlog_write_by_other": "docs/backlog/ is written only by backlog-keeper; report it in out_of_scope_issues",
+    "backlog_write_by_other": "<docs root>/backlog/ (docs/backlog/ by default) is written only by backlog-keeper; report it in out_of_scope_issues",
+    "design_director_write_outside": "design-director writes only the project's DESIGN_SYSTEM.md; for anything else finish with result: blocked and a scope_requests entry saying what and why, the caller will ask the user",
+    "design_system_write_by_other": "a project's DESIGN_SYSTEM.md (any directory) is created only by design-director and maintained only by the main session following the design-system skill; propose the value (token, light and dark, usage) in scope_requests instead",
     "docker_build": "images are built only when the task changes a Dockerfile or its build context",
     "external_request": "requests go only to local hosts (localhost, 127.0.0.1, compose service names)",
 }
@@ -386,7 +438,7 @@ def main() -> None:
         elif tool in {"Write", "Edit", "MultiEdit", "NotebookEdit"}:
             path = tinput.get("file_path") or tinput.get("notebook_path") or ""
             record["categories"] = ["write"]
-            record.update(evaluate_write(path, payload.get("cwd", ""), actor, tool, payload.get("tool_response")))
+            record.update(evaluate_write(path, payload.get("cwd", ""), actor, tool, payload.get("tool_response"), docs_roots(config)))
             flags = record.pop("flags", [])
         elif VISUAL_TOOL.search(tool):
             record["categories"] = ["visual"]

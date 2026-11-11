@@ -1,14 +1,31 @@
 # Design System - <project name>
 
-<!-- Source of truth for every UI-facing service (web frontend, mobile). The `design-system` skill reads and extends this file directly - keep it current instead of letting one-off values drift into components. -->
+<!-- Source of truth for every UI-facing service (web, mobile). Created once by the `design-director` agent, from a visual direction the user chose; maintained afterwards by the main session following the `design-system` skill. Subagents never edit it: they propose values in `scope_requests`. -->
 
 ## Principles
 
 <!-- 2-4 sentences on the visual direction: what this product should feel like, and any hard rule that shapes every decision below (e.g. "dense, data-heavy, no wasted whitespace" vs "generous whitespace, editorial"). -->
 
+## Layout concept
+
+<!-- Filled by design-director from the chosen direction. Concept: how screens are organized and why (navigation model, density, where the primary action lives). Wireframe: ASCII sketch of the main-task screen - one block per platform in a monorepo (web, mobile). Avoided patterns: each generic pattern this direction could fall into and how it avoids it; elements taken from the brief or CONSTRAINTS.md that match a pattern are listed with source "brief". -->
+
+**Concept:**
+
+**Wireframe - <platform>:**
+
+```text
+```
+
+**Avoided patterns:**
+
+| Pattern | How this direction avoids it (or why it is kept) | Source |
+|---|---|---|
+| | | list / brief / CONSTRAINTS.md |
+
 ## Color
 
-<!-- Semantic tokens, not raw hex sprinkled through components. Name by role, not by appearance (`accent`, not `blue`) so the value can change without renaming every usage. Provide both light and dark values if the product supports dark mode. -->
+<!-- Semantic tokens, not raw hex sprinkled through components. Name by role, not by appearance (`accent`, not `blue`) so the value can change without renaming every usage. Always provide both light and dark values, even when the product ships one theme. -->
 
 | Token | Light | Dark | Usage |
 |---|---|---|---|
@@ -38,7 +55,15 @@ Minimum contrast: body text 4.5:1, large text/icons 3:1 (WCAG AA) against its ba
 | `text.small` | | | | Secondary/meta text |
 | `text.caption` | | | | Labels, timestamps |
 
-Font family: <family, with fallback stack>
+### Font family
+
+<!-- Open-license (e.g. SIL OFL) or system families only. Record where each family comes from and its license. In a monorepo the family must work on web and mobile (expo-font). -->
+
+| Role | Family | Weights | Fallback stack | Source | License |
+|---|---|---|---|---|---|
+| Display | | | | | |
+| Text | | | | | |
+| Mono | | | | | |
 
 ## Spacing scale
 

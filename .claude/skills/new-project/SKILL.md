@@ -42,7 +42,9 @@ From `~/.claude/templates/project-root/`:
    - Fill `CLAUDE.md`'s `Local runtime` and `Test suites` sections after the services exist (step 5), as described in step 7.
    - Fill `PRD.md` and `CONSTRAINTS.md` from what the user described. `OPEN_QUESTIONS.md` gets only project-level open decisions (architecture, product direction); feature questions wait for that feature's plan.
    - In `DEPLOY.md`, fill the CI table and one subsection per service; keep only the rows for the CI level chosen.
-   - Leave the `DESIGN_SYSTEM.md` tables blank for the `design-system` skill. Drop it if there is no UI service.
+   - `DESIGN_SYSTEM.md`: drop it if there is no UI service (no `react` or `react-native`). With a UI service, ask once, here: "Define the visual direction now? (`design-director`: two contrasting proposals, you choose)".
+     - **Yes**: after `PRD.md`, `CONSTRAINTS.md` and the `Services` table are filled, call `design-director` with `phase: design-direction`, `project_root`, `entry: new-project` and the brief (the user's description). Relay each `needs_input` with `AskUserQuestion` and resume the same agent with `SendMessage` until `done` or `blocked`; then continue the scaffold.
+     - **No**: leave the tables blank. The direction can be created later by the Workflow phrase in the global `CLAUDE.md` or by the offer of the `design-system` skill. Do not ask again in this run.
 2. **`docker-compose.yml`.**
    - Replace `__PROJECT__`.
    - Keep one block per containerized service (named after its folder, with that stack's dev port and command) and only the infra chosen.
@@ -114,4 +116,5 @@ Fill the two sections of the root `CLAUDE.md` that agents read, from what steps 
   - the profile used;
   - the tree created;
   - files skipped because they already existed;
-  - anything from the templates that didn't apply.
+  - anything from the templates that didn't apply;
+  - whether the visual direction was created (`design-director`), left blank, or not applicable (no UI service).

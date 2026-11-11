@@ -47,6 +47,7 @@ first; when it fails, say what is missing instead of proceeding. Plans, specs an
 | The user says (examples) | Phase -> owner | Precondition |
 |---|---|---|
 | "tenho uma ideia", "vamos pensar em X" | Discover -> `grill-me` skill, one question at a time, then hand off to `planner` | none |
+| "cria a identidade visual", "define o design do zero", "vamos criar o frontend do zero" | Visual direction -> `design-director`, in rounds (`needs_input`: brief if missing, two contrasting directions, the user's choice), writes only the root `DESIGN_SYSTEM.md`; tokens reach the code later through a normal plan and spec | root `DESIGN_SYSTEM.md` missing or its `Principles` empty, and no UI service with its own tokens in code; the phrase is the user's yes. Otherwise say the direction exists and follow `design-system` (maintenance), or document the tokens already in code following `design-system` (extraction), without the agent |
 | "vamos planejar", "escreve o plano" | Plan -> `planner` | decisions clear enough; otherwise Discover first |
 | "pode especificar", "escreve a spec" | Spec -> `specker` | the plan exists (asking for the spec approves a Draft plan), or a refactor entry |
 | "podemos seguir com a implementação", "pode implementar", "go" | Implement -> `implement` skill (`--tdd` when the user says "com TDD") | spec Approved (a Draft spec needs the user's yes) and plan Approved |
@@ -68,6 +69,12 @@ first; when it fails, say what is missing instead of proceeding. Plans, specs an
 - Subagents cannot ask the user. When one finishes with `result: needs_input` (a question) or `result: blocked` with
   `scope_requests`, ask the user - one `AskUserQuestion` call for everything pending - and resume the same agent with
   `SendMessage` and the answers.
+- A subagent's `scope_requests` on the root `DESIGN_SYSTEM.md` never adds the path to its `allowed_paths`: a missing
+  file (or empty `Principles`) becomes the offer of `design-director` to the user; an extraction request (`reason:
+  extraction of tokens in <files>`, the UI service already has tokens in code) is asked as extraction, and on yes the
+  main session documents the existing tokens following `design-system`; a proposed value is written by the main
+  session itself, following `design-system`, after the user's yes. Then the agent is resumed. A refusal is a denied
+  request.
 - The agent workflow hook (`~/.claude/hooks/agent-audit.py`) enforces part of these rules: a call it denies
   ("Agent workflow (<category>): ...") is never retried or worked around; follow its message, and ask the user when
   the action is really needed. Commits and pushes go through a confirmation prompt even after the user authorized them.

@@ -3,7 +3,7 @@
 - **Data**: 2026-11-10
 - **Revisão**: 3 (incorpora os comentários das rodadas 1 e 2; ver Apêndices A e B)
 - **Status**: Aprovado (rodada 3 fechada em 2026-11-10); pronto para a etapa A
-- **Adendo 2026-11-11**: etapa H, agent `design-director` (D22), **Status: Approved** (2026-11-11); ver 15.1. As linhas marcadas "(etapa H)" nas outras seções valem a partir desta aprovação; spec em `~/dotfiles/docs/features/design-director/spec.md`
+- **Adendo 2026-11-11**: etapa H, agent `design-director` (D22), **Status: Implemented** (aprovada e implementada em 2026-11-11); ver 15.1. As linhas marcadas "(etapa H)" nas outras seções valem a partir desta aprovação; spec em `~/dotfiles/.claude/docs/features/design-director/spec.md`
 - **Escopo**: `~/.claude/agents/`, `~/.claude/skills/`, `~/.claude/templates/`, `~/.claude/CLAUDE.md`, `~/.claude/settings.json`
 - **Objetivo duplo**:
   1. Atender melhor o workflow diário: feature, bug, refactor, review de PR e projeto novo, em proporções parecidas.
@@ -409,7 +409,7 @@ Modelo: sonnet com effort baixo, porque é preenchimento de template com dedupli
 | `backlog-keeper`    | **novo**         | dono único de `docs/backlog/` (seção 8.1)                                                                                                                                       |
 | `docs-writer`       | **novo**         | dono único de docs no fim do run, a partir dos `needs_docs`; pré-carrega a skill `docs`                                                                                         |
 | `ui-verifier`       | **novo, opt-in** | roda só quando o usuário pede explicitamente um print; isola as imagens fora da conversa principal e devolve só texto; read-only                                                |
-| `design-director`   | **novo** (etapa H, Draft) | cria a direção visual de um projeto sem frontend definido e escreve só `DESIGN_SYSTEM.md`, em rodadas via `needs_input` (15.1); opus, effort alto; pré-carrega `design-system`; sem `Bash` |
+| `design-director`   | **novo** (etapa H, implementada) | cria a direção visual de um projeto sem frontend definido e escreve só `DESIGN_SYSTEM.md`, em rodadas via `needs_input` (15.1); opus, effort alto; pré-carrega `design-system`; sem `Bash` |
 
 > 💬
 
@@ -731,7 +731,7 @@ Sem a flag, nada muda: o stack agent escreve código e testes da task, como na s
 1. **Etapa A**: o protocolo de escopo (13.4) já vale por **instrução**, no `implementer-contract`.
 2. **Etapa D**: hook em `audit`. Custo zero de execução; mede violações reais e falsos positivos.
 3. **Etapa G**: `block` **por categoria**, onde os dados mostrarem falso positivo zero. Candidatos: comandos Docker proibidos, `git commit`/`git push` sem autorização, `.md` criado fora de `docs/`, escrita fora de `allowed_paths`.
-4. **Etapa H** (Draft, 15.1): categoria nova `design_system_write_by_other` em `warn` (escrita no `DESIGN_SYSTEM.md` da raiz por quem não é `design-director` nem a sessão principal); o `design-director` fica isento de `md_outside_docs` só para esse arquivo. A promoção a `block` segue a mesma regra dos dados.
+4. **Etapa H** (implementada, 15.1, 13.5): categoria nova `design_system_write_by_other` em `warn` (escrita em um `DESIGN_SYSTEM.md` por quem não é `design-director` nem a sessão principal) e categoria nova `design_director_write_outside` em `block` (qualquer escrita do `design-director` que não seja um `DESIGN_SYSTEM.md`); o `design-director` fica isento de `md_outside_docs` só para esse arquivo. A promoção da `design_system_write_by_other` a `block` segue a mesma regra dos dados.
 
 ### 13.4 Protocolo de pedido de escopo
 
@@ -758,6 +758,26 @@ implement
 
 **Fora de um run** (conversa ad hoc), a regra é a mesma, sem estado: o agent explica e pergunta antes de agir fora do que foi pedido.
 
+### 13.5 Regras do hook da etapa H (`DESIGN_SYSTEM.md` e `docs_roots`)
+
+**`DESIGN_SYSTEM.md` por nome.** A regra vale para qualquer caminho cujo nome de arquivo, sem diferenciar maiúsculas (`casefold`), seja `design_system.md`, em qualquer diretório do repositório (cobre `apps/web/` num monorepo e sistemas de arquivos que ignoram caixa). A redação antiga, só o arquivo da raiz, está obsoleta. Consequência aceita: `templates/**/DESIGN_SYSTEM.md` também é protegido (stack agents recebem aviso, o `design-director` pode escrever, a sessão principal é livre).
+
+| Quem escreve | Resultado |
+|---|---|
+| `design-director` em um `DESIGN_SYSTEM.md` | silencioso (isento de `md_outside_docs` só para esse nome) |
+| `design-director` em qualquer outro arquivo | `design_director_write_outside` (`block`), também sem raiz git |
+| sessão principal | silencioso |
+| qualquer outro ator | `design_system_write_by_other` (`warn`) |
+
+Alvos de `approved_scope` que casam com a regra são descartados dos caminhos permitidos derivados do run: aprovar o pedido não libera a escrita do agent, então o `out_of_scope_write` continua valendo (regra 29).
+
+**`docs_roots`.** Lista em `agent-audit.json` das pastas, relativas à raiz git, que contam como área de docs. Padrão: `["docs/"]`; neste repositório, `["docs/", ".claude/docs/"]`, porque os docs das features da própria config ficam em `.claude/docs/`.
+
+- Normalização de cada entrada: tira espaços, troca `\\` por `/`, remove `./` e `/` iniciais, garante a `/` final e elimina duplicatas. Entradas que não são texto, vazias, `.` ou com `..` são ignoradas.
+- Fallback: chave ausente, valor que não é lista ou nenhuma entrada válida -> `["docs/"]`.
+- Efeito: `.md` dentro de uma raiz não gera `md_outside_docs`, e `<raiz>backlog/` só é escrito pelo `backlog-keeper` (`backlog_write_by_other`), checado por raiz. A comparação é por prefixo: `services/x/docs/` não é raiz.
+- `project-docs` e `/implement` ainda resolvem `docs/` na raiz do repositório; aqui o caminho da feature é passado explicitamente.
+
 > 💬
 
 ---
@@ -772,6 +792,7 @@ O mesmo hook da seção 13 grava um JSONL por sessão (por exemplo em `~/.claude
 - `PostToolUse` em `Bash`: comando, classificado como `lint | typecheck | test-narrow | test-gate-task | test-gate-full | docker-read | docker-build | docker-lifecycle | git | other`.
 - `PostToolUse` em `Write|Edit`: caminho e se está dentro de `allowed_paths` ou `approved_scope`.
 - `PostToolUse` nas tools de browser e screenshot: quem chamou. Fora de pedido explícito, o esperado é zero.
+- Etapa H: o relatório do `agent-metrics.py` ganha a seção `## design-director`, só quando a sessão tem um `SubagentStart` ou algum evento desse ator. Traz as chamadas, as escritas fora de um `DESIGN_SYSTEM.md` (alvo 0, até 5 exemplos com horário e caminho) e uma linha lembrando de conferir à mão, no transcript, as chamadas sem um sim prévio do usuário (o hook não vê a conversa; alvo 0). Os rótulos das categorias `design_system_write_by_other` e `design_director_write_outside` entram na lista de flags. Sem eventos do `design-director`, o relatório fica idêntico ao anterior.
 
 ### 14.2 Métricas por run
 
@@ -854,7 +875,7 @@ Um conjunto fixo de cenários, rodado igual na config pura e via Briareu:
 
 ## 15. Plano de execução
 
-A ordem A -> G foi aprovada. As decisões da rodada 2 entram nas etapas já existentes, sem etapa nova. A etapa H (adendo de 2026-11-11, `Draft`) vem depois da G e não muda as anteriores (15.1).
+A ordem A -> G foi aprovada. As decisões da rodada 2 entram nas etapas já existentes, sem etapa nova. A etapa H (adendo de 2026-11-11, implementada) vem depois da G e não muda as anteriores (15.1).
 
 | Etapa | Conteúdo                                                                                                                                                                                                                                                                                     | Ataca                                                               |
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
@@ -865,15 +886,15 @@ A ordem A -> G foi aprovada. As decisões da rodada 2 entram nas etapas já exis
 | **E** | `docs-writer` + `ui-verifier`                                                                                                                                                                                                                                                                | fases sem dono                                                      |
 | **F** | `fix-bug` + consolidação de skills (seção 12.2), incluindo a `tdd` evoluída e o `implement --tdd` (12.4)                                                                                                                                                                                                           | fluxo de bug, sobreposição                                          |
 | **G** | `block` por categoria, com base nos dados da etapa D                                                                                                                                                                                                                                         | garantia mecânica                                                   |
-| **H** (Draft) | `design-director` (criação de `DESIGN_SYSTEM.md`) + `design-system` só com a manutenção + pontos de entrada (`new-project`, Workflow, `design-system`) + hook (`design_system_write_by_other`, isenção de `md_outside_docs`) + remoção do plugin `frontend-design` (15.1) | criação da direção visual sem dono, dependência de fonte externa desligada |
+| **H** (implementada) | `design-director` (criação de `DESIGN_SYSTEM.md`) + `design-system` só com a manutenção + pontos de entrada (`new-project`, Workflow, `design-system`) + hook (`design_system_write_by_other`, `design_director_write_outside`, isenção de `md_outside_docs`, `docs_roots`) + remoção do plugin `frontend-design` (15.1) | criação da direção visual sem dono, dependência de fonte externa desligada |
 
 Cada etapa termina com os cenários relevantes da seção 14.3 rodados e as métricas comparadas.
 
 ### 15.1 Etapa H - `design-director` (adendo 2026-11-11)
 
-- **Status**: Approved (2026-11-11)
+- **Status**: Approved (2026-11-11); implementada em 2026-11-11 (Registro de execução)
 - **Origem**: grill-me de 2026-11-11 (D22; Apêndice D)
-- **Spec**: `~/dotfiles/docs/features/design-director/spec.md`
+- **Spec**: `~/dotfiles/.claude/docs/features/design-director/spec.md`
 
 #### Objetivo
 
@@ -885,7 +906,7 @@ Um projeto sem frontend definido ganha uma direção visual própria antes da pr
 | Arquivo final completo | todas as tabelas do template preenchidas (ou "não se aplica" explícito); light e dark sempre; escala de 5-7 passos; `Layout concept` preenchida | 100% |
 | Fontes utilizáveis | famílias com licença aberta ou do sistema, com origem e licença registradas no arquivo | 100% |
 | Contraste | todo par texto/fundo com razão listada no report, AA nos dois temas | 100% dos pares |
-| Escrita restrita | escritas do `design-director` fora do `DESIGN_SYSTEM.md` da raiz (hook) | 0 |
+| Escrita restrita | escritas do `design-director` fora de um `DESIGN_SYSTEM.md` (hook; seção `## design-director` das métricas) | 0 |
 | Nada automático | chamadas do `design-director` sem um sim do usuário antes (14.2) | 0 |
 | Um dono por ação | `design_system_write_by_other` no relatório de métricas | 0 |
 | Sem fonte externa | `grep -r frontend-design` na config, fora deste documento | 0 ocorrências |
@@ -969,7 +990,7 @@ Um projeto sem frontend definido ganha uma direção visual própria antes da pr
 
 28. O `design-director` escreve só o `DESIGN_SYSTEM.md` da raiz: nenhum código, config, fonte, asset, estado de run ou outro doc. Tools: `Read`, `Grep`, `Glob`, `Write`, `Edit`; sem `Bash`, browser ou screenshot.
 29. Depois da criação, o arquivo é escrito só pela sessão principal seguindo a `design-system`. Stack agents propõem valores em `scope_requests`; com o sim do usuário, a sessão principal aplica o valor e retoma o agent (exceção ao passo 5 de 13.4, em que o próprio agent faria a ação). `docs-writer` continua sem tocar no arquivo.
-30. Hook: o `design-director` não gera `md_outside_docs` ao escrever o `DESIGN_SYSTEM.md` da raiz (só esse caminho); qualquer outro ator que não seja `design-director` ou a sessão principal gera `design_system_write_by_other` (`warn`). Uma chamada negada ou com aviso nunca é repetida; o agent termina `blocked`.
+30. Hook: o `design-director` não gera `md_outside_docs` ao escrever um `DESIGN_SYSTEM.md` (regra por nome, 13.5); qualquer outro ator que não seja `design-director` ou a sessão principal gera `design_system_write_by_other` (`warn`); qualquer escrita do `design-director` em outro arquivo é negada (`design_director_write_outside`, `block`). Uma chamada negada nunca é repetida; o agent termina `blocked`, dizendo o estado do arquivo. Um aviso numa escrita bem-sucedida é reportado e a rodada segue.
 31. Report: bloco YAML final no formato comum (5.1), com `result: done | needs_input | blocked`, `files_written`, `question` (rodadas 1 e 2), as duas direções resumidas (rodada 2), os pares de contraste com as razões (rodada 3), o próximo passo e `needs_docs: []`.
 32. Contrato para o Briareu: a entrada é autossuficiente (fase, raiz do projeto, brief e, na retomada, a direção escolhida em texto), sem depender da conversa principal (seção 5).
 
@@ -1042,12 +1063,13 @@ Padrões: poderia cair no kit de cards SaaS; evita com tabela e divisórias, sem
 | `agents/design-director.md` | **novo**: frontmatter de D22 (f); corpo com o ciclo de rodadas, a lista de padrões genéricos, o plano compacto de tokens revisado contra o brief, as regras de contraste, de escala e de licença das fontes, o `Layout concept` e o report YAML (regras 1-34) |
 | `skills/design-system/SKILL.md` | passo 1: arquivo ausente ou `Principles` vazia -> oferecer o `design-director` (sessão principal) ou `scope_requests` (subagent); com UI já em código e tokens próprios, documentar os tokens existentes (extração) em vez de oferecer o agent (regra 33); sai a referência ao `frontend-design`; a skill fica só com a manutenção; valores propostos por subagent passam pela sessão principal (regra 29) |
 | `skills/new-project/SKILL.md` | passo 1 (~linha 45): com serviço de UI, pergunta se define a direção agora; sim -> `design-director` depois de `PRD.md`; não -> tabelas em branco |
-| `CLAUDE.md` (global) | linha nova no Workflow: "cria a identidade visual", "define o design do zero", "vamos criar o frontend do zero" -> `design-director`, com a pré-condição da regra 1 |
+| `CLAUDE.md` (global) | linha nova no Workflow: "cria a identidade visual", "define o design do zero", "vamos criar o frontend do zero" -> `design-director`, com a pré-condição da regra 1; bullet de `scope_requests` no `DESIGN_SYSTEM.md` da raiz com três ramos (arquivo ausente -> oferta do `design-director`; extração -> a sessão principal documenta os tokens com a `design-system`; valor proposto -> a sessão principal escreve), e o caminho nunca entra em `allowed_paths` |
+| `skills/implement/SKILL.md` | passo 5.2: exceção para pedidos de escopo no `DESIGN_SYSTEM.md` com os mesmos três ramos; a decisão do usuário continua registrada em `approved_scope`, mas o caminho nunca entra em `allowed_paths` (regra 29) |
 | `templates/node-ts-react/CLAUDE.md`, `templates/react-native/CLAUDE.md` | linha 25: sai o `frontend-design`; criação da direção pelo `design-director`, manutenção pela `design-system` |
 | `templates/project-root/DESIGN_SYSTEM.md` | comentário do topo: criado pelo `design-director`, mantido pela `design-system`; seção nova `Layout concept` depois de `Principles` (conceito, wireframe ASCII por plataforma, padrões evitados), aprovada pelo usuário em 2026-11-11 (D22 h); linha `Font family` com origem e licença de cada família (D22 i) |
-| `hooks/agent-audit.py` | isenção de `md_outside_docs` para `design-director` no `DESIGN_SYSTEM.md` da raiz; flag `design_system_write_by_other`; mensagem em `WHY` (propor o valor em `scope_requests`) |
-| `hooks/agent-audit.json` | `design_system_write_by_other: warn` |
-| `hooks/agent-metrics.py` | descrição da categoria nova (alvo 0) |
+| `hooks/agent-audit.py` | regra por nome (13.5): `DESIGN_SYSTEM.md` em qualquer diretório, sem diferenciar maiúsculas; isenção de `md_outside_docs` para `design-director` nesse arquivo; flags `design_system_write_by_other` e `design_director_write_outside` (também sem raiz git); mensagens em `WHY`; alvos de `approved_scope` que casam com a regra saem dos caminhos permitidos derivados, para o `out_of_scope_write` continuar valendo; lista `docs_roots` (13.5) no lugar do `docs/` fixo |
+| `hooks/agent-audit.json` | `design_system_write_by_other: warn`, `design_director_write_outside: block`, `docs_roots: ["docs/", ".claude/docs/"]` |
+| `hooks/agent-metrics.py` | rótulos das duas categorias novas (alvo 0); seção `## design-director` (14.1) |
 | `settings.json` | sai `frontend-design@claude-plugins-official` de `enabledPlugins` (arquivo com regra `ask`: o usuário confirma) |
 | `README.md` | pelo `docs-writer`, no fim: linha do `design-director` na tabela de agents; `design-system` pré-carregada também pelo `design-director`; o parágrafo do `frontend-design` vira a divisão criação x manutenção; categoria nova na política do hook |
 | `agent-workflow.md` | "Registro de execução" da etapa H, depois de executada |
@@ -1060,14 +1082,14 @@ Padrões: poderia cair no kit de cards SaaS; evita com tabela e divisórias, sem
   | Caso | Esperado |
   |---|---|
   | `design-director` faz `Write` em `DESIGN_SYSTEM.md` na raiz | silencioso |
-  | `design-director` faz `Write` em `services/web/DESIGN_SYSTEM.md` | `md_outside_docs` (`warn`) |
-  | `design-director` faz `Write` em `NOTES.md` | `md_outside_docs` (`warn`) |
+  | `design-director` faz `Write` em `services/web/DESIGN_SYSTEM.md` | silencioso (regra por nome, 13.5) |
+  | `design-director` faz `Write` em `NOTES.md` | negado: `design_director_write_outside` (`block`) |
   | `frontend-react` faz `Edit` no `DESIGN_SYSTEM.md` da raiz | `design_system_write_by_other` (`warn`) |
   | `docs-writer` faz `Edit` no mesmo arquivo | `design_system_write_by_other` (`warn`) |
   | sessão principal faz `Edit` no mesmo arquivo | silencioso |
   | modo `audit` | silencioso |
 
-- **Regressão**: os 31 casos de classificação e os 10 casos da etapa G continuam passando.
+- **Regressão**: a bateria pelo stdin de 119 checagens (H1-H28 da etapa H, G1-G11 da etapa G, 37 comandos de classificação C e D1-D10 dos `docs_roots`) passa, e as métricas M1-M5 também (o relatório de uma sessão sem `design-director` é idêntico ao anterior).
 - **Uso real** (sessão nova do Claude Code, porque agents novos só aparecem nela): cenários 37-45 da seção 14.3, mais o relatório `agent-metrics.py` com as métricas novas de 14.2.
 
 #### Riscos e mitigações
@@ -1122,7 +1144,7 @@ Rótulos fixos (`D<n>`) para não serem renumerados por formatadores de Markdown
 | D19 | Nome do agent de spec             | `specker`                                                                                                                              |
 | D20 | Modo TDD no `implement` | flag opt-in `--tdd`; o stack agent não altera testes sem `scope_request` aprovado (12.4) |
 | D21 | Migração para `docs/features/` | oferecer uma vez **e** manter compatibilidade com o layout legado; a recusa fica gravada no `CLAUDE.md` do projeto (6.1.1) |
-| D22 | `design-director` (etapa H, Draft) | agent novo cria a direção visual de projetos sem frontend definido, em rodadas via `needs_input` (duas direções contrastantes, o usuário escolhe), e escreve só `DESIGN_SYSTEM.md`; a manutenção fica com a `design-system`; três pontos de entrada, nenhum automático; plugin `frontend-design` não adotado, só ideias reescritas; opus, effort alto, sem `Bash`; hook com isenção e categoria `design_system_write_by_other`; UI já existente em código fica com a extração pela `design-system`; seção nova `Layout concept` no template; só fontes de licença aberta ou do sistema; light e dark sempre (15.1, decisões a-j) |
+| D22 | `design-director` (etapa H, implementada) | agent novo cria a direção visual de projetos sem frontend definido, em rodadas via `needs_input` (duas direções contrastantes, o usuário escolhe), e escreve só `DESIGN_SYSTEM.md`; a manutenção fica com a `design-system`; três pontos de entrada, nenhum automático; plugin `frontend-design` não adotado, só ideias reescritas; opus, effort alto, sem `Bash`; hook com isenção, categoria `design_system_write_by_other` (`warn`) e categoria `design_director_write_outside` (`block`); UI já existente em código fica com a extração pela `design-system`; seção nova `Layout concept` no template; só fontes de licença aberta ou do sistema; light e dark sempre (15.1, decisões a-j) |
 
 ### 16.2 Em aberto
 
@@ -1408,3 +1430,40 @@ Nenhuma. As perguntas da etapa H foram respondidas em 2026-11-11 (15.1, D22 g-j)
 **Pendências:**
 - Rodada de testes (sessão de validação): cenários da seção 14.3 e o relatório `agent-metrics.py`. Com ele, promover a `block` as categorias em `warn` sem falso positivo (candidatas: `md_outside_docs`, `docs_write_by_implementer`, `backlog_write_by_other`).
 - Confirmar no uso real que o lembrete de `warn` (`additionalContext` no `PreToolUse`) chega ao contexto do agent.
+
+### Etapa H - 2026-11-11 (concluída; uso real pendente)
+
+Spec: `~/dotfiles/.claude/docs/features/design-director/spec.md`; log: `log.md` na mesma pasta. Sete tasks, quatro correções de review (r1, r2, r4 e uma adição de escopo r3).
+
+**O que foi feito (em `~/dotfiles/.claude/`):**
+
+| Arquivo | Mudança |
+|---|---|
+| `agents/design-director.md` | **novo**: opus, effort alto, tools `Read`, `Grep`, `Glob`, `Write`, `Edit`, pré-carrega `design-system`; corpo em inglês com as rodadas (briefing, duas direções, `DESIGN_SYSTEM.md`), a lista de padrões a evitar, a fórmula de contraste (razões calculadas à mão, e o report diz isso) e o report YAML. Negado pelo hook, nunca repete: termina `blocked` com `hook-denied` e o estado do arquivo |
+| `templates/project-root/DESIGN_SYSTEM.md` | comentário do topo (criação x manutenção), `Color` com light e dark sempre, seção nova `Layout concept` depois de `Principles`, `Font family` como subseção de `Type scale` com origem e licença |
+| `skills/design-system/SKILL.md` | só manutenção; passo 1 com quatro situações (oferta do `design-director`, extração, valor proposto, nota para o próprio agent); sai o `frontend-design` |
+| `templates/node-ts-react/CLAUDE.md`, `templates/react-native/CLAUDE.md` | linha 25: criação pelo `design-director`, manutenção pela `design-system` |
+| `skills/new-project/SKILL.md` | passo 3.1: pergunta uma vez, só com serviço de UI (react ou react-native); sim chama o `design-director` depois de `PRD.md`, `CONSTRAINTS.md` e `Services`; não deixa as tabelas em branco |
+| `CLAUDE.md` (global), `skills/implement/SKILL.md` | linha do Workflow e bullet de `scope_requests` com os três ramos (15.1) |
+| `hooks/agent-audit.py`, `hooks/agent-audit.json`, `hooks/agent-metrics.py` | ver 15.1, 13.5 e 14.1 |
+| `settings.json` | sai `frontend-design@claude-plugins-official` de `enabledPlugins` (uma linha) |
+| `.gitignore` | `.claude/runs/` |
+| `README.md` | agents, skills, parágrafo criação x manutenção, hooks, `.claude/docs/` |
+
+**Verificação:** bateria pelo stdin com 119 checagens (H1-H28, G1-G11, 37 comandos C, D1-D10) e métricas M1-M5, todas passando; harnesses no scratchpad da sessão, que copiam os arquivos do hook sem tocar o hook vivo. `grep frontend-design` fora de `.claude/docs/` e deste documento sem ocorrências.
+
+**Achados do review corrigidos:**
+- r1: o `design-director` podia escrever fora do `DESIGN_SYSTEM.md` com só um aviso -> categoria `design_director_write_outside` em `block`; a regra da raiz virou regra por nome (monorepo e sistemas de arquivos que ignoram caixa); alvos de `approved_scope` no arquivo saem dos caminhos permitidos.
+- r2: ramo de extração no passo 1 da `design-system` com formato fixo do pedido (`action: create`, `target: DESIGN_SYSTEM.md`, motivo `extraction of tokens in <files>`); redação de `approved_scope` no `implement` e no `CLAUDE.md` global com três ramos; agent distingue negação do hook (`blocked`) de aviso (segue); detecção de serviço de UI alinhada ao `new-project`.
+- r4: textos do hook e das métricas sem a redação "raiz"; exemplo da seção `## design-director` usa `rel`, ou `path` quando não há `rel`.
+- r3 (adição de escopo aprovada pelo usuário): `docs_roots` configurável no hook (13.5).
+
+**Mudança de pasta de docs:** a pasta `docs/` desta config foi movida para `.claude/docs/` a pedido do usuário depois da r1, e não é ligada a `~/.claude`. Por isso a `docs_roots` e a nota em 13.5 sobre `project-docs` e `/implement`.
+
+**Decisões tomadas durante a execução:**
+- O `md_outside_docs` (`warn`) ao criar `agents/design-director.md` e o `out_of_scope_write` nas edições do template em paralelo são falsos positivos esperados (o hook lê só a `current_task`).
+- Heredoc no Bash é classificado como `docker_lifecycle` quando o corpo tem linhas parecidas com comandos: os harnesses são escritos com `Write` e rodados com `python3 -I`.
+
+**Pendências:**
+- Sessão nova do Claude Code (o agent só carrega nela): cenários 37-45 da seção 14.3, `/new-project` com perfil react e com perfil só backend, e o relatório `agent-metrics.py` com a seção `## design-director`.
+- Promover a `design_system_write_by_other` a `block` só com os dados do uso real.

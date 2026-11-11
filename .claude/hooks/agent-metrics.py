@@ -29,6 +29,8 @@ FLAG_LABELS = {
     "docs_write_by_implementer": "docs (docs/, README, CHANGELOG, .env.example, DEPLOY.md) edited by implementers - docs-writer owns them (target 0)",
     "write_by_readonly_agent": "files written by a read-only agent: ui-verifier, test-runner, reviewers (target 0)",
     "backlog_write_by_other": "backlog written by someone other than backlog-keeper (target 0)",
+    "design_system_write_by_other": "a DESIGN_SYSTEM.md written by someone other than design-director or the main session - propose values in scope_requests (target 0)",
+    "design_director_write_outside": "design-director write outside DESIGN_SYSTEM.md, blocked by the hook (target 0)",
     "suite_by_non_runner": "suites run by agents other than test-runner (target 0)",
     "docker_lifecycle": "docker up/down/restart/exec/run (target 0)",
     "docker_build": "docker builds (only when the task changes a Dockerfile)",
@@ -105,6 +107,28 @@ def report(title: str, events: list[dict]) -> str:
             "",
             f"- total: {len(writes)}; during a run: {len(in_run)}; checked against allowed_paths: {len(checked)}; "
             f"outside: {sum(1 for e in checked if not e['in_scope'])}",
+            "",
+        ]
+
+    director_calls = sum(1 for e in events if e.get("event") == "SubagentStart" and e.get("agent_type") == "design-director")
+    if director_calls or any(e.get("actor") == "design-director" for e in events):
+        stray = [
+            e
+            for e in writes
+            if e.get("actor") == "design-director" and e.get("event") != "PreToolUse" and Path(e.get("rel") or e.get("path") or "").name.casefold() != "design_system.md"
+        ]
+        out += [
+            "## design-director",
+            "",
+            f"- calls: {director_calls}",
+            f"- writes other than to a DESIGN_SYSTEM.md: {len(stray)} (target 0)",
+        ]
+        for e in stray[:5]:
+            out.append(f"  - {e.get('ts')} `{e.get('rel') or e.get('path')}`")
+        if len(stray) > 5:
+            out.append(f"  - ... {len(stray) - 5} more")
+        out += [
+            "- calls without a prior yes from the user: check by hand in the transcript (the hook does not see the conversation; target 0)",
             "",
         ]
 

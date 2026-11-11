@@ -2,6 +2,8 @@
   "mode": "enforce",
   "_mode": "off = record nothing; audit = record only, PreToolUse never decides (stage D); enforce = PreToolUse applies the action of each category below (stage G).",
   "_actions": "block = deny, with the reason and the scope-request protocol; ask = Claude Code asks the user; warn = allow, with a reminder in the agent's context; audit = record only. Promote a category from warn to block once the metrics show it has no false positives (agent-workflow.md, section 13).",
+  "docs_roots": ["docs/", ".claude/docs/"],
+  "_docs_roots": "Folders (relative to the git root) that count as the docs area: .md files there are not md_outside_docs, and <root>backlog/ is written only by backlog-keeper. Missing or invalid -> [\"docs/\"].",
   "categories": {
     "docker_lifecycle": "block",
     "write_by_readonly_agent": "block",
@@ -13,6 +15,8 @@
     "md_outside_docs": "warn",
     "docs_write_by_implementer": "warn",
     "backlog_write_by_other": "warn",
+    "design_system_write_by_other": "warn",
+    "design_director_write_outside": "block",
     "external_request": "warn",
     "docker_build": "audit"
   }

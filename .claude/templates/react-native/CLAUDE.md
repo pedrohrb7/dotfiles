@@ -22,4 +22,4 @@
 
 ## Reference
 
-Root `DESIGN_SYSTEM.md` for tokens · Root `PRD.md` for product context · `frontend-design` skill for aesthetic direction on new/greenfield screens · `design-system` skill for consistency, tokens, and accessibility on any screen
+Root `DESIGN_SYSTEM.md` for tokens · Root `PRD.md` for product context · `design-director` agent to create the visual direction when `DESIGN_SYSTEM.md` is missing or its `Principles` are empty · `design-system` skill to maintain tokens, consistency and accessibility on any screen
