@@ -1,7 +1,7 @@
 ---
 name: implement
-description: Implement an approved spec task by task by orchestrating the stack agents, test-runner, quality-fixer, the reviewers and backlog-keeper, with a resumable run state. Use when the user says "/implement <feature>", "podemos seguir com a implementação", "pode implementar", "vamos implementar", "segue com a implementação", "implement this spec", "start development of the plan", or "go" right after approving a spec. Verifies first that the plan and spec are approved, and never guesses which spec when several qualify.
-argument-hint: <docs/features/<slug>/ or docs/specs/file.md> [tasks 2-4] [--step]
+description: Implement an approved spec task by task by orchestrating the stack agents, test-runner, quality-fixer, the reviewers, docs-writer and backlog-keeper, with a resumable run state and an optional --tdd mode (tests written first against stubs). Use when the user says "/implement <feature>", "podemos seguir com a implementação", "pode implementar", "vamos implementar", "segue com a implementação", "implement this spec", "start development of the plan", or "go" right after approving a spec. Verifies first that the plan and spec are approved, and never guesses which spec when several qualify.
+argument-hint: <docs/features/<slug>/ or docs/specs/file.md> [tasks 2-4] [--step] [--tdd]
 ---
 
 # Implement a spec
@@ -25,6 +25,7 @@ Arguments: `$ARGUMENTS`
    If none of these resolves to exactly one spec, list the candidates (`Draft` or `Approved`) with their status and ask which one. Never pick between several. If the project has no spec, say so in one line and suggest `@specker` (or `@planner` when there is no plan either).
 3. **Tasks**: an optional range or list (`tasks 2-4`, `task 3`). The default is every task in **Implementation order** not already done (`Status: done` in a structured task block, or a ` (done)` suffix in an older free-form list).
 4. **`--step`**: pause after each task and wait for the user's approval before starting the next one. Without it, run all tasks and pause only on blockers, scope requests and the questions below.
+5. **`--tdd`** (opt-in, also "com TDD" in the user's phrase): each task's tests are written first, against stubs, and confirmed red by assertion before the stack agent implements (section 5). Record `"tdd": true` in the run state so a resume keeps the mode.
 
 ## 2. Preconditions
 
@@ -78,6 +79,12 @@ A structured task block gives every field directly (**Stack**, **Files**, **Depe
 Show the list to the user in a short table, set the spec to `In progress` when the first task starts, then go.
 
 ## 5. Per task
+
+0. **TDD first (only with `--tdd`).** Before step 1, for this task:
+   1. Delegate to the stack agent with `phase: scaffold`, the task and its `allowed_paths`: stubs that compile, no logic, no tests.
+   2. Delegate to `test-writer` in **tdd mode**, with the spec's Testing section for this task, its `Done when` and the stub files. It writes the tests and does not touch the stubs.
+   3. Run the new test files through `test-runner` with scope `files`. Every failure must have `failure_kind: assertion`. A `compile`, `import` or `runtime` failure sends the task back to scaffold once (with the failures); a test that passes goes back to `test-writer` once. Still wrong after that: stop and ask the user.
+   4. In step 1, say `TDD: on` and list the test files: the stack agent makes them pass without editing them.
 
 1. **Implement.** Delegate to the stack agent with this prompt shape:
 

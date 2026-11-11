@@ -4,24 +4,25 @@ The design behind the agents and skills (phases, single owner per action, agent 
 
 ## skills/
 
-Personal skills, mostly explicit-invocation-only (`disable-model-invocation: true` - call with `/name`, never auto-triggered). `implement` is the exception: it is auto-invoked by the phrases of the global `CLAUDE.md` Workflow table, and checks its own preconditions. Compose with each other the way `review` calls `codebase-standards`, or `tdd` calls `grill-me` and `scaffold`.
+Personal skills. Each one owns a phase of the workflow or a piece of know-how, and the global `CLAUDE.md` **Workflow** table routes phrases to them ("tenho uma ideia" -> `grill-me`, "podemos seguir com a implementação" -> `implement`, "corrige o bug X" -> `fix-bug`, "escreve o PR" -> `pr-description`). The skill holds the know-how, the agent executes: several are preloaded by agents through their `skills:` frontmatter. No skill is disabled in `settings.json` (`skillOverrides`).
 
-| skill                | purpose                                                                                 |
-| -------------------- | --------------------------------------------------------------------------------------- |
-| `scaffold`           | Placeholder files with correct types/exports/TODOs                                      |
-| `code-simplify`      | Remove unnecessary complexity/duplication, preserve behavior                            |
-| `codebase-standards` | Compare recent changes against the codebase's own conventions                           |
-| `grill-me`           | Interview the user until a plan/design is fully resolved                                |
-| `review`             | Two-phase review: feature correctness, then standards                                   |
-| `tdd`                | grill-me -> scaffold -> failing tests, then hand off to implement                       |
-| `bug-repro`          | Reproduce a bug end-to-end before attempting a fix                                      |
-| `docs`               | Know-how of the documentation pass; enabled and preloaded by `docs-writer`, which owns the pass |
-| `pr-description`     | Draft a PR description and changelog entry from a diff                                  |
-| `dep-audit`          | Audit dependencies for outdated/vulnerable packages                                     |
-| `design-system`      | Apply design tokens, hierarchy, and accessibility when building a layout                |
-| `new-project`        | Scaffold a new project's structure from `templates/`                                    |
-| `onboard`            | Document folder structure, patterns, and conventions of an existing project per service |
-| `implement`          | Execute an approved spec task by task by orchestrating the agents in `agents/`; auto-invoked by "podemos seguir com a implementação" and similar phrases, with preconditions and a resumable run state |
+| skill                  | purpose                                                                                 | preloaded by |
+| ---------------------- | --------------------------------------------------------------------------------------- | ------------ |
+| `grill-me`             | Discover: interview the user one question at a time until the decisions are clear, then hand off to `planner` | - |
+| `implement`            | Execute an approved spec task by task through the agents, with preconditions, a resumable run state in `.claude/runs/` and an optional `--tdd` mode | - |
+| `fix-bug`              | Fix a registered bug: reproduce, diagnose (read-only), regression test red by assertion, fix without touching it, gate, review, docs, close the entry | - |
+| `tdd`                  | TDD where the user implements: settle the behavior, scaffold stubs that compile, tests red by assertion, hand off | - |
+| `bug-repro`            | Reproduce a bug end to end as the user sees it: request + logs, failing command, or UI steps the user confirms | `quality-fixer` |
+| `project-docs`         | The `docs/` tree: layouts and path resolution (features or legacy), scaffold, add entry, migrate | `planner`, `specker`, `backlog-keeper`, `docs-writer` |
+| `docs`                 | Know-how of the documentation pass                                                      | `docs-writer` |
+| `design-system`        | Design tokens, hierarchy and accessibility, with `DESIGN_SYSTEM.md` as the single source | `frontend-react`, `mobile-react-native` |
+| `dep-audit`            | Audit dependencies by real risk; never auto-upgrade                                      | `security-reviewer` |
+| `pr-description`       | Deliver: draft the PR description and changelog entry from the diff and the feature's documents (text only) | - |
+| `archify`              | Architecture, flow, sequence and state diagrams as standalone HTML                       | - |
+| `new-project`          | Scaffold a new project's structure from `templates/`                                    | - |
+| `onboard`              | Document an existing project per service, plus the root `CLAUDE.md` agent sections      | - |
+
+Removed in stage F (see `agent-workflow.md`): `review` (its intent check moved into `code-reviewer`), `codebase-standards` (already `code-reviewer`'s standards phase), `scaffold` (now step 2 of `tdd` and the `scaffold` phase of the stack agents) and `code-simplify` (replaced by the built-in `/simplify`; its "wait for approval before applying" rule is in the Workflow table).
 
 `implementer-contract` is not called by hand (`user-invocable: false`): it is the shared contract every stack agent preloads through its `skills:` frontmatter - inputs, write scope and scope requests, narrow-checks policy, runtime validation against the user's local instance, UI policy, out-of-scope reporting and the YAML report. Rules common to the stack agents change there, not in the seven agent files.
 
@@ -69,20 +70,20 @@ Each agent pins its own `model` and `effort` to balance quality and token cost:
 | agent                 | model  | effort | tools                  | preloaded skills                               | auto-invoked                              |
 | --------------------- | ------ | ------ | ---------------------- | ---------------------------------------------- | ----------------------------------------- |
 | `code-reviewer`       | opus   | medium | read-only              | -                                              | after significant changes                 |
-| `security-reviewer`   | opus   | medium | read-only              | -                                              | only auth, API, input, secrets, deps      |
+| `security-reviewer`   | opus   | medium | read-only              | `dep-audit`                                    | only auth, API, input, secrets, deps      |
 | `planner`             | opus   | high   | read + write `docs/`   | `project-docs`                                 | "vamos planejar", "escreve o plano"       |
 | `specker`             | opus   | high   | read + write `docs/`   | `project-docs`                                 | "pode especificar", "escreve a spec"      |
 | `docs-writer`         | sonnet | medium | read + write doc files | `docs`, `project-docs`                         | end of `/implement` and bug fixes, "documenta" |
 | `ui-verifier`         | sonnet | low    | all, read-only by prompt | -                                            | only on an explicit "tira um print", "pode subir um snapshot" |
 | `backlog-keeper`      | sonnet | low    | read + write `docs/backlog/` | `project-docs`                           | "encontrei um bug", "registra um refactor", end of `/implement` |
-| `frontend-react`      | sonnet | medium | all                    | `implementer-contract`, `react-best-practices`, `composition-patterns` | yes               |
-| `mobile-react-native` | sonnet | medium | all                    | `implementer-contract`, `react-native-skills`, `react-native-core`     | yes               |
+| `frontend-react`      | sonnet | medium | all                    | `implementer-contract`, `design-system`, `react-best-practices`, `composition-patterns` | yes               |
+| `mobile-react-native` | sonnet | medium | all                    | `implementer-contract`, `design-system`, `react-native-skills`, `react-native-core` | yes               |
 | `backend-node`        | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
 | `backend-spring`      | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
 | `backend-go`          | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
 | `backend-rust`        | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
 | `backend-python`      | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
-| `test-writer`         | sonnet | medium | all                    | -                                              | requested tests, legacy gaps, or a report saying tests are missing |
+| `test-writer`         | sonnet | medium | all                    | -                                              | requested tests, legacy gaps, a report saying tests are missing; tdd and regression modes for `tdd`, `implement --tdd` and `fix-bug` |
 | `quality-fixer`       | sonnet | medium | all                    | `bug-repro`                                    | after `test-runner` reports failures      |
 | `test-runner`         | haiku  | low    | Bash, Read, Grep, Glob | -                                              | whenever checks need to run (sole owner of the gate) |
 
@@ -113,6 +114,11 @@ The global `CLAUDE.md` has a **Workflow** table that routes phrases to phases ("
 2. "pode especificar" (or `@specker`) - review `docs/features/<slug>/spec.md`.
 3. "podemos seguir com a implementação" (or `/implement docs/features/<slug>/ [tasks 2-4] [--step]`) - checks that plan and spec are approved (a Draft spec reached by a phrase needs a yes), keeps a resumable run state in `.claude/runs/<slug>.json` (tasks, budgets, approved scope, agent calls), and orchestrates: per task, stack agent (with the task's **Files** as `allowed_paths`; scope requests go to the user) -> `test-runner` -> `quality-fixer` (max 2 rounds) -> `test-writer` if tests are missing, setting the task's `Status: done` in the spec and appending its block to `log.md`, so a run can resume and the next task inherits the decisions; then one review pass (`code-reviewer`, plus `security-reviewer` for auth/API/input/secrets/deps), fixes, one full gate, `docs-writer` once with the consolidated `needs_docs`, the out-of-scope issues handed to `backlog-keeper` once, and spec and plan status `Implemented`. `--step` pauses after each task. The final report lists the docs updated and ends with the "Para validar localmente" checklist.
 4. Validate locally with the checklist. For a visual check, ask for it explicitly ("tira um print de /orders"): `ui-verifier` does it and only text comes back.
+
+### Bug workflow
+
+1. "encontrei um bug ..." - `backlog-keeper` registers it (deduplicated, from the template) and the session asks "quer corrigir agora?" ("só registra" skips the question).
+2. "corrige o bug X" (or yes to the question) - `fix-bug` runs: reproduce as the user sees it (request + logs on the local instance, the failing command, or UI steps the user confirms), diagnose with the owning stack agent in read-only `diagnose` phase, `test-writer` writes a regression test that must fail by assertion, the stack agent fixes it in `fix` phase without touching the test, `test-runner` gate, review, the repro repeated, `docs-writer` if needed, and `backlog-keeper` closes the entry with root cause and fix. Resumable through `.claude/runs/bug-<slug>.json`.
 
 Subagents cannot spawn subagents, so chains like `test-runner` -> `quality-fixer` -> `code-reviewer` are orchestrated by the main session (that is what `/implement` encodes). The write scopes of `planner`, `specker` (`docs/`) and `backlog-keeper` (`docs/backlog/`) are enforced by their prompts, not by `tools`.
 

@@ -18,6 +18,13 @@ Before coding:
 - Find an existing module, package or component similar to the task and mirror its layout, naming, error handling and tests.
 - If the task is ambiguous, pick the option most consistent with the codebase and list it under `assumptions`.
 
+**Phases.** The prompt's `phase` says what kind of work this run is:
+- `implement` (default): code and tests for the task, as the rest of this contract describes.
+- `scaffold` (TDD): create only the modules the task's tests will import, inside `allowed_paths`, with real types, signatures and exports and bodies that compile and do nothing useful (throw not-implemented, or return an empty value of the right type). No logic, no tests. Run the typecheck or compile on them. Report the files in `files_changed`.
+- `implement` with TDD on: the tests already exist and are the specification. Make them pass without editing them (see Checks).
+- `diagnose` (bug fix): read-only. Given the bug and its reproduction evidence, find the root cause in the code. Write nothing. Report `root_cause` (what is wrong, at `path:line`, and why the symptom follows), `fix_plan` (the change, in a few lines), `fix_paths` (every path the fix needs to write, as globs) and `regression_test` (where a test that reproduces the bug at the closest boundary should live, and what it asserts).
+- `fix` (bug fix): apply the fix inside `allowed_paths`. A regression test already exists and fails: make it pass without editing it, and fix only the root cause, not the symptom.
+
 ## 2. Write scope
 
 - Write only inside `allowed_paths`. Without them, write only the files the task names; without a spec, only what the request clearly needs.
@@ -31,7 +38,7 @@ Before coding:
 - While working, run only the narrowest checks for what you touched: the specific test files or test names, and lint/typecheck on the changed files (or the package, when the tool has no per-file mode).
 - Never run the full suite, the whole-repo gate, or e2e/load suites. The gate belongs to `test-runner`.
 - Write or update the tests for the behavior you changed, following the task's Testing section.
-- TDD mode (the prompt says so): the tests are given. Make them pass without editing them. A test you believe is wrong becomes a scope request with the reason.
+- TDD mode and `fix` phase: the tests are given. Make them pass without editing them. A test you believe is wrong becomes a scope request with the reason.
 - Fix only the failures your change caused or the task names. Pre-existing ones go to `out_of_scope_issues`.
 - Prefix shell commands with `rtk` when available.
 
@@ -119,6 +126,11 @@ migrations:
     safe_on_populated_table: true | false
 env_vars: [] # new env vars, config properties or flags
 notes: [] # stack-specific caveats (platform differences, native rebuilds, new dependencies)
+diagnosis: # phase diagnose only
+  root_cause: <what is wrong, at path:line, and why the symptom follows>
+  fix_plan: <the change, in a few lines>
+  fix_paths: [] # globs the fix needs to write
+  regression_test: <where it lives and what it asserts>
 out_of_scope_issues:
   - kind: bug | refactor
     summary: <one line>

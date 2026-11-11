@@ -5,6 +5,7 @@ model: sonnet
 effort: medium
 skills:
   - implementer-contract
+  - design-system
   - react-native-skills
   - react-native-core
 color: green

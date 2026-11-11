@@ -46,17 +46,22 @@ first; when it fails, say what is missing instead of proceeding. Plans, specs an
 
 | The user says (examples) | Phase -> owner | Precondition |
 |---|---|---|
-| "tenho uma ideia", "vamos pensar em X" | Discover -> interview the user, one question at a time, until the decisions are clear | none |
+| "tenho uma ideia", "vamos pensar em X" | Discover -> `grill-me` skill, one question at a time, then hand off to `planner` | none |
 | "vamos planejar", "escreve o plano" | Plan -> `planner` | decisions clear enough; otherwise Discover first |
 | "pode especificar", "escreve a spec" | Spec -> `specker` | the plan exists (asking for the spec approves a Draft plan), or a refactor entry |
-| "podemos seguir com a implementação", "pode implementar", "go" | Implement -> `implement` skill | spec Approved (a Draft spec needs the user's yes) and plan Approved |
+| "podemos seguir com a implementação", "pode implementar", "go" | Implement -> `implement` skill (`--tdd` when the user says "com TDD") | spec Approved (a Draft spec needs the user's yes) and plan Approved |
+| "vamos fazer com TDD" (the user writes the code) | TDD -> `tdd` skill: stubs, tests red by assertion, hand off | the behavior is settled; otherwise `grill-me` first |
 | "encontrei um bug", "achei um problema em X", "isso está quebrado" | Register -> `backlog-keeper`, then ask "quer corrigir agora?" | none |
 | "só registra esse bug", "anota esse bug" | Register -> `backlog-keeper`, no follow-up question | none |
 | "isso merece um refactor", "registra um refactor" | Register -> `backlog-keeper` | none |
-| "corrige o bug X", "vamos resolver esse bug" | Fix -> reproduce (`bug-repro`), regression test that fails, fix through the stack agent, `test-runner`, review, `docs-writer` if docs changed, then `backlog-keeper` updates the entry | the bug is registered; if not, `backlog-keeper` registers it first |
+| "corrige o bug X", "vamos resolver esse bug", yes to "quer corrigir agora?" | Fix -> `fix-bug` skill: reproduce, diagnose, regression test red, fix, gate, review, docs, close the entry | the bug is registered; if not, `backlog-keeper` registers it first |
 | "revisa esse PR", "review" | Review -> `code-reviewer` (+ `security-reviewer` when auth, API, input, secrets or dependencies change) | a PR, branch or diff to review |
 | "documenta", "atualiza as docs" | Document -> `docs-writer`, with the collected `needs_docs` (or the diff) | none |
 | "pode subir um snapshot", "tira um print de X" | Visual check -> `ui-verifier`, text-only report | the app is already running locally; never start it |
+| "escreve o PR", "descrição do PR" | Deliver -> `pr-description` skill (text only) | a diff against the base branch |
+| "simplifica isso", "limpa esse código" | Simplify -> the built-in `/simplify` review | show the planned changes and wait for the user's approval before applying them |
+| "audita as dependências", "check dependencies" | Audit -> `dep-audit` skill | none; never auto-upgrade |
+| "desenha a arquitetura", "faz um diagrama do fluxo" | Diagram -> `archify` skill | none |
 | "pode commitar" | Commit | explicit authorization in the current conversation |
 
 - Never pick between several plans or specs: list them with their status and ask.

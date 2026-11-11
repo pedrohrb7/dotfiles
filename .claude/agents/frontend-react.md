@@ -5,6 +5,7 @@ model: sonnet
 effort: medium
 skills:
   - implementer-contract
+  - design-system
   - react-best-practices
   - composition-patterns
 color: cyan

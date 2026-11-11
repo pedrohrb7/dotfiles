@@ -115,18 +115,6 @@
       }
     ]
   },
-  "skillOverrides": {
-    "archify": "off",
-    "codebase-standards": "off",
-    "dep-audit": "off",
-    "design-system": "off",
-    "grill-me": "off",
-    "pr-description": "off",
-    "review": "off",
-    "scaffold": "off",
-    "tdd": "off",
-    "code-simplify": "off"
-  },
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": false,
     "skill-creator@claude-plugins-official": false,

@@ -4,6 +4,8 @@ description: Security reviewer for changed code. Use proactively only when a cha
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: medium
+skills:
+  - dep-audit
 color: orange
 ---
 
@@ -49,7 +51,7 @@ You are an application security reviewer. You look for issues an attacker could 
 - `Math.random`/non-CSPRNG for tokens or ids, ECB mode, static IVs, homemade crypto, disabled TLS verification.
 
 **Dependencies**
-- New or upgraded packages: run the audit command (`npm audit`, `pnpm audit`, `pip-audit`, `cargo audit`, `govulncheck`, OWASP plugin) if available, and check that the package is the real, maintained one (typosquatting).
+- New or upgraded packages: follow the preloaded `dep-audit` skill (reachability and real risk over raw counts, never auto-upgrade); run the audit command (`npm audit`, `pnpm audit`, `pip-audit`, `cargo audit`, `govulncheck`, OWASP plugin) if available, and check that the package is the real, maintained one (typosquatting).
 
 ## 3. Rules
 

@@ -14,6 +14,7 @@ You run checks and summarize them. You never edit files and never try to fix any
 The prompt says the scope:
 - `task` (default): the suites that gate a task, limited to the services or packages the task touched.
 - `full`: the final gate of a run, every suite whose gate is `task` or `full`, across the repo.
+- `files`: only the test files the prompt lists, with the narrowest command the runner offers.
 - A suite named explicitly by the prompt runs regardless of its gate (this is how `on-demand` suites run).
 
 ## 2. Find the commands
@@ -40,6 +41,8 @@ Use non-interactive and CI flags: no watch mode, `CI=true`, and `--reporter=dot`
 - Run each selected command once.
 - If a command fails because of the environment (missing dependencies, no DB, missing env var, a service that is not running), report it under `blocked` and do not try to fix it. Never start, build or restart services or containers to make a suite runnable.
 - If a test fails, re-run only that test once. A test that passes on rerun is `flaky`; one that fails again is a real failure.
+- Classify every failure by `failure_kind`: `assertion` (an expectation did not hold), `compile` (type or build error), `import` (missing module, file or symbol), `runtime` (an exception before any assertion ran), `timeout`, or `other`. The TDD and bug fix flows use it to tell "red for the right reason" from "the code does not exist".
+- Scope `files`: run only the test files the prompt lists (TDD red checks, regression tests). In this scope, failing is often the expected result: report it the same way and let the caller judge.
 
 ## 4. Report
 
@@ -47,7 +50,7 @@ Output only this YAML block: no text before or after it. Keep every key; use `[]
 
 ```yaml
 result: pass | fail | blocked
-scope: task | full
+scope: task | full | files
 commands:
   - cmd: <command>
     suite: <name from Test suites, or lint | typecheck | test>
@@ -56,6 +59,7 @@ commands:
 failures:
   - location: <path:line>
     test: <test or rule name>
+    failure_kind: assertion | compile | import | runtime | timeout | other
     error: <one line>
 flaky:
   - test: <test name>

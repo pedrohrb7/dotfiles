@@ -1086,3 +1086,40 @@ Nenhuma. O documento está fechado para a etapa A.
 
 **Pendências:**
 - `docs-writer` e `ui-verifier` sem teste de uso real: cenários 1 (fechamento do `/implement`), 11 e 14 da seção 14.3, na sessão de validação. O `ui-verifier` precisa de um app rodando e de uma ferramenta de browser disponível na sessão.
+
+### Etapa F - 2026-11-10 (concluída)
+
+**Arquivos (em `~/dotfiles/.claude/`):**
+
+| Arquivo | Mudança |
+|---|---|
+| `skills/fix-bug/SKILL.md` | **nova**: fluxo de bug com estado em `.claude/runs/bug-<slug>.json`: entrada no backlog (registra se faltar) -> reproduzir como o usuário vê (request + logs, comando, ou passos de UI confirmados) -> diagnóstico só leitura pelo stack agent dono -> teste de regressão pelo `test-writer`, vermelho por asserção -> fix sem tocar no teste -> gate -> review (com checagem de intenção) -> repetir a reprodução -> `docs-writer` -> `backlog-keeper` fecha a entrada. Não reproduziu: para e registra a tentativa |
+| `skills/tdd/SKILL.md` | absorve a `scaffold`; regra "vermelho pelo motivo certo"; stubs que compilam -> `test-writer` em modo tdd -> `test-runner` com escopo `files` exige `failure_kind: assertion` -> entrega ao usuário |
+| `skills/implement/SKILL.md` | flag `--tdd` (também "com TDD"): por task, `scaffold` -> testes em modo tdd -> vermelho por asserção -> stack agent implementa sem editar os testes; registrada no estado do run |
+| `skills/implementer-contract/SKILL.md` | fases `implement`, `scaffold`, `diagnose` (só leitura, devolve `diagnosis` com causa raiz, plano, `fix_paths` e onde fica o teste de regressão) e `fix` |
+| `agents/test-writer.md` | modos `coverage`, `tdd` e `regression`, com `red_check` por teste no report |
+| `agents/test-runner.md` | escopo `files`; toda falha classificada em `failure_kind` (assertion, compile, import, runtime, timeout, other) |
+| `agents/code-reviewer.md` | checagem de intenção (vinda da skill `review`): cada critério `Done when` (ou o comportamento esperado do bug) com `met` e evidência; critério não cumprido vira `major` |
+| `agents/security-reviewer.md` | pré-carrega `dep-audit` |
+| `agents/frontend-react.md`, `agents/mobile-react-native.md` | pré-carregam `design-system` |
+| `skills/design-system/SKILL.md` | passe de pixel no código, não na tela; o que está fora do escopo vira out-of-scope; `DESIGN_SYSTEM.md` ausente ou incompleto vira pedido de escopo num subagent |
+| `skills/pr-description/SKILL.md` | usa plan, spec, log ou entrada do bug para o "porquê"; test plan com os checks locais e o "Para validar localmente"; sem linhas de atribuição |
+| `skills/grill-me/SKILL.md` | fase Descobrir; no fim, decisões de produto no `PRD.md` e perguntas de projeto no `OPEN_QUESTIONS.md` (com confirmação) e entrega ao `planner` |
+| `skills/review`, `codebase-standards`, `scaffold`, `code-simplify` | **removidas**, com o conteúdo útil levado para `code-reviewer`, `tdd`, a fase `scaffold` e a tabela Workflow (`/simplify` só aplica depois da aprovação) |
+| `settings.json` | `skillOverrides` removido: nenhuma skill desligada |
+| `CLAUDE.md` (global) | Workflow: Discover -> `grill-me`; Fix -> `fix-bug`; linhas novas para `tdd`, `implement --tdd`, `pr-description`, `/simplify`, `dep-audit` e `archify` |
+| `README.md` | tabela de skills com quem pré-carrega cada uma; skills removidas; fluxo de bug |
+
+**Decisões tomadas durante a execução:**
+- No `fix-bug`, o teste de regressão é escrito pelo `test-writer`, não pelo stack agent que faz o fix: o teste nasce da evidência e do diagnóstico, independente da correção, como no TDD.
+- O diagnóstico é uma fase só leitura do stack agent dono do código, e não da sessão principal, para manter a conversa principal enxuta.
+- A `design-system` perdeu o "corrija ao longo do caminho mesmo sem relação com a task", que conflitava com a regra de escopo e com a validação visual pelo usuário.
+
+**Validação feita nesta sessão:**
+- Frontmatter dos arquivos novos e alterados, `settings.json` (JSON válido, sem `skillOverrides`, hooks e `ask` intactos), nenhum em dash, nenhuma referência às skills removidas.
+- As skills reativadas apareceram na listagem da sessão logo após a mudança.
+- Um teste real do `failure_kind` no `test-runner` não foi possível: o ambiente não tem `pytest`, e instalar dependências só para isso foi descartado.
+
+**Pendências:**
+- Cenários 8, 31 e 36 da seção 14.3 (fix-bug, tdd e implement --tdd) na sessão de validação, num projeto com runner de testes.
+- Etapa G (bloqueio por categoria) depende dos dados do hook em uso real.
