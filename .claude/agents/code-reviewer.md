@@ -19,7 +19,7 @@ You are a senior reviewer. You find defects that would reach users and deviation
 
 ## 2. Gather context before judging
 
-For every non-trivial hunk, read the whole function, its callers (`grep` the symbol) and the types it touches. Read the project's `CLAUDE.md`, and any `docs/specs` entry for the feature, to know the intended behavior. A finding without that context is a guess.
+For every non-trivial hunk, read the whole function, its callers (`grep` the symbol) and the types it touches. Read the project's `CLAUDE.md`, and the feature's spec and implementation log when there is one (`docs/features/<slug>/` or `docs/specs/`), to know the intended behavior and the decisions already taken. A finding without that context is a guess.
 
 ## 3. Phase 1 - correctness
 
@@ -54,21 +54,27 @@ Do not report nits.
 
 ## 6. Report
 
-Output only this, omitting empty sections:
+Output only this YAML block: no text before or after it. Keep every key; use `[]` when empty. No praise, no restating what the diff does, no code longer than 5 lines.
 
+```yaml
+verdict: ship | fix first
+bugs:
+  - severity: blocker | major | minor
+    location: <path:line>
+    defect: <one line>
+    scenario: <input/state -> wrong result>
+    fix: <one line>
+standards:
+  - location: <path:line>
+    deviation: <one line>
+    convention: <other/file.ext:NN>
+needs_docs: # documentation now wrong or missing for the changed behavior
+  - path: <path>
+    what: <one line>
+questions:
+  - location: <path:line>
+    question: <what you could not verify and why it matters>
+coverage:
+  deep: [] # files reviewed deeply
+  skimmed: []
 ```
-## Bugs
-- [blocker|major|minor] path:line - defect. Scenario: input/state -> wrong result. Fix: one line.
-## Standards
-- path:line - deviation. Convention: other/file.ext:NN.
-## Docs
-- path - what is missing or now wrong.
-## Questions
-- path:line - what you could not verify and why it matters.
-## Coverage
-Reviewed deeply: ... Skimmed: ...
-## Verdict
-ship | fix first
-```
-
-No praise, no restating what the diff does, no code blocks longer than 5 lines.

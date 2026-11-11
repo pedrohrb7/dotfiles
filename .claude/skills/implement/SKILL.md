@@ -38,9 +38,11 @@ Arguments: `$ARGUMENTS`
 
 1. **Implement.** Delegate to the stack agent with this prompt shape:
 
-   > Implement task N of `<spec path>` (plan: `<plan path>`). Only this task: `<task title>`. Done criteria: `<criteria>`. Earlier tasks in this spec already changed: `<files from previous reports>`. Follow the spec's Design and Testing sections for this task.
+   > Implement task N of `<spec path>` (plan: `<plan path>`). Only this task: `<task title>`. Done criteria: `<criteria>`. allowed_paths: `<the files and folders the task names, plus scope approved earlier>`. Earlier tasks in this spec already changed: `<files from previous reports>`; their decisions and assumptions: `<from previous reports>`. Follow the spec's Design and Testing sections for this task.
 
    Independent tasks that touch different services may run in parallel, as separate agents in the same message. Run tasks that share files or depend on each other in order.
+
+   **Scope requests.** If a report ends with `result: blocked` and `scope_requests`, ask the user once (one `AskUserQuestion` call for all pending requests, each with its reason). Then resume the same agent with `SendMessage`, keeping its context: approved requests join that task's `allowed_paths`; denied ones are stated so the agent finishes without them. Keep every approval for the final report.
 
 2. **Check.** Delegate to `test-runner`, scoped to the packages or services the task touched.
 
@@ -50,7 +52,7 @@ Arguments: `$ARGUMENTS`
 
 5. **Mark done.** Append ` (done)` to the task line in the spec's **Implementation order**, so an interrupted run can resume.
 
-6. **Collect.** From the agents' reports, keep the assumptions made, the new env vars and migrations, and the backlog entries logged.
+6. **Collect.** The agents end with a YAML report. Keep `decisions`, `assumptions`, `migrations`, `env_vars`, `needs_docs`, `manual_checks`, `local_checks` and `out_of_scope_issues`, and pass the decisions and assumptions on to the next tasks.
 
 7. **Pause** here if `--step` was given: show a 3-5 line summary of the task and wait for the user.
 
@@ -61,13 +63,15 @@ Arguments: `$ARGUMENTS`
 3. **Fix the findings.**
    - Send blocker and major bugs, and critical, high or medium security findings, to the owning stack agent with the exact findings. Then run `test-runner` again.
    - Run `code-reviewer` once more, only if blockers were fixed. Never loop more than once.
-   - Minor findings and standards notes: fix them in the same round if they are in this change's code. Otherwise they go to the backlog, like the agents' out-of-scope issues.
+   - Minor findings and standards notes: fix them in the same round if they are in this change's code. Otherwise add them to the collected `out_of_scope_issues`.
+   - The reviewers' `needs_docs` join the collected `needs_docs`.
 
 ## 5. Verify
 
-1. Run the commands from the spec's **Verification** section through `test-runner`.
-2. For manual checks (UI, flows): run them yourself if the tooling is available (dev server, browser, simulator). Otherwise list them for the user.
-3. If every selected task is `(done)` and verification passes, set the spec to `Implemented` and update the specs Index. Otherwise leave it `Approved`.
+1. Run the final gate once through `test-runner` with scope `full`, plus any suite the spec's **Verification** section names explicitly.
+2. Manual checks (UI, flows, restarts, requests that could not run): never run them yourself - no browser, dev server, simulator or screenshots, and no starting or restarting services. Consolidate the agents' `manual_checks` and the spec's manual verification steps into one checklist for the user.
+3. **Backlog.** Log the collected `out_of_scope_issues` once, with the `project-docs` skill (add-entry mode): one entry per root cause, deduplicated against each folder's Index. If the project has no `docs/backlog/`, list them in the final report instead.
+4. If every selected task is `(done)` and verification passes, set the spec to `Implemented` and update the specs Index. Otherwise leave it `Approved`.
 
 ## 6. Final report to the user
 
@@ -76,6 +80,9 @@ Keep it short:
 - files changed, grouped by service (one line per file);
 - migrations and new env vars;
 - check results, and review findings fixed and still open;
+- `local_checks` results (request, status, pass/fail/skipped);
+- scope requests approved or denied;
 - assumptions the agents made that the user should confirm;
 - backlog entries logged (paths);
-- next step: the documentation pass (plan status, README, `docs/` coherence).
+- **Para validar localmente**: the consolidated manual checklist, as `- [ ]` items;
+- **Documentation pass**: the consolidated `needs_docs`, plus plan status, README and `docs/` coherence. Run it after the user confirms the manual checks; no agent edited docs during the run.

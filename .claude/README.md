@@ -1,5 +1,7 @@
 # Claude Code global config
 
+The design behind the agents and skills (phases, single owner per action, agent contracts, runtime validation, the decisions taken and the rollout stages) is in [`agent-workflow.md`](agent-workflow.md). It lives only in this repo and is not symlinked into `~/.claude`.
+
 ## skills/
 
 Personal, explicit-invocation-only skills (`disable-model-invocation: true` - call with `/name`, never auto-triggered). Compose with each other the way `review` calls `codebase-standards`, or `tdd` calls `grill-me` and `scaffold`.
@@ -20,6 +22,8 @@ Personal, explicit-invocation-only skills (`disable-model-invocation: true` - ca
 | `new-project`        | Scaffold a new project's structure from `templates/`                                    |
 | `onboard`            | Document folder structure, patterns, and conventions of an existing project per service |
 | `implement`          | Execute an approved spec task by task by orchestrating the agents in `agents/`          |
+
+`implementer-contract` is not called by hand (`user-invocable: false`): it is the shared contract every stack agent preloads through its `skills:` frontmatter - inputs, write scope and scope requests, narrow-checks policy, runtime validation against the user's local instance, UI policy, out-of-scope reporting and the YAML report. Rules common to the stack agents change there, not in the seven agent files.
 
 ### Third-party, auto-invoked skills
 
@@ -67,27 +71,31 @@ Each agent pins its own `model` and `effort` to balance quality and token cost:
 | `code-reviewer`       | opus   | medium | read-only              | -                                              | after significant changes                 |
 | `security-reviewer`   | opus   | medium | read-only              | -                                              | only auth, API, input, secrets, deps      |
 | `planner`             | opus   | high   | read + write `docs/`   | `project-docs`                                 | no, manual only                           |
-| `frontend-react`      | sonnet | medium | all                    | `react-best-practices`, `composition-patterns` | yes                                       |
-| `mobile-react-native` | sonnet | medium | all                    | `react-native-skills`, `react-native-core`     | yes                                       |
-| `backend-node`        | sonnet | medium | all                    | -                                              | yes                                       |
-| `backend-spring`      | sonnet | medium | all                    | -                                              | yes                                       |
-| `backend-go`          | sonnet | medium | all                    | -                                              | yes                                       |
-| `backend-rust`        | sonnet | medium | all                    | -                                              | yes                                       |
-| `backend-python`      | sonnet | medium | all                    | -                                              | yes                                       |
-| `test-writer`         | sonnet | medium | all                    | -                                              | when code lands without tests             |
+| `frontend-react`      | sonnet | medium | all                    | `implementer-contract`, `react-best-practices`, `composition-patterns` | yes               |
+| `mobile-react-native` | sonnet | medium | all                    | `implementer-contract`, `react-native-skills`, `react-native-core`     | yes               |
+| `backend-node`        | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
+| `backend-spring`      | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
+| `backend-go`          | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
+| `backend-rust`        | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
+| `backend-python`      | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
+| `test-writer`         | sonnet | medium | all                    | -                                              | requested tests, legacy gaps, or a report saying tests are missing |
 | `quality-fixer`       | sonnet | medium | all                    | `bug-repro`                                    | after `test-runner` reports failures      |
-| `test-runner`         | haiku  | low    | Bash, Read, Grep, Glob | -                                              | whenever checks need to run               |
+| `test-runner`         | haiku  | low    | Bash, Read, Grep, Glob | -                                              | whenever checks need to run (sole owner of the gate) |
 
 Token-economy rules every agent follows - keep them when adding a new one:
 
 - Model aliases (`opus`/`sonnet`/`haiku`), not full IDs, so agents follow new model versions.
 - Preload only small, always-relevant skills: preloaded `SKILL.md` content is paid on every run. Larger or situational skills (`react-view-transitions`, `react-native-expo`, `react-native-performance`, `react-native-testing`, ...) are named in the prompt and loaded on demand.
 - Minimal `tools` on read-only agents; no MCP servers unless needed.
-- The prompt ends with a fixed, short report format. That report is all that returns to the main context.
+- The prompt ends with a fixed YAML report. That report is all that returns to the main context, and it is the interface an external orchestrator parses.
 - Expensive (`opus`) agents get narrow auto-invocation triggers or are manual only.
 - Shell commands go through `rtk` when available.
+- Narrow checks only: agents run the tests and files they touched. Whole suites run only through `test-runner` (one gate per task, one full gate per run), honoring the project's `## Test suites` table when it has one.
+- No visual validation: agents never open a browser, simulator or screenshot unless the user explicitly asks; UI work reports `manual_checks` for the user. Backend runtime validation is one request to the user's running local instance plus a filtered log read, never starting, stopping or restarting services (see `implementer-contract`).
 
-Scope rule every agent that edits code follows - keep it when adding a new one: fix only the lint, typecheck, test and visual (UI) problems the current change caused, or that the task names. Pre-existing problems found along the way are not fixed; they are logged with the `project-docs` skill (add-entry mode) - failing/flaky tests, type/build errors and visual defects as bugs in `docs/backlog/bugs/`, lint violations and code smells as refactors in `docs/backlog/refactor/`, one entry per root cause, deduplicated against the folder's Index. If the project has no `docs/backlog/`, the agent lists them in its report instead of scaffolding it.
+Scope rule every agent that edits code follows - keep it when adding a new one: fix only the lint, typecheck and test problems the current change caused, or that the task names. Pre-existing problems found along the way are not fixed and not written by the agent: they go to `out_of_scope_issues` in its report, and the main session (or `/implement`, at the end of a run) logs them once with the `project-docs` skill - failing/flaky tests, type/build errors and visual defects as bugs in `docs/backlog/bugs/`, lint violations and code smells as refactors in `docs/backlog/refactor/`, one entry per root cause, deduplicated against the folder's Index. A single writer avoids duplicate entries when agents run in parallel. Likewise, agents never edit docs: they list `needs_docs`, and the documentation pass happens once, at the end.
+
+Write-scope rule: an agent writes only inside its task's `allowed_paths`. Anything else it needs is a `scope_requests` entry with the reason; the caller asks the user and resumes the same agent with the answer.
 
 `planner` writes one document per run: plan mode (a feature request -> `docs/plans/`, product side only) or spec mode (a plan path -> `docs/specs/`, technical side, with an **Implementation order** whose tasks name their stack, files, dependencies and done criteria so `/implement` can execute them). Asking for the spec of a `Draft` plan marks the plan `Approved`.
 
@@ -95,10 +103,14 @@ Scope rule every agent that edits code follows - keep it when adding a new one: 
 
 1. `@planner write the plan for <feature>` - review `docs/plans/...`, answer its open questions, ask for changes.
 2. `@planner write the spec for docs/plans/<file>.md` - review `docs/specs/...`.
-3. `/implement docs/specs/<file>.md [tasks 2-4] [--step]` - the main session orchestrates: per task, stack agent -> `test-runner` -> `quality-fixer` (max 2 rounds) -> `test-writer` if tests are missing, marking the task `(done)` in the spec so a run can resume; then one review pass (`code-reviewer`, plus `security-reviewer` for auth/API/input/secrets/deps), fixes, spec **Verification**, and spec status `Implemented`. `--step` pauses after each task.
-4. Documentation pass - check `docs/` and READMEs against what shipped, update the plan status, review new `docs/backlog/` entries. Lighter than before, since the agents already update docs per change.
+3. `/implement docs/specs/<file>.md [tasks 2-4] [--step]` - the main session orchestrates: per task, stack agent (with `allowed_paths`; scope requests go to the user) -> `test-runner` -> `quality-fixer` (max 2 rounds) -> `test-writer` if tests are missing, marking the task `(done)` in the spec so a run can resume; then one review pass (`code-reviewer`, plus `security-reviewer` for auth/API/input/secrets/deps), fixes, one full gate, the backlog entries logged once, and spec status `Implemented`. `--step` pauses after each task. The final report ends with the "Para validar localmente" checklist and the consolidated `needs_docs`.
+4. Validate locally with the checklist, then run the documentation pass from `needs_docs` - check `docs/` and READMEs against what shipped, update the plan status, review new `docs/backlog/` entries. No agent edits docs during the run.
 
 Subagents cannot spawn subagents, so chains like `test-runner` -> `quality-fixer` -> `code-reviewer` are orchestrated by the main session (that is what `/implement` encodes). `planner`'s "only write inside `docs/`" is enforced by its prompt, not by `tools`.
+
+### Permissions
+
+`settings.json` allows reading and editing `~/.claude` and `~/dotfiles/.claude` without prompts, allows the read-only Docker commands agents use for runtime validation (`docker compose ps|logs|port|config|images`, `docker ps|logs|inspect|port|images`), and denies the lifecycle and exec commands (`up`, `down`, `start`, `stop`, `restart`, `rm`, `kill`, `pull`, `create`, `run`, `exec`, compose or plain). Image builds are in neither list: agents run them only when the task changes a Dockerfile or its build context. Permission rules match by command prefix, so a form like `docker compose -f other.yml up` is not caught by them; the instructions cover it, and a hook is planned for a mechanical guarantee (`agent-workflow.md`, section 13).
 
 ## templates/
 
