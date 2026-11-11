@@ -4,7 +4,7 @@ The design behind the agents and skills (phases, single owner per action, agent 
 
 ## skills/
 
-Personal, explicit-invocation-only skills (`disable-model-invocation: true` - call with `/name`, never auto-triggered). Compose with each other the way `review` calls `codebase-standards`, or `tdd` calls `grill-me` and `scaffold`.
+Personal skills, mostly explicit-invocation-only (`disable-model-invocation: true` - call with `/name`, never auto-triggered). `implement` is the exception: it is auto-invoked by the phrases of the global `CLAUDE.md` Workflow table, and checks its own preconditions. Compose with each other the way `review` calls `codebase-standards`, or `tdd` calls `grill-me` and `scaffold`.
 
 | skill                | purpose                                                                                 |
 | -------------------- | --------------------------------------------------------------------------------------- |
@@ -21,7 +21,7 @@ Personal, explicit-invocation-only skills (`disable-model-invocation: true` - ca
 | `design-system`      | Apply design tokens, hierarchy, and accessibility when building a layout                |
 | `new-project`        | Scaffold a new project's structure from `templates/`                                    |
 | `onboard`            | Document folder structure, patterns, and conventions of an existing project per service |
-| `implement`          | Execute an approved spec task by task by orchestrating the agents in `agents/`          |
+| `implement`          | Execute an approved spec task by task by orchestrating the agents in `agents/`; auto-invoked by "podemos seguir com a implementação" and similar phrases, with preconditions and a resumable run state |
 
 `implementer-contract` is not called by hand (`user-invocable: false`): it is the shared contract every stack agent preloads through its `skills:` frontmatter - inputs, write scope and scope requests, narrow-checks policy, runtime validation against the user's local instance, UI policy, out-of-scope reporting and the YAML report. Rules common to the stack agents change there, not in the seven agent files.
 
@@ -70,7 +70,9 @@ Each agent pins its own `model` and `effort` to balance quality and token cost:
 | --------------------- | ------ | ------ | ---------------------- | ---------------------------------------------- | ----------------------------------------- |
 | `code-reviewer`       | opus   | medium | read-only              | -                                              | after significant changes                 |
 | `security-reviewer`   | opus   | medium | read-only              | -                                              | only auth, API, input, secrets, deps      |
-| `planner`             | opus   | high   | read + write `docs/`   | `project-docs`                                 | no, manual only                           |
+| `planner`             | opus   | high   | read + write `docs/`   | `project-docs`                                 | "vamos planejar", "escreve o plano"       |
+| `specker`             | opus   | high   | read + write `docs/`   | `project-docs`                                 | "pode especificar", "escreve a spec"      |
+| `backlog-keeper`      | sonnet | low    | read + write `docs/backlog/` | `project-docs`                           | "encontrei um bug", "registra um refactor", end of `/implement` |
 | `frontend-react`      | sonnet | medium | all                    | `implementer-contract`, `react-best-practices`, `composition-patterns` | yes               |
 | `mobile-react-native` | sonnet | medium | all                    | `implementer-contract`, `react-native-skills`, `react-native-core`     | yes               |
 | `backend-node`        | sonnet | medium | all                    | `implementer-contract`                         | yes                                       |
@@ -93,20 +95,24 @@ Token-economy rules every agent follows - keep them when adding a new one:
 - Narrow checks only: agents run the tests and files they touched. Whole suites run only through `test-runner` (one gate per task, one full gate per run), honoring the project's `## Test suites` table when it has one.
 - No visual validation: agents never open a browser, simulator or screenshot unless the user explicitly asks; UI work reports `manual_checks` for the user. Backend runtime validation is one request to the user's running local instance plus a filtered log read, never starting, stopping or restarting services (see `implementer-contract`).
 
-Scope rule every agent that edits code follows - keep it when adding a new one: fix only the lint, typecheck and test problems the current change caused, or that the task names. Pre-existing problems found along the way are not fixed and not written by the agent: they go to `out_of_scope_issues` in its report, and the main session (or `/implement`, at the end of a run) logs them once with the `project-docs` skill - failing/flaky tests, type/build errors and visual defects as bugs in `docs/backlog/bugs/`, lint violations and code smells as refactors in `docs/backlog/refactor/`, one entry per root cause, deduplicated against the folder's Index. A single writer avoids duplicate entries when agents run in parallel. Likewise, agents never edit docs: they list `needs_docs`, and the documentation pass happens once, at the end.
+Scope rule every agent that edits code follows - keep it when adding a new one: fix only the lint, typecheck and test problems the current change caused, or that the task names. Pre-existing problems found along the way are not fixed and not written by the agent: they go to `out_of_scope_issues` in its report, and the main session (or `/implement`, at the end of a run) hands them to `backlog-keeper` in one call, which logs them once - failing/flaky tests, type/build errors and visual defects as bugs in `docs/backlog/bugs/`, lint violations and code smells as refactors in `docs/backlog/refactor/`, one entry per root cause, deduplicated against the folder's Index. A single writer avoids duplicate entries when agents run in parallel. Likewise, agents never edit docs: they list `needs_docs`, and the documentation pass happens once, at the end.
 
 Write-scope rule: an agent writes only inside its task's `allowed_paths`. Anything else it needs is a `scope_requests` entry with the reason; the caller asks the user and resumes the same agent with the answer.
 
-`planner` writes one document per run: plan mode (a feature request -> the feature's `plan.md`, product side only) or spec mode (a plan -> its `spec.md`, technical side, with an **Implementation order** of structured task blocks - Stack, Files, Depends on, Done when, Status - so `/implement` can execute them without interpreting prose). Asking for the spec of a `Draft` plan marks the plan `Approved`. Paths come from the `project-docs` skill: `docs/features/<slug>/` by default, or `docs/plans/` + `docs/specs/` in a project still on the legacy layout.
+One writer per document: `planner` writes the feature's `plan.md` (product side only), `specker` writes its `spec.md` (technical side, with an **Implementation order** of structured task blocks - Stack, Files, Depends on, Done when, Status - so `/implement` can execute them without interpreting prose; also specs for refactor entries, with no plan), `/implement` writes `log.md`, and `backlog-keeper` writes `docs/backlog/`. Asking `specker` for the spec of a `Draft` plan marks the plan `Approved`. Paths come from the `project-docs` skill: `docs/features/<slug>/` by default, or `docs/plans/` + `docs/specs/` in a project still on the legacy layout.
+
+Subagents cannot ask the user. `planner`, `specker` and `backlog-keeper` return `result: needs_input` with the question (a missing decision, the one-time docs migration offer, a bug with no way to reproduce it); stack agents return `result: blocked` with `scope_requests`. The main session asks, then resumes the same agent with `SendMessage`.
+
+The global `CLAUDE.md` has a **Workflow** table that routes phrases to phases ("vamos planejar" -> `planner`, "pode especificar" -> `specker`, "podemos seguir com a implementação" -> `implement`, "encontrei um bug" -> `backlog-keeper`), each with its precondition, so nothing depends on remembering to call an agent by name.
 
 ### Feature workflow
 
-1. `@planner write the plan for <feature>` - review `docs/features/<slug>/plan.md`, answer its open questions, ask for changes.
-2. `@planner write the spec for <feature>` - review `docs/features/<slug>/spec.md`.
-3. `/implement docs/features/<slug>/ [tasks 2-4] [--step]` - the main session orchestrates: per task, stack agent (with the task's **Files** as `allowed_paths`; scope requests go to the user) -> `test-runner` -> `quality-fixer` (max 2 rounds) -> `test-writer` if tests are missing, setting the task's `Status: done` in the spec and appending its block to `log.md`, so a run can resume and the next task inherits the decisions; then one review pass (`code-reviewer`, plus `security-reviewer` for auth/API/input/secrets/deps), fixes, one full gate, the backlog entries logged once, and spec status `Implemented`. `--step` pauses after each task. The final report ends with the "Para validar localmente" checklist and the consolidated `needs_docs`.
+1. "vamos planejar <feature>" (or `@planner`) - review `docs/features/<slug>/plan.md`, answer its open questions, ask for changes.
+2. "pode especificar" (or `@specker`) - review `docs/features/<slug>/spec.md`.
+3. "podemos seguir com a implementação" (or `/implement docs/features/<slug>/ [tasks 2-4] [--step]`) - checks that plan and spec are approved (a Draft spec reached by a phrase needs a yes), keeps a resumable run state in `.claude/runs/<slug>.json` (tasks, budgets, approved scope, agent calls), and orchestrates: per task, stack agent (with the task's **Files** as `allowed_paths`; scope requests go to the user) -> `test-runner` -> `quality-fixer` (max 2 rounds) -> `test-writer` if tests are missing, setting the task's `Status: done` in the spec and appending its block to `log.md`, so a run can resume and the next task inherits the decisions; then one review pass (`code-reviewer`, plus `security-reviewer` for auth/API/input/secrets/deps), fixes, one full gate, the out-of-scope issues handed to `backlog-keeper` once, and spec status `Implemented`. `--step` pauses after each task. The final report ends with the "Para validar localmente" checklist and the consolidated `needs_docs`.
 4. Validate locally with the checklist, then run the documentation pass from `needs_docs` - check `docs/` and READMEs against what shipped, update the plan status, review new `docs/backlog/` entries. No agent edits docs during the run.
 
-Subagents cannot spawn subagents, so chains like `test-runner` -> `quality-fixer` -> `code-reviewer` are orchestrated by the main session (that is what `/implement` encodes). `planner`'s "only write inside `docs/`" is enforced by its prompt, not by `tools`.
+Subagents cannot spawn subagents, so chains like `test-runner` -> `quality-fixer` -> `code-reviewer` are orchestrated by the main session (that is what `/implement` encodes). The write scopes of `planner`, `specker` (`docs/`) and `backlog-keeper` (`docs/backlog/`) are enforced by their prompts, not by `tools`.
 
 ### Permissions
 

@@ -23,11 +23,10 @@
   emulator, and never take or read screenshots, unless the user explicitly asks. List what the user should check instead.
 - Apply that same high standard to engineering excellence: lint, test failures, and test flakiness.
   Fix only the ones caused by the current change or named in the task. Pre-existing ones in code you did not touch
-  (and visual defects the user reports) are not fixed; they are logged once, by the main session, with the
-  `project-docs` skill - failing/flaky tests, type/build errors and visual defects as bugs in `docs/backlog/bugs/`,
-  lint violations and code smells as refactors in `docs/backlog/refactor/` (one entry per root cause, deduplicated
-  against the folder's Index). Subagents never write to `docs/backlog/`; they report these in `out_of_scope_issues`.
-  If the project has no `docs/backlog/`, list them in your reply instead.
+  (and visual defects the user reports) are not fixed; they are logged once, by `backlog-keeper`, the single writer
+  of `docs/backlog/` - failing/flaky tests, type/build errors and visual defects as bugs, lint violations and code
+  smells as refactors (one entry per root cause, deduplicated against the folder's Index). Every other agent reports
+  them in `out_of_scope_issues`, and the main session hands them to `backlog-keeper` in one call.
 - Checks: subagents run only narrow checks (the tests and files they touched). Whole suites run only through `test-runner`.
 - Documentation is updated once, at the end of the work, from the `needs_docs` the agents reported. Subagents never
   create or edit doc files (README, `docs/`, notes, summaries); they list what needs documenting in their report.
@@ -36,5 +35,30 @@
 - Be concise. Prefer direct answers. Do not add code explanation or summaries unless asked.
   Output no more than 3-4 lines of text before using tools.
 - Always read a file before editing it. Never overwrite files without reading them first.
+
+## Workflow
+
+Route each request to its phase and owner without waiting for the user to name the agent. Check the precondition
+first; when it fails, say what is missing instead of proceeding. Plans, specs and logs are found through the
+`project-docs` skill (`docs/features/<slug>/`, or `docs/plans` + `docs/specs` in legacy projects).
+
+| The user says (examples) | Phase -> owner | Precondition |
+|---|---|---|
+| "tenho uma ideia", "vamos pensar em X" | Discover -> interview the user, one question at a time, until the decisions are clear | none |
+| "vamos planejar", "escreve o plano" | Plan -> `planner` | decisions clear enough; otherwise Discover first |
+| "pode especificar", "escreve a spec" | Spec -> `specker` | the plan exists (asking for the spec approves a Draft plan), or a refactor entry |
+| "podemos seguir com a implementação", "pode implementar", "go" | Implement -> `implement` skill | spec Approved (a Draft spec needs the user's yes) and plan Approved |
+| "encontrei um bug", "achei um problema em X", "isso está quebrado" | Register -> `backlog-keeper`, then ask "quer corrigir agora?" | none |
+| "só registra esse bug", "anota esse bug" | Register -> `backlog-keeper`, no follow-up question | none |
+| "isso merece um refactor", "registra um refactor" | Register -> `backlog-keeper` | none |
+| "corrige o bug X", "vamos resolver esse bug" | Fix -> reproduce (`bug-repro`), regression test that fails, fix through the stack agent, `test-runner`, review, then `backlog-keeper` updates the entry | the bug is registered; if not, `backlog-keeper` registers it first |
+| "revisa esse PR", "review" | Review -> `code-reviewer` (+ `security-reviewer` when auth, API, input, secrets or dependencies change) | a PR, branch or diff to review |
+| "documenta", "atualiza as docs" | Document -> the documentation pass from the collected `needs_docs` | none |
+| "pode commitar" | Commit | explicit authorization in the current conversation |
+
+- Never pick between several plans or specs: list them with their status and ask.
+- Subagents cannot ask the user. When one finishes with `result: needs_input` (a question) or `result: blocked` with
+  `scope_requests`, ask the user - one `AskUserQuestion` call for everything pending - and resume the same agent with
+  `SendMessage` and the answers.
 
 @RTK.md

@@ -4,8 +4,8 @@ One folder per feature or technical change, named `<slug>/` (kebab-case, no date
 
 | File | Side | Written by | Read by |
 | --- | --- | --- | --- |
-| `plan.md` | product: goal, scope, **business rules**, edge cases, flows | `@planner` | the spec author, `/implement` (precondition) |
-| `spec.md` | technical: design, contracts, tests, **structured tasks**, verification | the spec author (`@planner` in spec mode) | `/implement`, the stack agents, reviewers |
+| `plan.md` | product: goal, scope, **business rules**, edge cases, flows | `planner` | `specker`, `/implement` (precondition) |
+| `spec.md` | technical: design, contracts, tests, **structured tasks**, verification | `specker` | `/implement`, the stack agents, reviewers |
 | `log.md` | implementation log: per task, files, decisions, assumptions, approved scope | `/implement` only | the stack agents (before coding), reviewers, the documentation pass |
 
 - Start every new file from `_template/`. A refactor without product impact gets a folder with only `spec.md` and `log.md`; its spec points to the backlog entry it came from.

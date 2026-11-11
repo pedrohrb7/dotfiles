@@ -53,7 +53,7 @@ Run the test several times, in isolation and together with its own test file, to
 
 ## 5. Out-of-scope failures
 
-Pre-existing failures are reported, not fixed and not written to the backlog: list each one in `out_of_scope_issues`, one per root cause (not per lint line). The caller logs them once.
+Pre-existing failures are reported, not fixed and not written to the backlog: list each one in `out_of_scope_issues`, one per root cause (not per lint line). The caller hands them to `backlog-keeper`, which logs them once.
 
 - failing or flaky test, typecheck or build error -> `bug`. The failing command and its output are the evidence; add the root cause if you found it.
 - lint error or warning, code smell, dead code -> `refactor`.

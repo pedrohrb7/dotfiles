@@ -1000,3 +1000,31 @@ Nenhuma. O documento está fechado para a etapa A.
 **Pendências conhecidas:**
 - `planner` ainda escreve plan e spec; a separação para o `specker` é da etapa C.
 - Os `CLAUDE.md` de serviço dos templates de stack (`node-ts-react`, `react-native`) mantêm a seção `Testing` própria do serviço; a tabela `Test suites` do root é a fonte do gate.
+
+### Etapa C - 2026-11-10 (concluída)
+
+**Arquivos (em `~/dotfiles/.claude/`):**
+
+| Arquivo | Mudança |
+|---|---|
+| `agents/specker.md` | **novo**: dono único das specs (a partir do plan aprovado ou de uma entrada de refactor); tasks estruturadas; `Files` como `allowed_paths` com guia de largura; aprova um plan `Draft` ao ser chamado; nunca edita `docs/backlog/` (reporta `backlog_updates`); report YAML |
+| `agents/backlog-keeper.md` | **novo**: escritor único de `docs/backlog/`; modos user report, run batch e update; deduplica contra o Index (e entre issues do mesmo lote); no máximo uma pergunta (via `needs_input`); `offer_fix` para o "quer corrigir agora?"; sonnet, effort baixo |
+| `agents/planner.md` | só escreve o plan; perguntas e a oferta de migração voltam como `needs_input`; nunca muda o plan para `Approved`; report YAML |
+| `skills/implement/SKILL.md` | auto-invocável (gatilhos em PT e EN); resolução da spec em 3 passos sem chute; pré-condições (plan `Approved`; spec `Draft` por frase pede confirmação, por `/implement` vale como aprovação); estado do run em `.claude/runs/<slug>.json` com retomada, orçamentos e `approved_scope`; pedidos de escopo de agents em paralelo numa só pergunta; backlog via `backlog-keeper` em uma chamada |
+| `CLAUDE.md` (global) | seção **Workflow** com a tabela de roteamento por frase, fase, dono e pré-condição; regra geral de `needs_input` / `scope_requests` (a sessão principal pergunta e retoma o mesmo agent); backlog só via `backlog-keeper` |
+| `agents/quality-fixer.md`, `agents/test-writer.md` | issues fora de escopo vão para o `backlog-keeper` |
+| `skills/project-docs/SKILL.md` | um escritor por tipo de documento; oferta de migração também para `specker`, via `needs_input` em subagents |
+| `templates/docs-structure/features/README.md`, `templates/project-root/CLAUDE.md`, `STRUCTURE.md` | `planner` escreve plan, `specker` escreve spec, `backlog-keeper` escreve backlog |
+| `templates/docs-structure/backlog/bugs/README.md` | escrito só pelo `backlog-keeper`; bug relatado pelo usuário é registrado com os passos observados e reproduzido pelo fluxo de correção |
+| `README.md` | tabela de agents, roteamento por frase, `needs_input`, workflow com frases |
+
+**Decisões tomadas durante a execução:**
+- Subagents não conseguem perguntar ao usuário. Toda pergunta de `planner`, `specker` e `backlog-keeper` (inclusive a oferta única de migração) volta como `result: needs_input`; a sessão principal pergunta e retoma o mesmo agent com `SendMessage`. Isso virou regra geral no `CLAUDE.md` global.
+- O `specker` não edita a entrada de refactor de origem: reporta `backlog_updates`, e a sessão principal repassa ao `backlog-keeper` (escritor único).
+- Uma spec `Draft` aprovada por `/implement` explícito continua valendo como aprovação; por frase, pede confirmação (cenário 2).
+- `.claude/runs/` fora do git: o `implement` verifica com `git check-ignore` e pergunta uma vez antes de mexer no `.gitignore`.
+- A linha de Discover no Workflow não cita `grill-me` nem `pr-description`, que continuam `off` até a etapa F; a linha de correção de bug descreve o fluxo com `bug-repro` até existir o `fix-bug` (etapa F).
+
+**Pendências conhecidas:**
+- `specker` e `backlog-keeper` só ficam disponíveis numa sessão nova do Claude Code; o teste de fumaça feito nesta sessão falhou por isso ("Agent type 'backlog-keeper' not found"), não por erro de definição.
+- Validação em uso real: cenários 1-3, 6-9, 25-27 e 29-30 da seção 14.3, na etapa D.

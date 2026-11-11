@@ -37,7 +37,7 @@ docs/
 
 ## Layouts and path resolution
 
-This section is the only place that knows where a feature's documents live. `/implement`, `@planner` and every other agent or skill that needs a plan, spec or log path resolves it here.
+This section is the only place that knows where a feature's documents live. `/implement`, `planner`, `specker`, `backlog-keeper` and every other agent or skill that needs a plan, spec, log or backlog path resolves it here.
 
 **Two layouts:**
 - `features` - the default, and the only one new projects get.
@@ -49,7 +49,7 @@ This section is the only place that knows where a feature's documents live. `/im
 3. `docs/plans/` or `docs/specs/` exists: `legacy`.
 4. None of these: `features`.
 
-**One-time migration offer.** When `/implement` or `@planner` starts work in a `legacy` project with **no** declaration, it asks once: "migrate `docs/` to `docs/features/` now?". Yes: run migrate mode (below), which records `docs layout: features`. No: record `- docs layout: legacy` in the root `CLAUDE.md` `## Workflow` section (create the section if missing) and never ask again. The user can still ask for a migration later.
+**One-time migration offer.** When `/implement`, `planner` or `specker` starts work in a `legacy` project with **no** declaration, the user is asked once (subagents return the question as `needs_input`, and the main session asks): "migrate `docs/` to `docs/features/` now?". Yes: run migrate mode (below), which records `docs layout: features`. No: record `- docs layout: legacy` in the root `CLAUDE.md` `## Workflow` section (create the section if missing) and never ask again. The user can still ask for a migration later.
 
 **Path map:**
 
@@ -87,7 +87,7 @@ Given a feature (slug, title or path), return the paths of its plan, spec and lo
 
 ## Add entry mode
 
-Use whenever the user, an agent or a skill needs a new bug, refactor, plan, spec, log, concept, quality snapshot or request.
+Use whenever the user, an agent or a skill needs a new bug, refactor, plan, spec, log, concept, quality snapshot or request. Each kind has one writer: bugs and refactors `backlog-keeper`, plans `planner`, specs `specker`, logs `/implement`.
 
 1. Confirm which kind of entry and get a short slug (a few words, kebab-case) describing it from the user if not already obvious from the request.
 2. Resolve the layout. Check the matching template exists; if the docs tree hasn't been scaffolded yet, offer to run scaffold mode first.

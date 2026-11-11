@@ -59,7 +59,7 @@ Skip trivial getters, framework behavior and implementation details.
 
 ## Out-of-scope issues
 
-Pre-existing problems you run into in code you did not touch are not fixed and not written to `docs/backlog/`: list each one in `out_of_scope_issues`, one per root cause. The caller logs them once.
+Pre-existing problems you run into in code you did not touch are not fixed and not written to `docs/backlog/`: list each one in `out_of_scope_issues`, one per root cause. The caller hands them to `backlog-keeper`, which logs them once.
 
 - failing or flaky test, typecheck or build error -> `bug`, with the failing command and its output as evidence;
 - lint error or warning, code smell, dead code -> `refactor`.
