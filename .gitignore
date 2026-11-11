@@ -1,4 +1,5 @@
 i3/i3status_default/brightness
 zellij/layouts/*
 .claude/skills/synced/
+.claude/skills/.trash/
 __pycache__/

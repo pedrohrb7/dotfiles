@@ -3,6 +3,7 @@
 - **Data**: 2026-11-10
 - **Revisão**: 3 (incorpora os comentários das rodadas 1 e 2; ver Apêndices A e B)
 - **Status**: Aprovado (rodada 3 fechada em 2026-11-10); pronto para a etapa A
+- **Adendo 2026-11-11**: etapa H, agent `design-director` (D22), **Status: Approved** (2026-11-11); ver 15.1. As linhas marcadas "(etapa H)" nas outras seções valem a partir desta aprovação; spec em `~/dotfiles/docs/features/design-director/spec.md`
 - **Escopo**: `~/.claude/agents/`, `~/.claude/skills/`, `~/.claude/templates/`, `~/.claude/CLAUDE.md`, `~/.claude/settings.json`
 - **Objetivo duplo**:
   1. Atender melhor o workflow diário: feature, bug, refactor, review de PR e projeto novo, em proporções parecidas.
@@ -114,6 +115,8 @@ Transversal: backlog-keeper (registra bug/refactor a qualquer momento)
 | Corrigir falhas do gate                                 | `quality-fixer`                                                                   | termina com o teste específico; o re-gate é do `test-runner`                                                          |
 | Validar UI visualmente                                  | **usuário**, localmente                                                           | agents entregam `manual_checks`; nenhum agent abre browser ou tira print, exceto o `ui-verifier` sob pedido explícito |
 | Validar backend em runtime                              | stack agent de backend: request + logs na instância local do usuário (seção 10.5) | ninguém sobe, reinicia ou para serviço ou container; build só nas condições da seção 10.6                             |
+| Criar `DESIGN_SYSTEM.md` (direção visual do zero; etapa H) | `design-director`, depois de um sim do usuário | só quando o arquivo falta ou a seção `Principles` está vazia; ninguém mais cria (15.1) |
+| Manter `DESIGN_SYSTEM.md` (valores novos, ajustes e extração de tokens já existentes em código; etapa H) | sessão principal, seguindo a skill `design-system` | stack agents só propõem valores em `scope_requests`; `docs-writer` não toca |
 | Docs, README, `.env.example`, OpenAPI, `docs/requests/` | `docs-writer`, uma vez no fim                                                     | os demais só **listam** em `needs_docs`                                                                               |
 | Status de plan e spec + Index de `features/`            | `implement`                                                                       | agents não mudam status                                                                                               |
 | Registrar bug/refactor em `docs/backlog/`               | `backlog-keeper`                                                                  | os demais **reportam** em `out_of_scope_issues`; `implement` repassa ao `backlog-keeper` uma vez no fim, deduplicado  |
@@ -191,6 +194,7 @@ O campo `files_created_outside_scope` da revisão 2 foi substituído por `scope_
 | `backlog-keeper`                        | `docs/backlog/`                                                                  | qualquer outro lugar                                                                         |
 | `docs-writer`                           | `docs/` (exceto `features/` e `backlog/`), READMEs, `.env.example`, specs de API | código                                                                                       |
 | `ui-verifier` (só sob pedido explícito) | nada no repo (prints no scratchpad)                                              | qualquer arquivo do projeto                                                                  |
+| `design-director` (etapa H)             | `DESIGN_SYSTEM.md` na raiz do projeto                                            | código, config, fontes, assets, qualquer outro doc                                           |
 | reviewers, `test-runner`                | nada                                                                             | qualquer arquivo                                                                             |
 
 **Enforcement em duas camadas:**
@@ -355,6 +359,7 @@ Para não depender de lembrar de chamar o agent:
 | "revisa esse PR", "review"                                     | Revisar (PR)                                                    | PR ou branch identificável                                                            |
 | "documenta", "atualiza as docs"                                | Documentar (`docs-writer`)                                      | nenhuma                                                                               |
 | "escreve o PR"                                                 | Entregar (`pr-description`)                                     | diff existente                                                                        |
+| "cria a identidade visual", "define o design do zero", "vamos criar o frontend do zero" (etapa H) | Direção visual (`design-director`) | `DESIGN_SYSTEM.md` ausente ou com `Principles` vazia, e sem UI com tokens próprios em código; senão, é manutenção (ou extração dos tokens existentes) pela skill `design-system` |
 | "pode commitar"                                                | Commit (seção 4.1)                                              | autorização explícita na conversa atual                                               |
 
 **Resolução da feature em "seguir com a implementação"**: (1) a feature citada na conversa; (2) senão, a única feature com spec `Approved` no Index; (3) senão, pergunta qual. Nunca chuta entre várias.
@@ -373,7 +378,8 @@ Para não depender de lembrar de chamar o agent:
 | **Refactor: registrar** | `backlog-keeper` -> entrada em `docs/backlog/refactor/` + Index                                                                                                                                                                                           |
 | **Refactor: executar**  | `specker` cria `docs/features/<slug>/spec.md` a partir da entrada do backlog (sem plan) -> `implement`                                                                                                                                                    |
 | **PR de terceiros**     | `code-reviewer` + `security-reviewer` (quando aplicável) -> findings, sem editar                                                                                                                                                                          |
-| **Projeto novo**        | skill `new-project` -> Descobrir -> Planejar ...                                                                                                                                                                                                          |
+| **Projeto novo**        | skill `new-project` -> (com serviço de UI e um sim do usuário, etapa H) `design-director` -> Descobrir -> Planejar ...                                                                                                                                    |
+| **Direção visual do zero** (etapa H) | `design-director`: briefing (só se faltar o básico) -> duas direções contrastantes -> escolha do usuário -> `DESIGN_SYSTEM.md`. Levar os tokens ao código vira tasks de spec normais (15.1) |
 
 ### 8.1 `backlog-keeper`
 
@@ -403,6 +409,7 @@ Modelo: sonnet com effort baixo, porque é preenchimento de template com dedupli
 | `backlog-keeper`    | **novo**         | dono único de `docs/backlog/` (seção 8.1)                                                                                                                                       |
 | `docs-writer`       | **novo**         | dono único de docs no fim do run, a partir dos `needs_docs`; pré-carrega a skill `docs`                                                                                         |
 | `ui-verifier`       | **novo, opt-in** | roda só quando o usuário pede explicitamente um print; isola as imagens fora da conversa principal e devolve só texto; read-only                                                |
+| `design-director`   | **novo** (etapa H, Draft) | cria a direção visual de um projeto sem frontend definido e escreve só `DESIGN_SYSTEM.md`, em rodadas via `needs_input` (15.1); opus, effort alto; pré-carrega `design-system`; sem `Bash` |
 
 > 💬
 
@@ -532,7 +539,7 @@ Os projetos seguem a mesma estrutura, então os templates passam a ser a **inter
 |                                   | `Documentation language`                                                                        | `new-project`                                                         | `planner`, `specker`, `docs-writer`, `backlog-keeper`     |
 | `PRD.md`                          | todo                                                                                            | `new-project`, `grill-me`                                             | `planner`                                                 |
 | `CONSTRAINTS.md`                  | todo                                                                                            | `new-project`, `planner` (quando um plan descobre uma restrição nova) | `planner`, `specker`, stack agents                        |
-| `DESIGN_SYSTEM.md`                | todo                                                                                            | `new-project`, skill `design-system`                                  | `frontend-react`, `mobile-react-native`, `code-reviewer`  |
+| `DESIGN_SYSTEM.md`                | todo                                                                                            | `new-project` (só copia o esqueleto); etapa H: `design-director` (criação), sessão principal com a skill `design-system` (manutenção) | `frontend-react`, `mobile-react-native`, `code-reviewer`  |
 | `OPEN_QUESTIONS.md`               | **só perguntas de nível de projeto** (arquitetura, produto); as de feature ficam em plan e spec | `grill-me`, `planner`                                                 | `planner`, `specker`                                      |
 | `STRUCTURE.md`                    | todo                                                                                            | template fixo                                                         | `new-project`, `onboard`, stack agents (serviço novo)     |
 | `TASKS.md`                        | **removido**                                                                                    | -                                                                     | -                                                         |
@@ -632,6 +639,7 @@ Regra geral: **a skill guarda o know-how, o agent executa.** O agent pré-carreg
 | `docs-writer`                           | `docs`, `project-docs`                               |
 | stack agents                            | `implementer-contract` + as da stack (já existentes) |
 | `frontend-react`, `mobile-react-native` | + `design-system`                                    |
+| `design-director` (etapa H)             | `design-system` (o know-how de direção fica no corpo do agent, não na skill) |
 | `security-reviewer`                     | `dep-audit`                                          |
 | `quality-fixer`                         | `bug-repro` (já existente)                           |
 
@@ -647,7 +655,7 @@ Regra geral: **a skill guarda o know-how, o agent executa.** O agent pré-carreg
 | `docs`                                                | ativar           | know-how do `docs-writer` (o que documentar, idioma, não inventar um sistema de docs novo)                                                              |
 | `archify`                                             | ativar           | sem mudança agora; reavaliar depois                                                                                                                     |
 | `dep-audit`                                           | ativar           | pré-carregada pelo `security-reviewer`; reavaliar depois                                                                                                |
-| `design-system`                                       | ativar           | lê e escreve `DESIGN_SYSTEM.md`; pré-carregada pelos agents de UI; reavaliar depois                                                                     |
+| `design-system`                                       | ativar           | lê e escreve `DESIGN_SYSTEM.md`; pré-carregada pelos agents de UI; reavaliar depois. Etapa H: fica só com a **manutenção** (a criação passa ao `design-director`), também é pré-carregada pelo `design-director` e perde a referência ao plugin `frontend-design` |
 | `pr-description`                                      | ativar           | fase Entregar                                                                                                                                           |
 | `bug-repro`, `project-docs`, `new-project`, `onboard` | manter e ajustar | conforme as seções 6.1, 10 e 11                                                                                                                         |
 | `review`                                              | remover          | "o que foi entregue x intenção" vai para o `code-reviewer` (comparar com os critérios `Done when` da spec); o resto já está no agent                    |
@@ -723,6 +731,7 @@ Sem a flag, nada muda: o stack agent escreve código e testes da task, como na s
 1. **Etapa A**: o protocolo de escopo (13.4) já vale por **instrução**, no `implementer-contract`.
 2. **Etapa D**: hook em `audit`. Custo zero de execução; mede violações reais e falsos positivos.
 3. **Etapa G**: `block` **por categoria**, onde os dados mostrarem falso positivo zero. Candidatos: comandos Docker proibidos, `git commit`/`git push` sem autorização, `.md` criado fora de `docs/`, escrita fora de `allowed_paths`.
+4. **Etapa H** (Draft, 15.1): categoria nova `design_system_write_by_other` em `warn` (escrita no `DESIGN_SYSTEM.md` da raiz por quem não é `design-director` nem a sessão principal); o `design-director` fica isento de `md_outside_docs` só para esse arquivo. A promoção a `block` segue a mesma regra dos dados.
 
 ### 13.4 Protocolo de pedido de escopo
 
@@ -782,6 +791,8 @@ O mesmo hook da seção 13 grava um JSONL por sessão (por exemplo em `~/.claude
 | Tasks de UI com `manual_checks`                                     | 0                     | 100%                                              |
 | Tasks de backend com `local_checks` (pass ou skipped com motivo)    | 0                     | 100%                                              |
 | Commits sem autorização                                             | não medido            | 0                                                 |
+| Escritas em `DESIGN_SYSTEM.md` fora do `design-director` e da sessão principal (etapa H) | não medido | 0 |
+| Chamadas do `design-director` sem um sim do usuário antes (etapa H) | não existe | 0 |
 
 A métrica "pedidos de escopo por run" também avalia o `specker`: se as tasks sempre precisam de arquivos extras, o campo `Files` da spec está sendo escrito estreito demais.
 
@@ -827,6 +838,15 @@ Um conjunto fixo de cenários, rodado igual na config pura e via Briareu:
 | 34 | Projeto com `docs layout: legacy` declarado | implement em legacy | nenhuma pergunta de migração |
 | 35 | Spec legada com `Implementation order` em lista livre | implement interpreta como hoje | spec não foi reescrita |
 | 36 | `implement --tdd` | stubs -> test-writer -> test-runner (só asserção) -> stack agent -> gate | o stack agent não alterou nenhum teste sem `scope_request` aprovado |
+| 37 | Etapa H: "cria a identidade visual", projeto sem `DESIGN_SYSTEM.md` e `PRD.md` completo | `design-director` rodada 2 -> `needs_input` -> escolha -> rodada 3 | duas direções contrastantes, cada uma revisada contra a lista de padrões; arquivo com todas as tabelas, light e dark, `Layout concept`, fontes de licença aberta com origem registrada, razões de contraste AA no report; nenhum outro arquivo escrito |
+| 38 | Etapa H: mesma frase, `PRD.md` sem público | rodada 1 | só as perguntas do básico; nenhuma direção proposta |
+| 39 | Etapa H: mesma frase, `Principles` preenchida | `design-director` não escreve | `result: blocked`; arquivo intocado; aponta a `design-system` |
+| 40 | Etapa H: usuário recusa as duas direções | nova rodada 2 | duas direções novas que levam em conta a recusa; nada escrito |
+| 41 | Etapa H: `new-project` com serviço web, usuário diz sim / não | sim: `design-director`; não: tabelas em branco | nenhuma chamada sem a resposta; no "não", nenhuma pergunta repetida no `new-project` |
+| 42 | Etapa H: task de UI do `implement` sem `DESIGN_SYSTEM.md` | `frontend-react` blocked + `scope_requests` -> pergunta -> `design-director` só depois do sim | nenhum token inventado; nenhuma chamada automática; recusa = pedido negado (13.4) |
+| 43 | Etapa H: stack agent edita `DESIGN_SYSTEM.md` | hook `warn` (`design_system_write_by_other`) | o valor vai para `scope_requests`; a sessão principal aplica depois do sim |
+| 44 | Etapa H: monorepo com web e mobile | um só `DESIGN_SYSTEM.md` na raiz | uma direção para as duas plataformas; wireframe por plataforma na rodada 2 |
+| 45 | Etapa H: "cria a identidade visual" num projeto com UI e tokens próprios em código, sem `DESIGN_SYSTEM.md` | sessão principal segue para a extração com a `design-system` | `design-director` não roda (ou termina `blocked`); os tokens documentados são os do código, sem direção nova |
 
 > 💬
 
@@ -834,7 +854,7 @@ Um conjunto fixo de cenários, rodado igual na config pura e via Briareu:
 
 ## 15. Plano de execução
 
-A ordem A -> G foi aprovada. As decisões da rodada 2 entram nas etapas já existentes, sem etapa nova.
+A ordem A -> G foi aprovada. As decisões da rodada 2 entram nas etapas já existentes, sem etapa nova. A etapa H (adendo de 2026-11-11, `Draft`) vem depois da G e não muda as anteriores (15.1).
 
 | Etapa | Conteúdo                                                                                                                                                                                                                                                                                     | Ataca                                                               |
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
@@ -845,8 +865,229 @@ A ordem A -> G foi aprovada. As decisões da rodada 2 entram nas etapas já exis
 | **E** | `docs-writer` + `ui-verifier`                                                                                                                                                                                                                                                                | fases sem dono                                                      |
 | **F** | `fix-bug` + consolidação de skills (seção 12.2), incluindo a `tdd` evoluída e o `implement --tdd` (12.4)                                                                                                                                                                                                           | fluxo de bug, sobreposição                                          |
 | **G** | `block` por categoria, com base nos dados da etapa D                                                                                                                                                                                                                                         | garantia mecânica                                                   |
+| **H** (Draft) | `design-director` (criação de `DESIGN_SYSTEM.md`) + `design-system` só com a manutenção + pontos de entrada (`new-project`, Workflow, `design-system`) + hook (`design_system_write_by_other`, isenção de `md_outside_docs`) + remoção do plugin `frontend-design` (15.1) | criação da direção visual sem dono, dependência de fonte externa desligada |
 
 Cada etapa termina com os cenários relevantes da seção 14.3 rodados e as métricas comparadas.
+
+### 15.1 Etapa H - `design-director` (adendo 2026-11-11)
+
+- **Status**: Approved (2026-11-11)
+- **Origem**: grill-me de 2026-11-11 (D22; Apêndice D)
+- **Spec**: `~/dotfiles/docs/features/design-director/spec.md`
+
+#### Objetivo
+
+Um projeto sem frontend definido ganha uma direção visual própria antes da primeira tela: o usuário escolhe entre duas propostas contrastantes, e a escolhida vira um `DESIGN_SYSTEM.md` completo, que os agents de UI já sabem consumir. A config deixa de apontar para uma fonte externa desligada.
+
+| Critério de sucesso | Como medir | Alvo |
+|---|---|---|
+| Rodada de direções entrega duas propostas completas | cenário 37: paleta de 4-6 hex, tipografias com papéis, wireframe ASCII, princípios e revisão contra a lista de padrões, nas duas | 100% |
+| Arquivo final completo | todas as tabelas do template preenchidas (ou "não se aplica" explícito); light e dark sempre; escala de 5-7 passos; `Layout concept` preenchida | 100% |
+| Fontes utilizáveis | famílias com licença aberta ou do sistema, com origem e licença registradas no arquivo | 100% |
+| Contraste | todo par texto/fundo com razão listada no report, AA nos dois temas | 100% dos pares |
+| Escrita restrita | escritas do `design-director` fora do `DESIGN_SYSTEM.md` da raiz (hook) | 0 |
+| Nada automático | chamadas do `design-director` sem um sim do usuário antes (14.2) | 0 |
+| Um dono por ação | `design_system_write_by_other` no relatório de métricas | 0 |
+| Sem fonte externa | `grep -r frontend-design` na config, fora deste documento | 0 ocorrências |
+
+#### Contexto
+
+- Hoje ninguém é dono da **criação** do `DESIGN_SYSTEM.md`. O `new-project` deixa as tabelas em branco "para a `design-system`"; a `design-system` (passo 1) manda estabelecer a direção com o usuário na sessão principal e cita o plugin `frontend-design`, que está `false` em `enabledPlugins`. Na prática, a instrução aponta para algo que não roda, e o resultado tende ao palpite genérico que a própria skill proíbe.
+- A `design-system` mistura criação (rara, cara, precisa de escolha do usuário) e manutenção (frequente, pré-carregada em todo agent de UI). Separar segue o princípio 2 (um dono por ação) e tira o know-how de direção do contexto dos implementers.
+- Base já existente: protocolo `needs_input` e retomada com `SendMessage` (etapa C), `scope_requests` (13.4), hook em `enforce` (etapa G), template `project-root/DESIGN_SYSTEM.md` (11.1) e a regra global de UI sem prints.
+
+#### Decisões (D22, grill-me de 2026-11-11)
+
+| # | Decisão |
+|---|---|
+| a | **Sem fonte externa.** O plugin `frontend-design@claude-plugins-official` não é adotado; as referências saem da `design-system`, dos `CLAUDE.md` dos templates `node-ts-react` e `react-native`, do `README.md` e de `enabledPlugins`. Só ideias são reaproveitadas, reescritas com as palavras do usuário: um plano compacto de tokens revisado contra o brief antes de virar valores, e uma lista de padrões genéricos "padrão de IA" a evitar onde o brief deixa o eixo livre. Os passos do plugin "escrever o código" e "tirar prints para criticar" ficam de fora: código passa por spec + implementers, e prints são proibidos para agents (regra global de UI; `visual_tool` bloqueado pelo hook) |
+| b | **Agent novo, só criação.** O `design-director` cria a direção visual do zero, só em projetos sem frontend definido. Ele é dono da **criação** do `DESIGN_SYSTEM.md`; a skill `design-system` continua dona da **manutenção** |
+| c | **Ciclo em rodadas via `needs_input`**: briefing (só se faltar o básico) -> duas direções contrastantes -> o usuário escolhe, mistura ou pede mudanças -> o agent, retomado com `SendMessage`, preenche o arquivo |
+| d | **Três pontos de entrada**, todos só com `DESIGN_SYSTEM.md` ausente ou `Principles` vazia, nenhum automático dentro de uma task: `new-project`, linha nova no Workflow e passo 1 da `design-system` |
+| e | **Escopo de escrita**: só `DESIGN_SYSTEM.md` na raiz. Sem código (`theme.ts`, config do Tailwind, carga de fontes, `expo-font`): levar tokens ao código vira tasks de spec para `frontend-react` / `mobile-react-native`. Tools `Read`, `Grep`, `Glob`, `Write`, `Edit`; sem `Bash`. Hook: isenção de `md_outside_docs` para esse arquivo e categoria nova `design_system_write_by_other` em `warn` |
+| f | **Definição do agent**: `model: opus`, `effort: high` (política do README: opus onde o erro é caro e os runs são raros); `skills: [design-system]`; o know-how de direção fica no corpo do agent. Description: _"Defines a project's visual direction from scratch and writes DESIGN_SYSTEM.md. Use only when the project has no DESIGN_SYSTEM.md (or its Principles are empty) and the user wants a visual identity created ("cria a identidade visual", "define o design do zero"), or when new-project or design-system hands off to it."_ |
+| g | **UI já existente em código, sem `DESIGN_SYSTEM.md`** (resposta de 2026-11-11 à pergunta 1, opção b): fora do escopo do `design-director`; a sessão principal documenta os tokens existentes seguindo a `design-system` (extração, não criação) (regra 33) |
+| h | **Conceito de layout, wireframe e padrões evitados** (pergunta 2, opção b): seção nova `Layout concept` no template `project-root/DESIGN_SYSTEM.md`, aprovada pelo usuário (regra 34) |
+| i | **Tipografia** (pergunta 3, opção a): só fontes com licença aberta (ex.: SIL OFL) ou do sistema, com a origem registrada no `DESIGN_SYSTEM.md` (regras 12 e 22) |
+| j | **`PRD.md` exclui tema escuro** (pergunta 4, opção a): light e dark sempre preenchidos (regra 20) |
+
+#### Escopo
+
+| Dentro | Fora |
+|---|---|
+| Agent `design-director` e seu ciclo de rodadas | Redesign de projeto com `Principles` preenchida (é manutenção ou um plan próprio) |
+| `DESIGN_SYSTEM.md` da raiz, criado a partir do template `project-root` | Qualquer código: tokens no código, fontes, `theme.ts`, Tailwind, `expo-font` (tasks de spec) |
+| Pontos de entrada em `new-project`, Workflow e `design-system` | Prints, browser, simulador ou crítica visual por imagem |
+| Hook: isenção e categoria nova | Adotar ou copiar o plugin `frontend-design` |
+| Remoção das referências ao plugin e da entrada em `enabledPlugins` | Assets de marca (logo, ícones, ilustrações) |
+| Cenários 37-45 (14.3) e métricas novas (14.2) | `DESIGN_SYSTEM.md` por serviço (o arquivo é um só, na raiz) |
+| Seção nova `Layout concept` e origem das fontes no template `project-root/DESIGN_SYSTEM.md` | Documentar tokens que já existem em código (extração pela sessão principal, com a `design-system`) |
+| | Fontes pagas ou sem licença aberta |
+
+#### Regras de negócio
+
+**Pré-condição e pontos de entrada**
+
+1. O `design-director` só escreve quando o `DESIGN_SYSTEM.md` da raiz não existe ou a seção `Principles` está vazia (sem texto além do comentário do template), e o projeto ainda não tem UI com identidade própria em código (regra 33).
+2. Com `Principles` preenchida, não escreve nada e termina `result: blocked`, dizendo que ajustes são manutenção pela skill `design-system` e que redesign está fora do escopo.
+3. Projeto sem serviço de UI (tabela `Services` do `CLAUDE.md` do projeto sem web nem mobile): não escreve e termina `result: blocked` com o motivo.
+4. Nenhuma chamada é automática dentro de uma task: o `design-director` só é chamado depois de um sim do usuário na conversa (pergunta do `new-project`, frase do Workflow ou oferta da `design-system`).
+5. `new-project`: com serviço de UI no perfil, o passo que hoje deixa as tabelas em branco pergunta se o usuário quer definir a direção visual agora. Sim: chama o `design-director` depois de `PRD.md` preenchido. Não: tabelas em branco, sem repetir a pergunta no `new-project`. Sem serviço de UI, o arquivo continua sendo descartado, como hoje.
+6. Workflow: as frases "cria a identidade visual", "define o design do zero" e "vamos criar o frontend do zero" vão para o `design-director` quando a pré-condição (regra 1) vale; senão, a sessão principal diz que o arquivo já tem direção e segue pela `design-system`.
+7. `design-system`, passo 1: na sessão principal, arquivo ausente ou `Principles` vazia leva a oferecer o `design-director` ao usuário, em vez de estabelecer a direção na conversa. Num subagent, o arquivo ausente vai para `scope_requests`, e a sessão principal leva a oferta ao usuário.
+8. Recusa no meio de uma task de UI: o pedido de escopo conta como negado (13.4); o stack agent conclui `partial` ou declara blocker; nenhum token genérico é inventado.
+
+**Rodada 1 - briefing**
+
+9. Lê `PRD.md`, `CONSTRAINTS.md`, o `CLAUDE.md` do projeto (`Services`, `Documentation language`) e o brief recebido no prompt.
+10. Faltando assunto, público ou tarefa principal, termina `needs_input` só com as perguntas do que falta (no máximo essas três), sem propor direção.
+11. Com o básico presente, segue direto para a rodada 2.
+
+**Rodada 2 - duas direções**
+
+12. Cada direção traz: paleta base de 4 a 6 hex, com o papel de cada cor; tipografias e seus papéis (display, texto e, quando houver, mono), só com licença aberta ou do sistema (regra 22); conceito de layout com wireframe ASCII da tela da tarefa principal; 2-4 princípios; e a revisão contra a lista de padrões genéricos (qual padrão a direção poderia repetir e como evita, ou "nenhum").
+13. Antes de ser apresentada, cada direção é revisada como um plano compacto de tokens contra o brief (público, tarefa principal, restrições); uma direção que não se sustenta contra o brief é refeita, não apresentada.
+14. As duas direções são contrastantes: diferem em pelo menos dois dos três eixos (paleta, tipografia, conceito de layout).
+15. A lista de padrões genéricos vale só para os eixos que o brief deixa livres. Uma escolha explícita do usuário ou de `CONSTRAINTS.md` (ex.: cor de marca, fonte institucional) vence a lista, e a direção registra que aquele elemento veio do brief.
+16. Lista inicial de padrões a evitar: fundo creme + serifa + acento terracota; quase preto + um único acento ácido; kit de cards SaaS (cards idênticos arredondados com sombra cinza suave); eyebrow labels em caixa alta; acento numa única palavra do título; entradas com fade-and-slide em tudo.
+17. A rodada termina com `needs_input`: o usuário escolhe uma direção, mistura (ex.: paleta da A com tipografia da B) ou pede mudanças. A sessão principal pergunta e retoma o mesmo agent com `SendMessage`.
+18. Pedido de mudança ou recusa das duas: nova rodada 2, com duas direções novas que levam em conta o que foi rejeitado e por quê; nada é escrito enquanto não há escolha.
+
+**Rodada 3 - `DESIGN_SYSTEM.md`**
+
+19. Preenche o arquivo a partir da direção escolhida, no formato de `templates/project-root/DESIGN_SYSTEM.md`; copia o template quando o arquivo não existe.
+20. Cor: tokens semânticos, nomeados por papel, com valor light e dark para cada token, sempre, inclusive quando o `PRD.md` exclui tema escuro (D22 j).
+21. Contraste: todo par texto/fundo atende WCAG AA nos dois temas (4.5:1 para texto normal; 3:1 para texto grande e para ícones e bordas de componentes). A razão de cada par vai no report.
+22. Tipografia: escala de 5 a 7 passos; cada família com stack de fallback. Só famílias com licença aberta (ex.: SIL OFL) ou do sistema; a origem e a licença de cada família ficam registradas no `DESIGN_SYSTEM.md` (D22 i). Em monorepo, a família precisa servir para web e mobile.
+23. Todas as tabelas do template são preenchidas; linha que não se aplica diz isso explicitamente (ex.: "não se aplica: sem alvo tablet"), nunca fica vazia nem com placeholder.
+24. `Principles`: 2-4 frases da direção escolhida, incluindo as regras duras que guiam o resto (ex.: densidade, uma cor de ação só); o detalhe de layout e os padrões evitados vão para `Layout concept` (regra 34).
+25. Prosa no idioma de `Documentation language`; nomes de token e cabeçalhos do template ficam como estão.
+26. Uma mistura que quebra o contraste AA não é escrita: o agent propõe o ajuste mais próximo num novo `needs_input`.
+27. O report final aponta o próximo passo: levar os tokens ao código é um plan/spec normal (`planner` -> `specker` -> `frontend-react` / `mobile-react-native`); o agent não faz isso.
+
+**Escrita, ferramentas e manutenção**
+
+28. O `design-director` escreve só o `DESIGN_SYSTEM.md` da raiz: nenhum código, config, fonte, asset, estado de run ou outro doc. Tools: `Read`, `Grep`, `Glob`, `Write`, `Edit`; sem `Bash`, browser ou screenshot.
+29. Depois da criação, o arquivo é escrito só pela sessão principal seguindo a `design-system`. Stack agents propõem valores em `scope_requests`; com o sim do usuário, a sessão principal aplica o valor e retoma o agent (exceção ao passo 5 de 13.4, em que o próprio agent faria a ação). `docs-writer` continua sem tocar no arquivo.
+30. Hook: o `design-director` não gera `md_outside_docs` ao escrever o `DESIGN_SYSTEM.md` da raiz (só esse caminho); qualquer outro ator que não seja `design-director` ou a sessão principal gera `design_system_write_by_other` (`warn`). Uma chamada negada ou com aviso nunca é repetida; o agent termina `blocked`.
+31. Report: bloco YAML final no formato comum (5.1), com `result: done | needs_input | blocked`, `files_written`, `question` (rodadas 1 e 2), as duas direções resumidas (rodada 2), os pares de contraste com as razões (rodada 3), o próximo passo e `needs_docs: []`.
+32. Contrato para o Briareu: a entrada é autossuficiente (fase, raiz do projeto, brief e, na retomada, a direção escolhida em texto), sem depender da conversa principal (seção 5).
+
+**Perguntas respondidas em 2026-11-11**
+
+33. Projeto que já tem UI em código com tokens próprios (tema, CSS de tokens, config do Tailwind nos serviços de UI), mas sem `DESIGN_SYSTEM.md` ou com `Principles` vazia: fora do escopo do `design-director`. O agent não escreve e termina `result: blocked`, apontando a extração; a sessão principal documenta os tokens existentes seguindo a `design-system` (extração, não criação). Nos pontos de entrada (regras 6 e 7), a sessão principal já segue direto para a extração, sem oferecer o agent (D22 g).
+34. A direção escolhida também preenche a seção nova `Layout concept` do template: o conceito de layout, o wireframe ASCII (um por plataforma, em monorepo) e os padrões genéricos evitados, inclusive os que vieram do brief por escolha explícita (regra 15) (D22 h).
+
+#### Casos de borda
+
+| Situação | Comportamento esperado |
+|---|---|
+| Monorepo com web e mobile | um só `DESIGN_SYSTEM.md` na raiz e uma direção para as duas plataformas; na rodada 2, um wireframe por plataforma; nomes de token iguais nas duas; tipografias com licença aberta ou do sistema que funcionem nas duas (regra 22); `Layout concept` com um wireframe por plataforma (regra 34) |
+| Arquivo existe com `Principles` e tabelas vazias (cópia do `new-project`) | fluxo normal; o agent preenche o arquivo existente |
+| `Principles` vazia, mas algumas tabelas já têm valores | os valores existentes entram como restrição do brief; se a direção escolhida conflita com eles, a rodada 2 lista o que mudaria, e só muda com a escolha do usuário |
+| `Principles` preenchida | `blocked`, arquivo intocado (regra 2); redesign fora do escopo |
+| Usuário recusa as duas direções | nova rodada 2 com duas direções novas (regra 18); nada escrito |
+| Usuário mistura direções | o agent confere o contraste da mistura; se quebra AA, propõe o ajuste antes de escrever (regra 26) |
+| Brief pede explicitamente um padrão da lista (ex.: serifa sobre creme) | o brief vence; a direção registra que veio do brief (regra 15) |
+| `CONSTRAINTS.md` traz cor de marca | entra nas duas direções; os tokens semânticos garantem AA (ex.: a marca vira `accent` só onde o contraste passa) |
+| Projeto sem `PRD.md` (não veio do `new-project`) | o básico vem do brief; faltando, rodada 1 |
+| Chamado enquanto um run do `implement` está ativo (regra 7) | não mexe no estado do run; a task que pediu fica parada até a sessão principal retomar o stack agent |
+| Sessão reiniciada entre as rodadas (sem `SendMessage`) | uma chamada nova com a direção escolhida em texto vai direto para a rodada 3, depois de rechecar a pré-condição |
+| Projeto sem serviço de UI | `blocked` (regra 3) |
+| Projeto já tem UI com identidade própria em código, mas sem `DESIGN_SYSTEM.md` | fora do escopo: `blocked`; a sessão principal documenta os tokens existentes seguindo a `design-system` (regra 33) |
+| `PRD.md` diz que não há tema escuro | light e dark preenchidos mesmo assim (regra 20) |
+| Brief ou `CONSTRAINTS.md` pede uma fonte paga | não entra; a direção propõe a alternativa de licença aberta mais próxima e registra o motivo (regra 22) |
+
+#### Abordagem (nível de produto)
+
+**Fluxo por ponto de entrada:**
+
+| Entrada | Quem pergunta | Pré-condição checada | Resultado |
+|---|---|---|---|
+| `new-project`, perfil com UI | o próprio `new-project` (sessão principal) | arquivo recém-copiado, `Principles` vazia | sim: `design-director`; não: tabelas em branco |
+| Frase do Workflow | sessão principal | regra 1 | `design-director`, ou aviso de que a direção já existe |
+| `design-system` na sessão principal | sessão principal | regra 1 | oferta do `design-director`; recusa: segue sem inventar tokens |
+| `design-system` num subagent | stack agent -> `scope_requests` -> sessão principal | regra 1 | oferta ao usuário; recusa = pedido negado (13.4) |
+
+**Estados de cada chamada:**
+
+| Estado | Quando | O que o usuário vê |
+|---|---|---|
+| Briefing (`needs_input`) | falta assunto, público ou tarefa principal | até 3 perguntas, numa chamada de `AskUserQuestion` |
+| Direções (`needs_input`) | básico presente | duas direções lado a lado (paleta, tipografia, wireframe, princípios, revisão de padrões) e a pergunta "qual, mistura ou mudanças?" |
+| Concluído (`done`) | direção escolhida e contraste AA ok | caminho do arquivo, pares de contraste e o próximo passo (tokens no código via spec) |
+| Bloqueado (`blocked`) | `Principles` preenchida, sem UI, UI já existente em código, ou ação negada pelo hook | o motivo e o caminho certo (`design-system`, extração dos tokens existentes, nada a fazer, ou pedido de escopo) |
+| Erro de escrita | o `Write`/`Edit` falha | `blocked` com o erro; nenhuma escrita parcial é dada como concluída |
+
+**Formato esperado de uma direção na rodada 2** (ilustrativo):
+
+```
+Direção A - "Arquivo técnico"
+Paleta: #F4F4F1 fundo · #1B1D1F texto · #5A6B7A apoio · #2F6FED acento · #D64545 erro
+Tipografia: display Space Grotesk 600 · texto Inter 400 · mono JetBrains Mono (todas SIL OFL, Google Fonts)
+Layout: barra lateral fixa, tabela densa, detalhe em painel
+  +--------+------------------------+
+  | nav    | filtros         [Novo] |
+  |        | tabela ............... |
+  |        | tabela ............... |
+  +--------+------------------------+
+Princípios: densidade acima de respiro; uma cor de ação só
+Padrões: poderia cair no kit de cards SaaS; evita com tabela e divisórias, sem sombra
+```
+
+**Arquivos (em `~/dotfiles/.claude/`):**
+
+| Arquivo | Mudança |
+|---|---|
+| `agents/design-director.md` | **novo**: frontmatter de D22 (f); corpo com o ciclo de rodadas, a lista de padrões genéricos, o plano compacto de tokens revisado contra o brief, as regras de contraste, de escala e de licença das fontes, o `Layout concept` e o report YAML (regras 1-34) |
+| `skills/design-system/SKILL.md` | passo 1: arquivo ausente ou `Principles` vazia -> oferecer o `design-director` (sessão principal) ou `scope_requests` (subagent); com UI já em código e tokens próprios, documentar os tokens existentes (extração) em vez de oferecer o agent (regra 33); sai a referência ao `frontend-design`; a skill fica só com a manutenção; valores propostos por subagent passam pela sessão principal (regra 29) |
+| `skills/new-project/SKILL.md` | passo 1 (~linha 45): com serviço de UI, pergunta se define a direção agora; sim -> `design-director` depois de `PRD.md`; não -> tabelas em branco |
+| `CLAUDE.md` (global) | linha nova no Workflow: "cria a identidade visual", "define o design do zero", "vamos criar o frontend do zero" -> `design-director`, com a pré-condição da regra 1 |
+| `templates/node-ts-react/CLAUDE.md`, `templates/react-native/CLAUDE.md` | linha 25: sai o `frontend-design`; criação da direção pelo `design-director`, manutenção pela `design-system` |
+| `templates/project-root/DESIGN_SYSTEM.md` | comentário do topo: criado pelo `design-director`, mantido pela `design-system`; seção nova `Layout concept` depois de `Principles` (conceito, wireframe ASCII por plataforma, padrões evitados), aprovada pelo usuário em 2026-11-11 (D22 h); linha `Font family` com origem e licença de cada família (D22 i) |
+| `hooks/agent-audit.py` | isenção de `md_outside_docs` para `design-director` no `DESIGN_SYSTEM.md` da raiz; flag `design_system_write_by_other`; mensagem em `WHY` (propor o valor em `scope_requests`) |
+| `hooks/agent-audit.json` | `design_system_write_by_other: warn` |
+| `hooks/agent-metrics.py` | descrição da categoria nova (alvo 0) |
+| `settings.json` | sai `frontend-design@claude-plugins-official` de `enabledPlugins` (arquivo com regra `ask`: o usuário confirma) |
+| `README.md` | pelo `docs-writer`, no fim: linha do `design-director` na tabela de agents; `design-system` pré-carregada também pelo `design-director`; o parágrafo do `frontend-design` vira a divisão criação x manutenção; categoria nova na política do hook |
+| `agent-workflow.md` | "Registro de execução" da etapa H, depois de executada |
+
+#### Verificação
+
+- **Estática**: frontmatter do agent novo válido (`model`, `effort`, `tools`, `skills`); `settings.json` como JSON válido, sem o plugin e com hooks e `ask` intactos; `grep -r frontend-design` sem ocorrências fora deste documento; template `project-root/DESIGN_SYSTEM.md` com a seção `Layout concept` e a origem/licença em `Font family`; nenhum em dash nos arquivos tocados.
+- **Hook pelo stdin**, como na etapa G, com repo git temporário:
+
+  | Caso | Esperado |
+  |---|---|
+  | `design-director` faz `Write` em `DESIGN_SYSTEM.md` na raiz | silencioso |
+  | `design-director` faz `Write` em `services/web/DESIGN_SYSTEM.md` | `md_outside_docs` (`warn`) |
+  | `design-director` faz `Write` em `NOTES.md` | `md_outside_docs` (`warn`) |
+  | `frontend-react` faz `Edit` no `DESIGN_SYSTEM.md` da raiz | `design_system_write_by_other` (`warn`) |
+  | `docs-writer` faz `Edit` no mesmo arquivo | `design_system_write_by_other` (`warn`) |
+  | sessão principal faz `Edit` no mesmo arquivo | silencioso |
+  | modo `audit` | silencioso |
+
+- **Regressão**: os 31 casos de classificação e os 10 casos da etapa G continuam passando.
+- **Uso real** (sessão nova do Claude Code, porque agents novos só aparecem nela): cenários 37-45 da seção 14.3, mais o relatório `agent-metrics.py` com as métricas novas de 14.2.
+
+#### Riscos e mitigações
+
+| Risco | Mitigação |
+|---|---|
+| Contraste calculado sem `Bash` sai errado | a razão de cada par fica no report e no arquivo, para o usuário conferir em qualquer verificador; o `code-reviewer` e o `ui-verifier` (sob pedido) já leem o arquivo |
+| As duas direções saem como variações de uma só | regra 14 (dois de três eixos diferentes) e o cenário 37 confere |
+| A lista de padrões vira um novo clichê ("evitar X" sempre leva a Y) | a lista é revisada quando os runs mostrarem repetição; vale só para eixos livres (regra 15) |
+| Custo de opus com effort alto | runs raros (uma vez por projeto), gatilhos estreitos e nada automático (regra 4) |
+| "vamos criar o frontend do zero" também pode significar código | a pré-condição desvia para a `design-system` quando a direção existe; o código continua no plan/spec |
+| Implementer grava um valor direto no arquivo | hook em `warn` agora; promoção a `block` com os dados (13.3) |
+| Fonte escolhida sem licença ou indisponível numa plataforma | regra 22: só licença aberta ou do sistema, com origem registrada; em monorepo, a família precisa servir para web e para `expo-font` |
+| A seção nova `Layout concept` muda o template de todos os projetos | aprovada pelo usuário (D22 h); projetos existentes não são migrados, e a seção vazia não quebra os leitores atuais do arquivo |
+
+#### Perguntas em aberto
+
+Nenhuma. As quatro perguntas foram respondidas em 2026-11-11 (D22 g-j) e viraram as regras 20, 22, 33 e 34.
+
+**Fontes**: WCAG 2.2, critérios [1.4.3 Contrast (Minimum)](https://www.w3.org/TR/WCAG22/#contrast-minimum) e [1.4.11 Non-text Contrast](https://www.w3.org/TR/WCAG22/#non-text-contrast).
 
 > 💬
 
@@ -881,10 +1122,11 @@ Rótulos fixos (`D<n>`) para não serem renumerados por formatadores de Markdown
 | D19 | Nome do agent de spec             | `specker`                                                                                                                              |
 | D20 | Modo TDD no `implement` | flag opt-in `--tdd`; o stack agent não altera testes sem `scope_request` aprovado (12.4) |
 | D21 | Migração para `docs/features/` | oferecer uma vez **e** manter compatibilidade com o layout legado; a recusa fica gravada no `CLAUDE.md` do projeto (6.1.1) |
+| D22 | `design-director` (etapa H, Draft) | agent novo cria a direção visual de projetos sem frontend definido, em rodadas via `needs_input` (duas direções contrastantes, o usuário escolhe), e escreve só `DESIGN_SYSTEM.md`; a manutenção fica com a `design-system`; três pontos de entrada, nenhum automático; plugin `frontend-design` não adotado, só ideias reescritas; opus, effort alto, sem `Bash`; hook com isenção e categoria `design_system_write_by_other`; UI já existente em código fica com a extração pela `design-system`; seção nova `Layout concept` no template; só fontes de licença aberta ou do sistema; light e dark sempre (15.1, decisões a-j) |
 
 ### 16.2 Em aberto
 
-Nenhuma. O documento está fechado para a etapa A.
+Nenhuma. As perguntas da etapa H foram respondidas em 2026-11-11 (15.1, D22 g-j).
 
 ---
 
@@ -930,6 +1172,21 @@ Nenhuma. O documento está fechado para a etapa A.
 |---|---|---|
 | D20 | "aceito a recomendação" | 12.2, 12.4 (`implement --tdd`), etapa F, cenário 36 |
 | D21 | "opção B e C; alguns projetos já têm a estrutura antiga, migrar mesmo que aos poucos eleva tempo e custo que não fazem sentido no momento" | 6.1.1, 11.4, etapa B, cenários 32-35 |
+
+## Apêndice D: decisões do grill-me de 2026-11-11 (etapa H) e onde foram tratadas
+
+| Decisão | Resumo | Tratado em |
+|---|---|---|
+| D22 (a) | sem fonte externa: plugin `frontend-design` não adotado; só as ideias do plano compacto de tokens e da lista de padrões genéricos, reescritas; sem "escrever o código" nem prints | 12.2, 15.1 (regras 13, 15-16; arquivos), cenário 37 |
+| D22 (b) | `design-director` cria; `design-system` mantém | 4, 9, 11.1, 12.2, 15.1 (regras 1-2, 29) |
+| D22 (c) | rodadas via `needs_input`: briefing se faltar o básico, duas direções, escolha, arquivo | 8, 15.1 (regras 9-27), cenários 37-40 |
+| D22 (d) | três pontos de entrada, só sem direção definida, nenhum automático | 7, 8, 15.1 (regras 4-8), cenários 41-42 |
+| D22 (e) | escreve só `DESIGN_SYSTEM.md`; sem código nem `Bash`; hook com isenção e `design_system_write_by_other` | 5.2, 13.3, 14.2, 15.1 (regras 28-30; verificação), cenário 43 |
+| D22 (f) | opus, effort alto, `skills: [design-system]`, know-how no corpo do agent, description fixa | 9, 12.1, 15.1 (decisões; arquivos) |
+| D22 (g) | resposta à pergunta 1: UI já em código sem `DESIGN_SYSTEM.md` fica fora do agent; extração pela sessão principal com a `design-system` | 4, 7, 15.1 (regras 1, 33; casos de borda; arquivos), cenário 45 |
+| D22 (h) | resposta à pergunta 2: seção nova `Layout concept` no template `project-root/DESIGN_SYSTEM.md`, aprovada | 15.1 (regras 24, 34; arquivos; verificação; riscos), cenário 37 |
+| D22 (i) | resposta à pergunta 3: só fontes de licença aberta (ex.: SIL OFL) ou do sistema, com a origem registrada | 15.1 (regras 12, 22; casos de borda; arquivos; riscos), cenário 37 |
+| D22 (j) | resposta à pergunta 4: light e dark sempre, mesmo com o `PRD.md` excluindo tema escuro | 15.1 (regra 20; casos de borda) |
 
 ---
 
