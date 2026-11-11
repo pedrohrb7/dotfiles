@@ -1,5 +1,19 @@
 {
-  "mode": "audit",
-  "_modes": "audit = record only, never block (stage D). off = record nothing. block = reserved for stage G (per-category blocking with scope requests).",
-  "block_categories": []
+  "mode": "enforce",
+  "_mode": "off = record nothing; audit = record only, PreToolUse never decides (stage D); enforce = PreToolUse applies the action of each category below (stage G).",
+  "_actions": "block = deny, with the reason and the scope-request protocol; ask = Claude Code asks the user; warn = allow, with a reminder in the agent's context; audit = record only. Promote a category from warn to block once the metrics show it has no false positives (agent-workflow.md, section 13).",
+  "categories": {
+    "docker_lifecycle": "block",
+    "write_by_readonly_agent": "block",
+    "visual_tool": "block",
+    "git_commit": "ask",
+    "git_push": "ask",
+    "out_of_scope_write": "warn",
+    "suite_by_non_runner": "warn",
+    "md_outside_docs": "warn",
+    "docs_write_by_implementer": "warn",
+    "backlog_write_by_other": "warn",
+    "external_request": "warn",
+    "docker_build": "audit"
+  }
 }

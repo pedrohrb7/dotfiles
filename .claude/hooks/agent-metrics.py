@@ -108,8 +108,21 @@ def report(title: str, events: list[dict]) -> str:
             "",
         ]
 
+    decisions = [e for e in events if e.get("event") == "PreToolUse" and e.get("decision")]
+    if decisions:
+        out += ["## Enforcement decisions (PreToolUse)", "", "| decision | category | count | examples |", "|---|---|---|---|"]
+        grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
+        for e in decisions:
+            grouped[(e["decision"], e.get("decision_category", "?"))].append(e)
+        for (decision, cat), items in sorted(grouped.items(), key=lambda kv: -len(kv[1])):
+            examples = "; ".join(f"{e.get('actor')}: `{(e.get('rel') or e.get('cmd') or e.get('tool') or '')[:60]}`" for e in items[:3])
+            out.append(f"| {decision} | {cat} | {len(items)} | {examples} |")
+        out += ["", "A blocked action that the user later approved, or a warn category with no real violation, is a false positive: keep it at warn. A warn category with only real violations and no false positives can be promoted to block in agent-audit.json.", ""]
+
     flagged = defaultdict(list)
     for e in events:
+        if e.get("event") == "PreToolUse":
+            continue  # counted above; the action itself is recorded by PostToolUse when it runs
         for f in e.get("flags") or []:
             flagged[f].append(e)
     out += ["## Flags", ""]

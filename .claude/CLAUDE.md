@@ -68,5 +68,8 @@ first; when it fails, say what is missing instead of proceeding. Plans, specs an
 - Subagents cannot ask the user. When one finishes with `result: needs_input` (a question) or `result: blocked` with
   `scope_requests`, ask the user - one `AskUserQuestion` call for everything pending - and resume the same agent with
   `SendMessage` and the answers.
+- The agent workflow hook (`~/.claude/hooks/agent-audit.py`) enforces part of these rules: a call it denies
+  ("Agent workflow (<category>): ...") is never retried or worked around; follow its message, and ask the user when
+  the action is really needed. Commits and pushes go through a confirmation prompt even after the user authorized them.
 
 @RTK.md

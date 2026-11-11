@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Agent audit hook - records what agents do, never blocks (audit mode).
+"""Agent audit and enforcement hook.
 
-Wired in settings.json on PostToolUse, PostToolUseFailure, SubagentStart and SubagentStop.
-Reads the hook payload (JSON) from stdin and appends one line per event to
-~/.claude/metrics/<session_id>.jsonl. agent-metrics.py turns those lines into a report.
+Wired in settings.json on PreToolUse (decide), PostToolUse, PostToolUseFailure, SubagentStart and
+SubagentStop (record). Reads the hook payload (JSON) from stdin.
+
+- Post* and Subagent* events append one line per event to ~/.claude/metrics/<session_id>.jsonl;
+  agent-metrics.py turns those lines into a report.
+- PreToolUse applies agent-audit.json: in mode "enforce", each flagged category gets its action -
+  "block" (deny, with the scope-request protocol as the reason), "ask" (Claude Code asks the user),
+  "warn" (allow, with a reminder injected into the agent's context) or "audit" (record only).
+  Decisions other than allow/audit are recorded too. In mode "audit" PreToolUse does nothing.
+- Fail-open: any error, a missing config or an unknown category lets the action through.
 
 What it classifies (see agent-workflow.md, sections 13 and 14):
 - Bash commands: tests (narrow/full/load), lint, typecheck, docker (read/build/lifecycle),
@@ -277,16 +284,79 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response) -> 
     return out
 
 
+SEVERITY = {"audit": 0, "warn": 1, "ask": 2, "block": 3}
+
+WHY = {
+    "docker_lifecycle": "agents never start, stop, restart, recreate or exec into services or containers; the user owns the local environment",
+    "write_by_readonly_agent": "this agent is read-only and must not write files",
+    "visual_tool": "browser and screenshot tools are used only by ui-verifier, on an explicit request from the user",
+    "git_commit": "commits need the user's explicit authorization in the current conversation, and never carry attribution lines",
+    "git_push": "pushes need the user's explicit authorization in the current conversation",
+    "out_of_scope_write": "this path is outside the task's allowed_paths and its approved scope",
+    "suite_by_non_runner": "whole suites run only through test-runner; run only the tests of the files you touched",
+    "md_outside_docs": "notes, summaries and other .md files outside docs/ are not created; documentation needs go to needs_docs",
+    "docs_write_by_implementer": "documentation files are written only by docs-writer; list the need in needs_docs",
+    "backlog_write_by_other": "docs/backlog/ is written only by backlog-keeper; report it in out_of_scope_issues",
+    "docker_build": "images are built only when the task changes a Dockerfile or its build context",
+    "external_request": "requests go only to local hosts (localhost, 127.0.0.1, compose service names)",
+}
+
+
+def what_to_do(actor: str, category: str) -> str:
+    if category == "docker_lifecycle":
+        return "Put the command in manual_checks for the user instead."
+    if category == "visual_tool":
+        return "List the states to check in manual_checks; the user can ask for a ui-verifier check."
+    if actor == "main":
+        return "Explain to the user why this is needed and ask for authorization before trying again."
+    return (
+        "Do not retry this action or a variation of it. If the task really needs it, stop here and finish "
+        "with result: blocked and a scope_requests entry saying why; the caller will ask the user."
+    )
+
+
+def decide(record: dict, config: dict) -> dict | None:
+    """Return the PreToolUse hook output for the strictest flagged category, or None to allow silently."""
+    actions = config.get("categories") or {}
+    worst, worst_cat = "audit", None
+    for flag in record.get("flags") or []:
+        action = actions.get(flag, "audit")
+        if SEVERITY.get(action, 0) > SEVERITY[worst]:
+            worst, worst_cat = action, flag
+    if worst_cat is None:
+        return None
+    record["decision"], record["decision_category"] = worst, worst_cat
+    actor = record.get("actor", "main")
+    reason = f"Agent workflow ({worst_cat}): {WHY.get(worst_cat, worst_cat)}."
+    out: dict = {"hookEventName": "PreToolUse"}
+    if worst == "block":
+        out["permissionDecision"] = "deny"
+        out["permissionDecisionReason"] = f"{reason} {what_to_do(actor, worst_cat)}"
+    elif worst == "ask":
+        out["permissionDecision"] = "ask"
+        out["permissionDecisionReason"] = reason
+    else:  # warn: allow, remind the agent
+        out["additionalContext"] = (
+            f"Reminder from the agent workflow ({worst_cat}): {WHY.get(worst_cat, worst_cat)}. "
+            "This action was allowed but recorded as a deviation; follow the scope-request protocol "
+            "instead of repeating it."
+        )
+    return {"hookSpecificOutput": out}
+
+
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
     except Exception:
         return
     config = load_config()
-    if config.get("mode", "audit") == "off":
+    mode = config.get("mode", "audit")
+    if mode == "off":
         return
 
     event = payload.get("hook_event_name", "")
+    if event == "PreToolUse" and mode != "enforce":
+        return
     actor = payload.get("agent_type") or ("subagent" if payload.get("agent_id") else "main")
     record: dict = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -303,7 +373,8 @@ def main() -> None:
         tool = payload.get("tool_name", "")
         tinput = payload.get("tool_input") or {}
         record["tool"] = tool
-        record["failed"] = event == "PostToolUseFailure"
+        if event != "PreToolUse":
+            record["failed"] = event == "PostToolUseFailure"
         flags: list[str] = []
         if tool == "Bash":
             cmd = tinput.get("command", "")
@@ -323,6 +394,14 @@ def main() -> None:
         else:
             return  # reads, searches and other tools are not audited
         record["flags"] = sorted(set(flags))
+
+    if event == "PreToolUse":
+        decision = decide(record, config)
+        if decision is None:
+            return  # allowed silently; PostToolUse records the action itself
+        print(json.dumps(decision))
+        if record.get("decision") == "warn":
+            return  # the action still runs and PostToolUse records it with its flags
 
     if "in_run" not in record:  # tag commands and lifecycle events with the active /implement run
         root = git_root(Path(payload.get("cwd") or "."))

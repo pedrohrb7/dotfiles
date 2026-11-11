@@ -84,6 +84,14 @@
     "defaultMode": "auto"
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*(creenshot|rowser|laywright|hrome|omputer|imulator|mulator|napshot)",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "timeout": 10 }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",

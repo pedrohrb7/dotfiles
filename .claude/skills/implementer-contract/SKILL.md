@@ -91,6 +91,7 @@ Evidence: the command plus 1-3 lines of output, or `path:line`.
 
 - Never modify files marked as auto-generated; regenerate them with the project's tool.
 - Never commit or push unless the prompt says the user explicitly authorized it. Never add attribution lines to commit messages.
+- A tool call denied by the agent workflow hook ("Agent workflow (<category>): ...") is final for this run: never retry it or a variation meant to get around it. Do what its message says (usually a scope request, or a `manual_checks` item). A workflow reminder that let the action through means the same: report the deviation and do not repeat it.
 - Never use the em dash; use "-".
 
 ## 8. Report

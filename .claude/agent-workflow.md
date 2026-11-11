@@ -1123,3 +1123,31 @@ Nenhuma. O documento está fechado para a etapa A.
 **Pendências:**
 - Cenários 8, 31 e 36 da seção 14.3 (fix-bug, tdd e implement --tdd) na sessão de validação, num projeto com runner de testes.
 - Etapa G (bloqueio por categoria) depende dos dados do hook em uso real.
+
+### Etapa G - 2026-11-10 (concluída; promoção de categorias pendente da rodada de testes)
+
+**Decisão (conversa de 2026-11-10):** implementar a G antes da validação, dividindo por categoria: bloqueio só onde alarme falso é improvável por definição; o resto em aviso até os dados da rodada de testes.
+
+**Arquivos (em `~/dotfiles/.claude/`):**
+
+| Arquivo | Mudança |
+|---|---|
+| `hooks/agent-audit.py` | fase `PreToolUse` (síncrona) que decide pela categoria mais grave sinalizada: `block` (nega com o motivo e o que fazer: pedido de escopo no subagent, perguntar ao usuário na sessão principal, `manual_checks` para Docker), `ask` (o Claude Code pergunta ao usuário), `warn` (deixa passar e injeta um lembrete no contexto do agent), `audit` (só registra). Registra blocks e asks. Fail-open em qualquer erro. Modo `audit` desliga as decisões |
+| `hooks/agent-audit.json` | modo `enforce` e a ação por categoria: `block` para `docker_lifecycle`, `write_by_readonly_agent` e `visual_tool`; `ask` para `git_commit` e `git_push`; `warn` para `out_of_scope_write`, `suite_by_non_runner`, `md_outside_docs`, `docs_write_by_implementer`, `backlog_write_by_other` e `external_request`; `audit` para `docker_build` |
+| `hooks/agent-metrics.py` | seção "Enforcement decisions" por decisão e categoria, com a regra de promoção (sem falso positivo -> `block`) |
+| `settings.json` | `PreToolUse` para Bash, escritas e só as ferramentas MCP de browser e screenshot (para não pagar a latência em toda chamada MCP) |
+| `skills/implementer-contract/SKILL.md`, `CLAUDE.md` (global) | chamada negada pelo hook nunca é repetida nem contornada; seguir a mensagem; commit e push passam por confirmação mesmo depois de autorizados |
+| `README.md` | gravação x enforcement, política atual e a lacuna das regras de permissão agora coberta |
+
+**Validação feita nesta sessão:**
+- 10 casos pelo stdin: Docker `-f`/`rtk` de agent e da sessão principal bloqueados; `git commit` vira confirmação; escrita do `ui-verifier` bloqueada; screenshot de implementer bloqueado e do `ui-verifier` liberado; escrita fora do escopo com aviso; escrita no escopo, teste específico e entrada inválida passam em silêncio; modo `audit` silencioso.
+- Latência da fase síncrona: cerca de 50 ms por chamada (Bash, escrita com run ativo, MCP).
+- Ao vivo: `docker compose -f /nonexistent-compose-file.yml restart none`, que as regras de permissão não pegam, foi negado pelo hook com a mensagem esperada, e a decisão apareceu no relatório.
+
+**Decisões tomadas durante a execução:**
+- Commit e push ficaram em `ask`, e não em `block`: o hook não sabe se o usuário autorizou na conversa, então quem decide é o prompt do Claude Code. Na prática, uma confirmação dupla.
+- `warn` usa `additionalContext` no `PreToolUse` para lembrar o agent; a ação continua e o `PostToolUse` a registra com os sinais.
+
+**Pendências:**
+- Rodada de testes (sessão de validação): cenários da seção 14.3 e o relatório `agent-metrics.py`. Com ele, promover a `block` as categorias em `warn` sem falso positivo (candidatas: `md_outside_docs`, `docs_write_by_implementer`, `backlog_write_by_other`).
+- Confirmar no uso real que o lembrete de `warn` (`additionalContext` no `PreToolUse`) chega ao contexto do agent.
