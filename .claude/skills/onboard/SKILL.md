@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Build a structural and design-pattern understanding of an existing, already-running project - one doc per service (backend/frontend/mobile) plus root CLAUDE.md pointers. Use when starting on an unfamiliar existing codebase, or the user says "understand this project", "onboard me", or "map this codebase".
+description: Build a structural and design-pattern understanding of an existing, already-running project - one doc per service (backend/frontend/mobile) plus root CLAUDE.md pointers and the agent contract sections (Local runtime, Test suites, Workflow). Use when starting on an unfamiliar existing codebase, or the user says "understand this project", "onboard me", or "map this codebase".
 ---
 
 # Onboard
@@ -19,4 +19,8 @@ This documents current reality - it does not change any code.
    - Recommendations: if a matching stack template exists at `~/.claude/templates/<stack>/STRUCTURE.md`, compare against it and note what's already solid vs. what's worth realigning, in priority order - a starting point for a conversation, not a mandate to refactor.
 5. Write findings into the corresponding root file - `BACKEND.md`, `FRONTEND.md`, `MOBILE.md` - copying the matching skeleton from `~/.claude/templates/onboarding/` and filling it in, in the language settled in step 3. Only create files for the services chosen in step 2.
 6. Check whether a root `CLAUDE.md` already exists. If it does, add or update a section pointing to the generated docs (and the "Documentation language" section, if step 3 had to ask) without touching unrelated content. If it doesn't, create one with a short project overview learned during exploration plus those pointers.
-7. If something couldn't be determined from the code alone (intent behind an odd pattern, a migration in progress, a known workaround), record it under that doc's "Open questions" instead of guessing.
+7. Add the agent contract sections to the root `CLAUDE.md`, in the shape of `~/.claude/templates/project-root/CLAUDE.md`, only where they are missing. Derive each one from the repo, show the proposed content to the user and write it only after they confirm:
+   - **`## Local runtime`**: the mode (`compose` if there is a compose file, `docker` if the services run from Dockerfiles without compose, `cli` otherwise); per service, the health path (from the compose healthcheck or the routes) and `reload: auto` only when the running service sees code changes (bind mount plus a watch/hot-reload command), `manual` otherwise; the `auth` line only if a seed/dev user is documented. In `cli` mode, also each service's URL and, if one exists, its log file. Never start or restart anything to find out; read the compose file, Dockerfiles and scripts.
+   - **`## Test suites`**: one row per real suite, from the CI workflows first and the package scripts or build files second, with its type and a gate (`task` for lint, typecheck, unit and fast integration; `full` for e2e; `on-demand` for load, perf or anything slow).
+   - **`## Workflow`**: the docs layout, detected as the `project-docs` skill describes. Do not migrate a legacy `docs/` here; just record what exists.
+8. If something couldn't be determined from the code alone (intent behind an odd pattern, a migration in progress, a known workaround), record it under that doc's "Open questions" instead of guessing.

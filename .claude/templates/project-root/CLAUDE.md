@@ -1,6 +1,6 @@
 # CLAUDE.md - <project name>
 
-<!-- Project-wide agent instructions: conventions shared by every service. Service-specific conventions (stack idioms, gotchas) belong in that service's own services/<name>/CLAUDE.md instead - don't duplicate them here, and don't repeat anything already covered by the global ~/.claude/CLAUDE.md. -->
+<!-- Project-wide agent instructions: conventions shared by every service. Service-specific conventions (stack idioms, gotchas) belong in that service's own services/<name>/CLAUDE.md instead - don't duplicate them here, and don't repeat anything already covered by the global ~/.claude/CLAUDE.md. The `Local runtime`, `Test suites` and `Workflow` sections are read by agents: keep their shape. -->
 
 ## Overview
 
@@ -14,9 +14,9 @@ See `PRD.md` for the full product context.
 |---|---|---|---|
 | | | `services/<name>/` | `services/<name>/CLAUDE.md` |
 
-## Running locally
+## Local runtime
 
-From the repo root:
+To run everything, from the repo root:
 
 ```
 cp .env.example .env
@@ -25,17 +25,36 @@ docker compose up --build
 
 <!-- Add anything beyond that: seed data, first-run migrations. Each service can also run on its own - see its README.md. -->
 
+<!-- Agents read the list below to validate changes against the instance you run. They never start, stop, restart or build anything here: they send one request and read that request's log lines. In `compose` mode, service names, state and ports come from `docker compose ps`, so list only what cannot be inferred.
+  - mode: `compose` (default), `docker` (containers started with docker run: list each container name) or `cli` (processes in a terminal: give url, health and an optional log file per service).
+  - reload: `auto` only when the running service picks up code changes by itself (bind mount + watch/hot reload). Without it, agents treat the instance as stale and ask you to restart it.
+  - auth: how to get a dev token with a seed user. Never a real credential. -->
+
+- mode: compose
+- <service>: health `<path>` | reload: <auto | manual>
+- auth: <e.g. POST /auth/login with seed user `dev@local` (password in `.env` -> DEV_PASSWORD)>
+
+## Test suites
+
+<!-- Read by test-runner, the only agent that runs whole suites. Gate: `task` = runs in the gate of every task that touches the service; `full` = runs once, in the final gate of a run; `on-demand` = only when asked, or when a spec's Verification names it (load, long e2e). Type: unit, integration, e2e, contract, load, static (lint/typecheck). -->
+
+| Suite | Service | Type | Command | Gate |
+|---|---|---|---|---|
+| | | | | |
+
 ## CI
 
 One GitHub Actions workflow per service in `.github/workflows/<service>.yml`, triggered only by changes under `services/<service>/`. Each runs lint, typecheck and tests, the production build, and the Docker image build. Pushes to `main` also publish the image to GHCR. Actions are pinned by commit SHA and updated by Dependabot; never replace a SHA with a tag. See `DEPLOY.md`.
 
-## Docs
+## Workflow
 
-`docs/` follows the project-docs structure: `plans/` (product side, business rules) and `specs/` (technical side, implementation order), written with `@planner` and executed with `/implement`. Bugs and refactors go to `docs/backlog/`.
+- docs layout: features
+
+`docs/` follows the project-docs structure. Each feature has a folder `docs/features/<slug>/` with `plan.md` (product side, business rules), `spec.md` (technical side, structured tasks) and `log.md` (implementation log, written by `/implement`). Plans and specs are written with `@planner` and executed with `/implement`. Bugs and refactors go to `docs/backlog/`.
 
 ## Documentation language
 
-<!-- Applies to prose in this file and every other project doc (PRD.md, TASKS.md, OPEN_QUESTIONS.md, CONSTRAINTS.md, DEPLOY.md, DESIGN_SYSTEM.md, docs/, and each service's own README.md/CLAUDE.md). Code - identifiers, comments, commit messages - is always English regardless of this setting. -->
+<!-- Applies to prose in this file and every other project doc (PRD.md, OPEN_QUESTIONS.md, CONSTRAINTS.md, DEPLOY.md, DESIGN_SYSTEM.md, docs/, and each service's own README.md/CLAUDE.md). Code - identifiers, comments, commit messages - is always English regardless of this setting. -->
 
 - Docs: <English | Portuguese>
 
@@ -45,12 +64,6 @@ One GitHub Actions workflow per service in `.github/workflows/<service>.yml`, tr
 
 -
 
-## Testing
-
-<!-- How tests are run across the whole project, if there's a project-wide entrypoint (e.g. a root script that runs every service's suite). Per-service test commands live in that service's own README.md. -->
-
--
-
 ## Reference
 
-`PRD.md` - what and why · `CONSTRAINTS.md` - hard limits · `DESIGN_SYSTEM.md` - UI tokens/conventions · `TASKS.md` - current work · `OPEN_QUESTIONS.md` - unresolved decisions · `DEPLOY.md` - how this ships
+`PRD.md` - what and why · `CONSTRAINTS.md` - hard limits · `DESIGN_SYSTEM.md` - UI tokens/conventions · `OPEN_QUESTIONS.md` - unresolved project-level decisions · `DEPLOY.md` - how this ships · `docs/features/README.md` - features and their status

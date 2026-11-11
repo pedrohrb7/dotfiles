@@ -36,10 +36,11 @@ Stack to template: `nestjs` -> `node-nestjs-api`, `express-prisma` -> `node-expr
 
 From `~/.claude/templates/project-root/`:
 
-1. **Root docs.** Copy `CLAUDE.md`, `PRD.md`, `CONSTRAINTS.md`, `OPEN_QUESTIONS.md`, `TASKS.md`, `DEPLOY.md` and `DESIGN_SYSTEM.md` as-is. They are filled-in skeletons, not stubs to rewrite.
+1. **Root docs.** Copy `CLAUDE.md`, `PRD.md`, `CONSTRAINTS.md`, `OPEN_QUESTIONS.md`, `DEPLOY.md` and `DESIGN_SYSTEM.md` as-is. They are filled-in skeletons, not stubs to rewrite.
    - Record the docs language in `CLAUDE.md`'s "Documentation language" section, and write all prose in it.
-   - Fill the `CLAUDE.md` Services table.
-   - Fill `PRD.md`, `CONSTRAINTS.md` and `OPEN_QUESTIONS.md` from what the user described, and seed `TASKS.md`'s "Up next" with the first concrete steps.
+   - Fill the `CLAUDE.md` Services table. Keep `- docs layout: features` in its `Workflow` section.
+   - Fill `CLAUDE.md`'s `Local runtime` and `Test suites` sections after the services exist (step 5), as described in step 7.
+   - Fill `PRD.md` and `CONSTRAINTS.md` from what the user described. `OPEN_QUESTIONS.md` gets only project-level open decisions (architecture, product direction); feature questions wait for that feature's plan.
    - In `DEPLOY.md`, fill the CI table and one subsection per service; keep only the rows for the CI level chosen.
    - Leave the `DESIGN_SYSTEM.md` tables blank for the `design-system` skill. Drop it if there is no UI service.
 2. **`docker-compose.yml`.**
@@ -93,7 +94,14 @@ From `~/.claude/templates/ci/` (read its `README.md` first):
 6. **Dependabot.** Copy `dependabot.yml` and add one block per service (ecosystem plus `/services/<folder>`). Add a `docker` block per containerized service. Delete the commented examples.
 7. **Pins.** Never change a pinned SHA to a tag. If you add an action, pin it by SHA as the CI README explains.
 
-## 7. Finish
+## 7. Agent contract sections
+
+Fill the two sections of the root `CLAUDE.md` that agents read, from what steps 3 and 5 actually created:
+
+- **`Local runtime`**: `mode: compose`. One line per containerized service: its health path (the health endpoint created in step 5) and `reload: auto` only when its compose block bind-mounts the source and runs a watch/hot-reload command (the Node services); every other service gets `reload: manual`, because the running container does not see code changes. Add the `auth` line only if a service has authentication with a seed user; never put a real credential there. Mobile apps are not listed.
+- **`Test suites`**: one row per suite that really exists after step 5 (the lint/typecheck command as type `static` and the example test as `unit`, both with gate `task`; e2e or load suites only if they were created, with gate `full` or `on-demand`). Use the exact commands the CI workflows run.
+
+## 8. Finish
 
 - Do not run `git init`, install dependencies, generate lockfiles or commit. List those as next steps, in order:
   1. `git init`;

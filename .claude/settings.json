@@ -77,6 +77,10 @@
       "Bash(docker kill *)",
       "Bash(docker exec *)"
     ],
+    "ask": [
+      "Edit(~/.claude/settings*.json)",
+      "Edit(~/dotfiles/.claude/settings*.json)"
+    ],
     "defaultMode": "auto"
   },
   "skillOverrides": {

@@ -285,9 +285,9 @@ Regras:
 
 | Artefato | `features` | `legacy` |
 |---|---|---|
-| plan | `features/<slug>/plan.md` | `plans/<YYYY-MM-DD>-<slug>.md` |
-| spec | `features/<slug>/spec.md` | `specs/<YYYY-MM-DD>-<slug>.md` |
-| log | `features/<slug>/log.md` | `specs/<YYYY-MM-DD>-<slug>.log.md` |
+| plan | `features/<slug>/plan.md` | `plans/<YYYY-MM-DD>-<slug>-plan.md` |
+| spec | `features/<slug>/spec.md` | `specs/<YYYY-MM-DD>-<slug>-design.md` |
+| log | `features/<slug>/log.md` | `specs/<YYYY-MM-DD>-<slug>-design.log.md` |
 | Index | `features/README.md` | `plans/README.md` + `specs/README.md` |
 | templates | `features/_template/` | `plans/TEMPLATE.md`, `specs/TEMPLATE.md` |
 | entrada do contrato (5.1) | `feature: docs/features/<slug>/` | `spec: docs/specs/<arquivo>.md` |
@@ -963,3 +963,40 @@ Nenhuma. O documento está fechado para a etapa A.
 - As regras de permissão casam por prefixo; formas como `docker compose -f x.yml up` ou com prefixo `rtk` não são pegas. A garantia mecânica fica para o hook (etapas D e G).
 - Mudanças em agents e skills valem a partir de uma sessão nova do Claude Code.
 - Validação em uso real: cenários 1-10, 13 e 16-19 da seção 14.3, na etapa D.
+
+### Etapa B - 2026-11-10 (concluída)
+
+**Arquivos (em `~/dotfiles/.claude/`):**
+
+| Arquivo | Mudança |
+|---|---|
+| `templates/docs-structure/features/README.md` | **novo**: Index único (feature, status do plan, status da spec, atualização) e regras de dono de cada arquivo |
+| `templates/docs-structure/features/_template/plan.md` | movido de `plans/TEMPLATE.md`; aponta para `spec.md` |
+| `templates/docs-structure/features/_template/spec.md` | movido de `specs/TEMPLATE.md`; tasks estruturadas (Stack, Files, Depends on, Done when, Status); links para plan e log; Testing e Verification referenciam suites pelo nome |
+| `templates/docs-structure/features/_template/log.md` | **novo**: log de implementação, escrito só pelo `/implement` |
+| `templates/docs-structure/plans/`, `specs/` | **removidos** (projetos legados continuam com as cópias locais) |
+| `templates/docs-structure/backlog/bugs/TEMPLATE.md` | campos `Source`, `Related` e seção `Evidence` |
+| `templates/docs-structure/backlog/refactor/README.md`, `concepts/README.md` | referências para `features/` |
+| `templates/docs-structure/requests/README.md` | `.http` preferido; usado pelos agents na validação em runtime; sem credenciais reais |
+| `templates/project-root/CLAUDE.md` | seções `Local runtime` (substitui `Running locally`), `Test suites` (substitui `Testing`) e `Workflow` (substitui `Docs`, com `docs layout: features`); `TASKS.md` removido das referências |
+| `templates/project-root/TASKS.md` | **removido** (D15) |
+| `templates/project-root/OPEN_QUESTIONS.md` | só perguntas de nível de projeto (D16) |
+| `templates/project-root/PRD.md`, `STRUCTURE.md` | `docs/features/`; sem `TASKS.md`; o root `CLAUDE.md` descrito como contrato com os agents |
+| `templates/project-root/gitignore.template` | `.claude/runs/` |
+| `skills/project-docs/SKILL.md` | reescrita: única fonte do layout (detecção, oferta única de migração, mapa de caminhos), modos `scaffold`, `resolve`, `add entry` e `migrate` |
+| `skills/new-project/SKILL.md` | não copia `TASKS.md`; novo passo 7 preenche `Local runtime` (reload `auto` só com bind mount + watch) e `Test suites` |
+| `skills/onboard/SKILL.md` | novo passo 7 gera `Local runtime`, `Test suites` e `Workflow` a partir do repo, com confirmação do usuário |
+| `agents/planner.md` | **ponte até a etapa C**: caminhos via `project-docs`, oferta única de migração, tasks estruturadas sempre, Verification por nome de suite |
+| `skills/implement/SKILL.md` | **ponte até a etapa C**: caminhos via `project-docs`, `allowed_paths` a partir de `Files`, `Status: done`, escreve `log.md`, status `In progress` |
+| `README.md` | templates como contrato; workflow com `docs/features/`; regra `ask` dos settings |
+| `settings.json` | regra `ask` para `settings*.json` (alerta de segurança: um agent poderia reescrever as próprias permissões) |
+
+**Decisões tomadas durante a execução:**
+- Nomes legados corrigidos no mapa (6.1.1): `-plan.md` e `-design.md`, como o `project-docs` já usava; o log legado fica em `<spec>-design.log.md`.
+- O `implement` passou a escrever o `log.md` já na etapa B, porque o template de spec aponta para ele; a etapa C mantém o estado do run (`.claude/runs/`), a auto-invocação, o `specker` e o `backlog-keeper`.
+- O `planner` ganhou permissão de escrever só a linha `docs layout` do `CLAUDE.md` do projeto, necessária para registrar a recusa da migração.
+- `migrate` usa `mv`, não `git mv`, para não mexer no index do git do usuário.
+
+**Pendências conhecidas:**
+- `planner` ainda escreve plan e spec; a separação para o `specker` é da etapa C.
+- Os `CLAUDE.md` de serviço dos templates de stack (`node-ts-react`, `react-native`) mantêm a seção `Testing` própria do serviço; a tabela `Test suites` do root é a fonte do gate.

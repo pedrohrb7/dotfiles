@@ -1,6 +1,6 @@
 # Open Questions - <project name>
 
-<!-- One entry per unresolved decision that affects scope, design, or implementation. Not a scratchpad for every passing thought - if it doesn't block or shape real work, it doesn't belong here. Once resolved, move the entry down to Resolved rather than deleting it, so the reasoning stays discoverable. -->
+<!-- One entry per unresolved project-level decision: architecture, product direction, anything that shapes more than one feature. A question about a single feature belongs in that feature's plan or spec ("Open questions"), not here. Not a scratchpad for every passing thought - if it doesn't block or shape real work, it doesn't belong here. Once resolved, move the entry down to Resolved rather than deleting it, so the reasoning stays discoverable. -->
 
 ## Open
 

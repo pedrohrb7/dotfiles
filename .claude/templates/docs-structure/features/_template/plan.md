@@ -2,7 +2,7 @@
 
 - **Date:** <YYYY-MM-DD>
 - **Status:** Draft
-- **Related spec:** <link, if any>
+- **Spec:** [spec.md](spec.md) <!-- once written -->
 
 ## Goal
 

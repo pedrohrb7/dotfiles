@@ -13,6 +13,8 @@ Thumbs.db
 !.vscode/extensions.json
 !.vscode/settings.json
 coverage/
+# run state written by /implement (resume, budgets, approved scope); local only
+.claude/runs/
 
 # --- node (NestJS, Express, React, React Native) ---
 node_modules/
