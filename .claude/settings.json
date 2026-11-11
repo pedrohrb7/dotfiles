@@ -83,6 +83,38 @@
     ],
     "defaultMode": "auto"
   },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+        ]
+      }
+    ]
+  },
   "skillOverrides": {
     "archify": "off",
     "codebase-standards": "off",

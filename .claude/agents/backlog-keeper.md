@@ -34,7 +34,7 @@ Follow project-docs add-entry mode: the folder's template, today's date in the f
 
 - **Bug**: fill **Source** (`user report`, or `agent run: <feature>, task <N>, <agent>`), **Evidence** and the steps. A user report's steps are recorded as the user observed them, with `Evidence: reported by the user`; the bug fix flow reproduces it before fixing. An agent issue's evidence is its command and output lines, or `path:line`. Leave **Root cause** and **Fix** as "not diagnosed yet" unless the evidence already shows them.
 - **Refactor**: fill **Scope**, **Motivation** and **Current state** from the evidence; **Proposed change** only if it is clear, otherwise say it needs a spec.
-- **Missing essentials (user report only).** If a bug has no way to reproduce it (no steps, no screen or endpoint, no observed result), write nothing and finish with `result: needs_input` and one single question. The caller asks the user and resumes you. Never ask more than one question per entry, and never ask for what you can find in the code.
+- **Missing essentials (user report only).** A report that says where (a screen, flow or endpoint), what was done (an action or input) and what was observed is enough: write the entry, with the steps as the user described them; details such as other filters or data are for the bug fix flow to find. Only when one of those three is missing, write nothing and finish with `result: needs_input` and one single question asking for exactly that. The caller asks the user and resumes you. Never ask more than one question per entry, and never ask for what you can find in the code.
 
 ## 4. After a user-reported bug
 

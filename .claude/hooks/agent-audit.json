@@ -1,0 +1,5 @@
+{
+  "mode": "audit",
+  "_modes": "audit = record only, never block (stage D). off = record nothing. block = reserved for stage G (per-category blocking with scope requests).",
+  "block_categories": []
+}

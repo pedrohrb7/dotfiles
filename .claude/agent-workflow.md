@@ -1028,3 +1028,33 @@ Nenhuma. O documento está fechado para a etapa A.
 **Pendências conhecidas:**
 - `specker` e `backlog-keeper` só ficam disponíveis numa sessão nova do Claude Code; o teste de fumaça feito nesta sessão falhou por isso ("Agent type 'backlog-keeper' not found"), não por erro de definição.
 - Validação em uso real: cenários 1-3, 6-9, 25-27 e 29-30 da seção 14.3, na etapa D.
+
+### Etapa D - 2026-11-10 (concluída, baseline pendente)
+
+**Arquivos (em `~/dotfiles/.claude/`):**
+
+| Arquivo | Mudança |
+|---|---|
+| `hooks/agent-audit.py` | **novo**: hook de auditoria, assíncrono, nunca bloqueia. Grava um JSONL por sessão em `~/.claude/metrics/`. Classifica comandos Bash (testes narrow/package/full/load, lint, typecheck, docker read/build/lifecycle, git commit/push, requests locais/externas), confere escritas contra `allowed_paths` + `approved_scope` do run ativo, marca cada evento com o run, e sinaliza as violações das seções 13 e 14 |
+| `hooks/agent-audit.json` | modo `audit` (alternativas: `off`; `block` reservado para a etapa G) |
+| `hooks/agent-metrics.py` | **novo**: relatório por sessão, por período ou por run (`--run <slug>`): chamadas e duração por agent, ações por categoria e ator, gates do `test-runner`, escritas fora de escopo e todas as flags com exemplos |
+| `settings.json` | hooks em `PostToolUse` e `PostToolUseFailure` (Bash, Write, Edit, MultiEdit, NotebookEdit, `mcp__.*`), `SubagentStart` e `SubagentStop` |
+| `~/.claude/hooks` | link para `~/dotfiles/.claude/hooks` (criado à mão, como `agents/` e `skills/`) |
+| `agents/backlog-keeper.md` | regra de "falta o essencial" apertada depois do teste de fumaça (ver abaixo) |
+| `README.md` | seção `hooks/` |
+
+**Validação feita nesta sessão:**
+- Classificador: 31 comandos sintéticos (testes por runner e escopo, prefixos `rtk`/`npx`/`pnpm exec`, `docker compose -f x.yml up`, git, curl local e externo), todos corretos.
+- Ponta a ponta pelo stdin, com repo git temporário e run ativo: escrita dentro do escopo, escrita em `approved_scope`, `NOTES.md` fora de `docs/`, implementer editando spec, suite rodada por implementer, `docker compose restart`, ferramenta de screenshot, leitura (ignorada) e entrada inválida (exit 0, nada gravado).
+- Ao vivo nesta sessão: o hook disparou em comandos da sessão principal, em `SubagentStart`/`SubagentStop` e num Bash executado dentro de um subagent, que foi atribuído ao agent certo (o payload traz `agent_type` e `agent_id` também nos eventos de ferramenta de subagents).
+- Teste de fumaça do `backlog-keeper`: cumpriu o contrato (YAML, sem gravar sem `docs/backlog/`), mas pediu um detalhe quando o relato já tinha onde, o que foi feito e o que aconteceu. A regra passou a exigir só esses três elementos.
+
+**Decisões tomadas durante a execução:**
+- Três níveis de teste em vez de dois: `test-narrow` (arquivo ou nome de teste), `test-package` (um serviço, o gate de task) e `test-full` (repo inteiro). Implementer rodando `package` ou `full` gera `suite_by_non_runner`.
+- O classificador normaliza `docker compose -f x.yml up` e o prefixo `rtk`, cobrindo a lacuna das regras de permissão por prefixo (pelo menos na auditoria).
+- Hooks assíncronos: auditoria não adiciona latência às ferramentas.
+- Nada de conteúdo de arquivo ou saída de comando nas métricas: só linha de comando truncada (300 caracteres) e caminhos.
+
+**Pendências:**
+- Baseline: rodar os cenários 1-10 da seção 14.3 num projeto real, na sessão de validação, e guardar o relatório (`agent-metrics.py --run <slug>`).
+- Métricas de tokens por task não vêm do hook (o payload não traz uso de tokens); ficam para o Briareu ou para a leitura do transcript.

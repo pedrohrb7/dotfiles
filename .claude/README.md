@@ -118,6 +118,14 @@ Subagents cannot spawn subagents, so chains like `test-runner` -> `quality-fixer
 
 `settings.json` allows reading and editing `~/.claude` and `~/dotfiles/.claude` without prompts, except the `settings*.json` files themselves, which always ask (an `ask` rule): otherwise an agent could rewrite its own permissions or hooks without the user seeing it. It also allows the read-only Docker commands agents use for runtime validation (`docker compose ps|logs|port|config|images`, `docker ps|logs|inspect|port|images`), and denies the lifecycle and exec commands (`up`, `down`, `start`, `stop`, `restart`, `rm`, `kill`, `pull`, `create`, `run`, `exec`, compose or plain). Image builds are in neither list: agents run them only when the task changes a Dockerfile or its build context. Permission rules match by command prefix, so a form like `docker compose -f other.yml up` is not caught by them; the instructions cover it, and a hook is planned for a mechanical guarantee (`agent-workflow.md`, section 13).
 
+## hooks/
+
+Symlinked as `~/.claude/hooks -> ~/dotfiles/.claude/hooks` (create the link by hand on each machine, like `agents/` and `skills/`).
+
+- `agent-audit.py` - audit hook wired in `settings.json` on `PostToolUse`/`PostToolUseFailure` (Bash, file writes, MCP tools) and `SubagentStart`/`SubagentStop`. It runs async and never blocks: it appends one JSON line per event to `~/.claude/metrics/<session_id>.jsonl` (outside the repo). It classifies Bash commands (narrow/package/full/load tests, lint, typecheck, docker read/build/lifecycle, git commit/push, local/external requests), checks file writes against the active run's `allowed_paths` and `approved_scope` (`.claude/runs/<slug>.json` in the project), and flags what the workflow forbids: writes outside scope, `.md` files outside `docs/`, docs or backlog edited by the wrong agent, suites run by agents other than `test-runner`, docker lifecycle commands, commits and pushes, browser/screenshot tools, external requests. Reads and searches are not recorded; neither are file contents or command output.
+- `agent-audit.json` - its mode: `audit` (now), `off`, or `block` (reserved for stage G: per-category blocking that turns a violation into a scope request).
+- `agent-metrics.py` - the report: `agent-metrics.py` (last session), `--last N`, `--session <id>`, `--since YYYY-MM-DD [--merge]`, `--run <slug>` (one `/implement` run across sessions). It lists agent calls and durations, actions by category and actor, gates run by `test-runner`, writes checked against scope, and every flag with examples.
+
 ## templates/
 
 Reference docs for how a new project should be structured, one per stack, each a `STRUCTURE.md` with the folder tree plus a "why this shape" section explaining the reasoning (so it can be adapted, not followed blindly). Used by the `new-project` skill; also readable directly.
