@@ -20,7 +20,8 @@
   user's steps and their confirmation. This makes sure you find the real problem so your fix will actually solve it.
 - UI code must be pixel-perfect by construction: design tokens, spacing and type scales, every state, themes and
   platform specifics. Visual validation is done by the user on their local run: never open a browser, simulator or
-  emulator, and never take or read screenshots, unless the user explicitly asks. List what the user should check instead.
+  emulator, and never take or read screenshots. List what the user should check instead. When the user explicitly asks
+  for a snapshot or screenshot, delegate it to `ui-verifier`, so the images stay out of the main conversation.
 - Apply that same high standard to engineering excellence: lint, test failures, and test flakiness.
   Fix only the ones caused by the current change or named in the task. Pre-existing ones in code you did not touch
   (and visual defects the user reports) are not fixed; they are logged once, by `backlog-keeper`, the single writer
@@ -28,8 +29,9 @@
   smells as refactors (one entry per root cause, deduplicated against the folder's Index). Every other agent reports
   them in `out_of_scope_issues`, and the main session hands them to `backlog-keeper` in one call.
 - Checks: subagents run only narrow checks (the tests and files they touched). Whole suites run only through `test-runner`.
-- Documentation is updated once, at the end of the work, from the `needs_docs` the agents reported. Subagents never
-  create or edit doc files (README, `docs/`, notes, summaries); they list what needs documenting in their report.
+- Documentation is updated once, at the end of the work, by `docs-writer`, from the `needs_docs` the agents reported.
+  No other agent creates or edits doc files (README, `.env.example`, `docs/`, notes, summaries); they list what needs
+  documenting in their report. Doc comments and API annotations inside the code are part of the code.
 - Ask before acting when: (1) the task is ambiguous, (2) there are multiple reasonable approaches,
   (3) changes span 5+ files, or (4) you would be modifying config, CI, or infrastructure files.
 - Be concise. Prefer direct answers. Do not add code explanation or summaries unless asked.
@@ -51,9 +53,10 @@ first; when it fails, say what is missing instead of proceeding. Plans, specs an
 | "encontrei um bug", "achei um problema em X", "isso está quebrado" | Register -> `backlog-keeper`, then ask "quer corrigir agora?" | none |
 | "só registra esse bug", "anota esse bug" | Register -> `backlog-keeper`, no follow-up question | none |
 | "isso merece um refactor", "registra um refactor" | Register -> `backlog-keeper` | none |
-| "corrige o bug X", "vamos resolver esse bug" | Fix -> reproduce (`bug-repro`), regression test that fails, fix through the stack agent, `test-runner`, review, then `backlog-keeper` updates the entry | the bug is registered; if not, `backlog-keeper` registers it first |
+| "corrige o bug X", "vamos resolver esse bug" | Fix -> reproduce (`bug-repro`), regression test that fails, fix through the stack agent, `test-runner`, review, `docs-writer` if docs changed, then `backlog-keeper` updates the entry | the bug is registered; if not, `backlog-keeper` registers it first |
 | "revisa esse PR", "review" | Review -> `code-reviewer` (+ `security-reviewer` when auth, API, input, secrets or dependencies change) | a PR, branch or diff to review |
-| "documenta", "atualiza as docs" | Document -> the documentation pass from the collected `needs_docs` | none |
+| "documenta", "atualiza as docs" | Document -> `docs-writer`, with the collected `needs_docs` (or the diff) | none |
+| "pode subir um snapshot", "tira um print de X" | Visual check -> `ui-verifier`, text-only report | the app is already running locally; never start it |
 | "pode commitar" | Commit | explicit authorization in the current conversation |
 
 - Never pick between several plans or specs: list them with their status and ask.

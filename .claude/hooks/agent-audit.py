@@ -35,6 +35,12 @@ IMPLEMENTERS = {
     "frontend-react", "mobile-react-native",
 }
 
+# Agents that must never write files.
+READ_ONLY_AGENTS = {"ui-verifier", "test-runner", "code-reviewer", "security-reviewer", "Explore", "Plan"}
+
+# Documentation files outside docs/ that only docs-writer edits.
+DOC_FILES = {"README.md", "CHANGELOG.md", ".env.example", "DEPLOY.md"}
+
 # Paths an implementer may always write, whatever its task's Files say.
 ALWAYS_ALLOWED = [
     "**/package-lock.json", "**/pnpm-lock.yaml", "**/yarn.lock", "**/bun.lockb", "**/bun.lock",
@@ -244,8 +250,10 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response) -> 
     flags = []
     if rel.endswith(".md") and out["area"] != "docs" and (created or tool == "Write") and not rel.endswith(("README.md", "CLAUDE.md", "CHANGELOG.md")):
         flags.append("md_outside_docs")
-    if out["area"] == "docs" and actor in IMPLEMENTERS:
+    if actor in IMPLEMENTERS and (out["area"] == "docs" or Path(rel).name in DOC_FILES):
         flags.append("docs_write_by_implementer")
+    if actor in READ_ONLY_AGENTS:
+        flags.append("write_by_readonly_agent")
     if rel.startswith("docs/backlog/") and actor not in {"backlog-keeper", "unknown"}:
         flags.append("backlog_write_by_other")
 
@@ -311,7 +319,7 @@ def main() -> None:
             flags = record.pop("flags", [])
         elif VISUAL_TOOL.search(tool):
             record["categories"] = ["visual"]
-            flags = ["visual_tool"]
+            flags = [] if actor == "ui-verifier" else ["visual_tool"]
         else:
             return  # reads, searches and other tools are not audited
         record["flags"] = sorted(set(flags))

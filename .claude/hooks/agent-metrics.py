@@ -26,14 +26,15 @@ METRICS_DIR = Path(os.environ.get("AGENT_AUDIT_DIR", str(Path.home() / ".claude"
 FLAG_LABELS = {
     "out_of_scope_write": "writes outside allowed_paths (target 0 without approval)",
     "md_outside_docs": "new .md files outside docs/ (target 0)",
-    "docs_write_by_implementer": "docs edited by implementers (target 0)",
+    "docs_write_by_implementer": "docs (docs/, README, CHANGELOG, .env.example, DEPLOY.md) edited by implementers - docs-writer owns them (target 0)",
+    "write_by_readonly_agent": "files written by a read-only agent: ui-verifier, test-runner, reviewers (target 0)",
     "backlog_write_by_other": "backlog written by someone other than backlog-keeper (target 0)",
     "suite_by_non_runner": "suites run by agents other than test-runner (target 0)",
     "docker_lifecycle": "docker up/down/restart/exec/run (target 0)",
     "docker_build": "docker builds (only when the task changes a Dockerfile)",
     "git_commit": "commits (only with explicit authorization)",
     "git_push": "pushes (only with explicit authorization)",
-    "visual_tool": "browser/screenshot tool calls (target 0 without an explicit request)",
+    "visual_tool": "browser/screenshot tool calls outside ui-verifier (target 0)",
     "external_request": "requests to non-local hosts (target 0)",
 }
 

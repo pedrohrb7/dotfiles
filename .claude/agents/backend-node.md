@@ -60,4 +60,4 @@ Prisma client, OpenAPI clients and other generated code: regenerate, never edit.
 ## 5. Report extras
 
 - `migrations`: say whether each is safe to run on production data.
-- `needs_docs`: OpenAPI/Swagger, `.env.example` for new env vars, `docs/requests/` for new or changed endpoints.
+- `needs_docs`: `.env.example` for new env vars, hand-written OpenAPI files, `docs/requests/` for new or changed endpoints. Swagger decorators are written with the code.

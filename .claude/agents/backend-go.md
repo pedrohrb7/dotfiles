@@ -59,4 +59,4 @@ Follow the preloaded `implementer-contract` for inputs, write scope, scope reque
 ## 5. Report extras
 
 - `env_vars`: new env vars or flags.
-- `needs_docs`: README, godoc on new exported identifiers, API specs, example env, `docs/requests/`.
+- `needs_docs`: README, hand-written API specs, example env, `docs/requests/`. Godoc on new exported identifiers is written with the code.

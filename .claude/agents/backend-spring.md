@@ -62,4 +62,4 @@ Generated sources and OpenAPI clients: regenerate, never edit.
 
 - `migrations`: say whether each is safe to run on production data.
 - `env_vars`: new config properties.
-- `needs_docs`: OpenAPI (springdoc), README, example config for new properties, `docs/requests/`.
+- `needs_docs`: README, example config for new properties, `docs/requests/`. springdoc annotations are written with the code.

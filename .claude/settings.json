@@ -120,7 +120,6 @@
     "codebase-standards": "off",
     "dep-audit": "off",
     "design-system": "off",
-    "docs": "off",
     "grill-me": "off",
     "pr-description": "off",
     "review": "off",

@@ -1058,3 +1058,31 @@ Nenhuma. O documento está fechado para a etapa A.
 **Pendências:**
 - Baseline: rodar os cenários 1-10 da seção 14.3 num projeto real, na sessão de validação, e guardar o relatório (`agent-metrics.py --run <slug>`).
 - Métricas de tokens por task não vêm do hook (o payload não traz uso de tokens); ficam para o Briareu ou para a leitura do transcript.
+
+### Etapa E - 2026-11-10 (concluída)
+
+**Arquivos (em `~/dotfiles/.claude/`):**
+
+| Arquivo | Mudança |
+|---|---|
+| `agents/docs-writer.md` | **novo**: dono único do passe de documentação; roda uma vez no fim, a partir dos `needs_docs`; confere cada item contra o código antes de escrever; cuida da coerência ao redor (env var no `.env.example` e na tabela do README, endpoint na doc de API e em `docs/requests/`, serviço ou suite nas seções do `CLAUDE.md` do projeto); nunca edita código, arquivos gerados, `docs/features/`, `docs/backlog/` nem documentos de produto e design; sonnet, effort médio |
+| `agents/ui-verifier.md` | **novo, opt-in**: só sob pedido explícito de print; usa o app que o usuário já tem rodando (nunca sobe nada); método mais barato primeiro (texto ou árvore de acessibilidade, depois medição de estilos, print por último, um por estado, recortado); imagens fora do repo; report só em texto; somente leitura no projeto |
+| `skills/docs/SKILL.md` | vira o know-how do `docs-writer`; comentários de código ficam com quem escreve o código; idioma vindo do `CLAUDE.md`, ou pergunta via `needs_input` |
+| `settings.json` | skill `docs` reativada (antecipado da etapa F, porque o `docs-writer` a pré-carrega) |
+| `skills/implementer-contract/SKILL.md` | comentários de código e anotações de API são parte do código; prints pedidos explicitamente são delegados ao `ui-verifier` |
+| `agents/backend-*.md` | `needs_docs` sem godoc, rustdoc, docstrings e anotações de OpenAPI (escritos junto com o código) |
+| `skills/implement/SKILL.md` | fase `document`: `docs-writer` uma vez antes do backlog; plan marcado `Implemented` junto com a spec; `ui-verifier` só sob pedido; relatório final lista as docs atualizadas |
+| `CLAUDE.md` (global) | documentação pelo `docs-writer`; prints explícitos pelo `ui-verifier`; linhas novas no Workflow ("documenta", "tira um print") e o `docs-writer` no fluxo de bug |
+| `hooks/agent-audit.py`, `hooks/agent-metrics.py` | novo sinal `write_by_readonly_agent`; `docs_write_by_implementer` cobre README, CHANGELOG, `.env.example` e `DEPLOY.md`; print feito pelo `ui-verifier` não é sinalizado |
+| `README.md` | agents novos, skill `docs`, passo de documentação automático no workflow |
+
+**Decisões tomadas durante a execução:**
+- O `docs-writer` roda dentro do `/implement`, depois do gate final e antes do backlog, em vez de esperar a validação manual. Isso segue a seção 3 (Documentar faz parte do fluxo de feature) e deixa o relatório final completo.
+- O plan passa para `Implemented` junto com a spec, pelo `implement`, que é o dono dos status.
+- O `ui-verifier` não restringe `tools` no frontmatter, porque as ferramentas de browser são MCP com nomes que variam. A regra de somente leitura fica no prompt, e o hook sinaliza qualquer escrita dele (`write_by_readonly_agent`).
+
+**Validação feita nesta sessão:**
+- Hook: escrita de `.env.example` por implementer sinalizada e pelo `docs-writer` não; README pelo `docs-writer` sem sinal; escrita do `ui-verifier` sinalizada; print do `ui-verifier` sem sinal e de um implementer sinalizado; os 31 casos de classificação continuam passando.
+
+**Pendências:**
+- `docs-writer` e `ui-verifier` sem teste de uso real: cenários 1 (fechamento do `/implement`), 11 e 14 da seção 14.3, na sessão de validação. O `ui-verifier` precisa de um app rodando e de uma ferramenta de browser disponível na sessão.

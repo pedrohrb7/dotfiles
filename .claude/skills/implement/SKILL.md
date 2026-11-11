@@ -49,7 +49,7 @@ The run state lives in `.claude/runs/<slug>.json` at the project root (`<slug>` 
   "feature": "docs/features/<slug>/",
   "spec": "<spec path>",
   "log": "<log path>",
-  "phase": "implement | verify | review | done",
+  "phase": "implement | review | verify | document | done",
   "started_at": "<ISO timestamp>",
   "updated_at": "<ISO timestamp>",
   "current_task": 3,
@@ -112,9 +112,10 @@ Show the list to the user in a short table, set the spec to `In progress` when t
 ## 7. Verify and close
 
 1. Set `phase: verify`. Run the final gate once through `test-runner` with scope `full`, plus any suite the spec's **Verification** section names explicitly.
-2. **Manual checks** (UI, flows, restarts, requests that could not run): never run them yourself - no browser, dev server, simulator or screenshots, and no starting or restarting services. Consolidate the agents' `manual_checks` and the spec's manual verification steps into one checklist for the user.
-3. **Backlog.** Send every collected `out_of_scope_issues` to `backlog-keeper` in a single call, in run-batch mode, each with its source (feature, task, agent). Do not write backlog entries yourself.
-4. If every task of the spec is done and verification passes, set the spec to `Implemented` and update the Index. Otherwise leave it `In progress`. Set the run state's `phase: done`.
+2. **Manual checks** (UI, flows, restarts, requests that could not run): never run them yourself - no browser, dev server, simulator or screenshots, and no starting or restarting services. Consolidate the agents' `manual_checks` and the spec's manual verification steps into one checklist for the user. If the user explicitly asks for a visual check, delegate those states to `ui-verifier`.
+3. **Documentation.** Set `phase: document`. Delegate to `docs-writer` once, with the consolidated `needs_docs`, the spec and log paths, and the files changed. It checks each need against the code and writes the doc files; nobody else edits docs. Its `out_of_scope_issues` join the collected ones; a `needs_input` question goes to the user before closing.
+4. **Backlog.** Send every collected `out_of_scope_issues` to `backlog-keeper` in a single call, in run-batch mode, each with its source (feature, task, agent). Do not write backlog entries yourself.
+5. If every task of the spec is done and verification passes, set the spec to `Implemented`, set its plan to `Implemented` too (when there is one), and update the Index. Otherwise leave the spec `In progress`. Set the run state's `phase: done`.
 
 ## 8. Final report to the user
 
@@ -127,5 +128,5 @@ Keep it short:
 - scope requests approved or denied;
 - assumptions the agents made that the user should confirm;
 - backlog entries created or updated (paths, from `backlog-keeper`);
-- **Para validar localmente**: the consolidated manual checklist, as `- [ ]` items;
-- **Documentation pass**: the consolidated `needs_docs`, plus plan status, README and `docs/` coherence. Run it after the user confirms the manual checks; no agent edited docs during the run.
+- documentation updated (paths, from `docs-writer`) and the needs it skipped, with the reason;
+- **Para validar localmente**: the consolidated manual checklist, as `- [ ]` items.

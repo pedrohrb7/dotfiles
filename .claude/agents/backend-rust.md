@@ -62,4 +62,4 @@ Follow the preloaded `implementer-contract` for inputs, write scope, scope reque
 ## 5. Report extras
 
 - `env_vars`: new env vars, features or flags.
-- `needs_docs`: README, rustdoc on new public items, CHANGELOG, example env, `docs/requests/`.
+- `needs_docs`: README, CHANGELOG, example env, `docs/requests/`. Rustdoc on new public items is written with the code.
