@@ -13,7 +13,8 @@ Confirmed bugs that need fixing, one file per bug.
 
 | Entry | Severity | Status |
 | --- | --- | --- |
-| [agent-audit: parallel tasks' writes flagged out_of_scope_write](2026-11-11-audit-parallel-task-out-of-scope.md) | medium | Open |
-| [agent-audit: heredoc body lines classified as commands (false docker_lifecycle)](2026-11-11-audit-heredoc-docker-lifecycle.md) | medium | Open |
+| [agent-audit: parallel tasks' writes flagged out_of_scope_write](2026-11-11-audit-parallel-task-out-of-scope.md) | medium | Fixed |
+| [agent-audit: heredoc body lines classified as commands (false docker_lifecycle)](2026-11-11-audit-heredoc-docker-lifecycle.md) | medium | Fixed |
 | [Write-capable agents can disable or rewrite the audit hook and agent definitions](2026-11-11-audit-hook-self-protection.md) | medium | Open |
-| [agent-audit: path checks skip targets outside the git root](2026-11-11-audit-path-checks-outside-git-root.md) | low | Open |
+| [agent-audit: path checks skip targets outside the git root](2026-11-11-audit-path-checks-outside-git-root.md) | low | Fixed |
+| [agent-audit: external_request misses bash /dev/tcp egress](2026-11-11-audit-dev-tcp-egress.md) | low | Open |

@@ -54,6 +54,7 @@ The run state lives in `.claude/runs/<slug>.json` at the project root (`<slug>` 
   "started_at": "<ISO timestamp>",
   "updated_at": "<ISO timestamp>",
   "current_task": 3,
+  "running_tasks": [3],
   "tasks": { "1": "done", "2": "done", "3": "in_progress", "4": "pending" },
   "allowed_paths": { "3": ["services/api/src/orders/**"] },
   "approved_scope": [
@@ -90,7 +91,7 @@ Show the list to the user in a short table, set the spec to `In progress` when t
 
    > phase: implement. Implement task N of `<spec path>` (plan: `<plan path>`, implementation log: `<log path>`). Only this task: `<task title>`. Done criteria: `<criteria>`. allowed_paths: `<list>`. Read the implementation log first: it holds the files, decisions and assumptions of earlier tasks. Follow the spec's Design and Testing sections for this task.
 
-   Independent tasks that touch different services may run in parallel, as separate agents in the same message. Run tasks that share files or depend on each other in order.
+   Independent tasks that touch different services may run in parallel, as separate agents in the same message. Before launching a parallel batch, record each task's `allowed_paths` and set `running_tasks` to the batch (the hook accepts a write that matches any running task); keep `current_task` as the first of them. A task leaves `running_tasks` only when you mark it done (after its `quality-fixer`/`test-writer` rounds and any scope-request resume), not when its report arrives; a blocked task stays listed while it waits and after it is resumed. Update `running_tasks` and `current_task` together. A single task sets `running_tasks` to just that task. Run tasks that share files or depend on each other in order.
 
 2. **Scope requests.** If a report ends with `result: blocked` and `scope_requests`, collect the requests of every agent that stopped (parallel ones included) and ask the user once, one `AskUserQuestion` call, each request with its reason. Record each decision in `approved_scope`. Then resume the same agent with `SendMessage`, keeping its context: approved targets join that task's `allowed_paths`; denied ones are stated, so the agent finishes without them (`partial`) or declares a blocker. Exception - the root `DESIGN_SYSTEM.md`: never add it to `allowed_paths`. A request because the file is missing (or its `Principles` are empty) is asked as "create the visual direction with `design-director`?"; on yes, run `design-director` (relay its `needs_input` rounds), then resume the stack agent. A request whose `reason` starts with "extraction of tokens" (the UI service already has tokens in code) is asked as "document the existing tokens in `DESIGN_SYSTEM.md`?"; on yes, write the file yourself following the `design-system` skill (extraction, no agent), then resume the stack agent. A proposed value is asked as that value; on yes, write it yourself following the `design-system` skill, then resume the agent. A no is a denied request. Record the decision in `approved_scope` and the log as usual, but the path never enters `allowed_paths`: the main session is the one that writes `DESIGN_SYSTEM.md`.
 
@@ -100,7 +101,7 @@ Show the list to the user in a short table, set the spec to `In progress` when t
 
 5. **Tests.** If the stack agent's report says the changed behavior has no tests, delegate to `test-writer` for that task's files.
 
-6. **Mark done.** Set the task's `Status: done` (or append ` (done)` to the line of an older free-form list), and `tasks[N] = "done"` in the run state. These and the spec status are the only edits you make to the spec.
+6. **Mark done.** Set the task's `Status: done` (or append ` (done)` to the line of an older free-form list), and `tasks[N] = "done"` in the run state, and remove N from `running_tasks`. These and the spec status are the only edits you make to the spec.
 
 7. **Collect and log.** The agents end with a YAML report. Keep `decisions`, `assumptions`, `migrations`, `env_vars`, `needs_docs`, `manual_checks`, `local_checks` and `out_of_scope_issues` for the final report, and append the task's block to the implementation log (create it from the log template on the first task of the feature; start a new `## Run <date>` section on each run): files, decisions, assumptions, approved scope, migrations/env vars, docs pending. The next task reads it from there.
 
@@ -111,7 +112,7 @@ Show the list to the user in a short table, set the spec to `In progress` when t
 1. Set `phase: review`. Delegate to `code-reviewer` (scope: the working tree, and the spec and log paths).
 2. If any task touched authentication, authorization, API endpoints, user input, uploads, queries, secrets or dependencies, delegate to `security-reviewer` in parallel with the code reviewer.
 3. **Fix the findings.**
-   - Send blocker and major bugs, and critical, high or medium security findings, to the owning stack agent with the exact findings and the task's `allowed_paths`. Then run `test-runner` (scope `task`) again.
+   - Send blocker and major bugs, and critical, high or medium security findings, to the owning stack agent with the exact findings and the task's `allowed_paths`. When the findings go to several tasks' agents, set `running_tasks` to the tasks receiving fixes before sending them, and clear it afterwards. Then run `test-runner` (scope `task`) again.
    - Run `code-reviewer` once more, only if blockers were fixed. Never loop more than once.
    - Minor findings and standards notes: fix them in the same round if they are in this change's code. Otherwise add them to the collected `out_of_scope_issues`.
    - The reviewers' `needs_docs` join the collected `needs_docs`.

@@ -15,3 +15,5 @@ Planned refactors that aren't urgent bugs but are worth doing deliberately, one 
 | [Versioned pytest suite for agent-audit hook](2026-11-11-audit-hook-test-suite.md) | Proposed |
 | [md_outside_docs false positive on main-session root .md files](2026-11-11-audit-md-outside-docs-false-positive.md) | Proposed |
 | [Align project-docs and implement skills with configurable docs root](2026-11-11-skills-configurable-docs-root.md) | Proposed |
+| [agent-audit: nested repo cwd does not consult the parent repo's run](2026-11-11-audit-nested-repo-run-lookup.md) | Proposed |
+| [agent-audit: scratch exemption accepts any /tmp/claude-* dir](2026-11-11-audit-scratch-exemption-too-broad.md) | Proposed |

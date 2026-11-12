@@ -309,6 +309,8 @@ Regras:
 {
   "feature": "docs/features/orders-export/",
   "phase": "verify",
+  "current_task": 3,
+  "running_tasks": [3],
   "allowed_paths": {
     "3": ["services/api/src/orders/**", "services/api/test/orders/**"]
   },
@@ -331,9 +333,11 @@ Para que serve:
 
 - **retomar** um run interrompido sem refazer tasks;
 - **controlar orçamento** (rodadas de fix e de review, gates completos);
-- **alimentar o hook** (seção 13), que lê `allowed_paths` e `approved_scope` daqui;
+- **alimentar o hook** (seção 13), que lê `allowed_paths`, `approved_scope`, `current_task` e `running_tasks` daqui;
 - **auditar** cada autorização de escopo dada pelo usuário;
 - **observar**: o Briareu, ao usar a config, pode ler o mesmo arquivo, mas a config não depende disso.
+
+`running_tasks` lista as tasks com agents rodando agora: o `implement` a define antes de um lote paralelo, remove a task quando a marca como `done` (uma task bloqueada continua listada) e, na rodada de correção do review, a define com as tasks que recebem correções. `current_task` continua sendo a primeira do lote. O `fix-bug` não usa `running_tasks`: os runs de bug são sequenciais e ficam só com `current_task` escalar.
 
 > 💬
 
@@ -715,7 +719,7 @@ Sem a flag, nada muda: o stack agent escreve código e testes da task, como na s
 - Um script único, chamado em `PreToolUse` (`Write|Edit|Bash`) e `PostToolUse`.
 - **Sem run ativo** (`.claude/runs/*.json` com `phase` diferente de `done`), o hook é um **no-op**. Trabalho ad hoc na conversa nunca é afetado.
 - **Com run ativo**, ele compara:
-  - caminho escrito x `allowed_paths` da task atual + `approved_scope` + uma lista sempre permitida (lockfiles, diretórios de migration, snapshots de teste, arquivos gerados por ferramenta);
+  - caminho escrito x `allowed_paths` de qualquer task em execução (`running_tasks`, mais a `current_task`) + `approved_scope` aprovado dessas tasks + uma lista sempre permitida (lockfiles, diretórios de migration, snapshots de teste, arquivos gerados por ferramenta);
   - comando Bash x mapa de comandos Docker (10.6) e regras de commit (4.1).
 
 ### 13.2 Modos
@@ -778,7 +782,38 @@ Alvos de `approved_scope` que casam com a regra são descartados dos caminhos pe
 - Efeito: `.md` dentro de uma raiz não gera `md_outside_docs`, e `<raiz>backlog/` só é escrito pelo `backlog-keeper` (`backlog_write_by_other`), checado por raiz. A comparação é por prefixo: `services/x/docs/` não é raiz.
 - `project-docs` e `/implement` ainda resolvem `docs/` na raiz do repositório; aqui o caminho da feature é passado explicitamente.
 
+### 13.6 Heredoc no Bash: corpo é dado só para sinks conhecidos
+
+O classificador do `hooks/agent-audit.py` (`strip_heredoc_bodies`) separa o comando em segmentos. Sem tratar heredoc, cada linha do corpo viraria um "comando" (um `docker compose up` dentro de um `git commit -F - <<EOF` seria `docker_lifecycle`). Mas o contrário é pior: tirar o corpo de um `bash <<EOF` esconderia código de verdade. Por isso a regra é **fail-closed**: o corpo só é removido (tratado como dado) para uma lista fechada de sinks; qualquer outro heredoc mantém o corpo, que é classificado como comandos (só a linha do terminador sai).
+
+**Sinks de dados (corpo removido):**
+
+| Sink | Condição |
+|---|---|
+| `cat` ou `tee` no nível raiz | sem pipe, sem `<(`/`>(` e sem `$(` na linha do abridor |
+| `git commit -F -` / `--file -` | sem `-c alias.*` nem `-c core.*` (executam código) |
+| `$(cat <<EOF ...)` como valor de `git commit -m` / `--message` | mesma restrição de `-c` |
+| `gh pr\|issue\|release create\|edit\|comment\|review` com `--body-file -` / `-F -` | |
+| `$(cat <<EOF ...)` como valor de `--body` / `-b` / `--title` / `-t` desses comandos `gh` | |
+
+Todo o resto (`bash`, `sh`, `python3`, `... | bash`, `eval`, `xargs`, `cat <<EOF | sh` etc.) tem o corpo classificado.
+
+**Marcadores de falha segura:** se o comando contém qualquer construção que o scanner não modela, **nada** é removido e o comando inteiro é classificado: `${`, `$'`, `$[`, crase, `\r`, `>(`, `<(`, `mkfifo`, `coproc`, redirecionamento de `exec`, definição de função `cat`/`tee`, redirecionamento para fd >= 3, e quebra de linha dentro de aspas enquanto há heredoc pendente. Um erro do scanner também devolve o comando original.
+
+**Limite declarado:** um script gravado em arquivo por heredoc e executado depois (`cat > x.sh <<EOF ...; bash x.sh`) está fora do alcance do classificador: o corpo é dado no `cat`, e o `bash x.sh` não mostra o conteúdo. É o mesmo limite de `Write` seguido de execução.
+
+**Testes:** `hooks/tests/` (`unittest` da biblioteca padrão), rodado com `cd ~/dotfiles/.claude/hooks && python3 -m unittest discover -s tests -t .`.
+
 > 💬
+
+### 13.7 Escritas fora da raiz git
+
+A raiz que governa uma escrita é a raiz git do `cwd` da sessão (onde mora o run); sem ela, a raiz do próprio alvo. Se o alvo está em outro repositório aninhado nessa raiz (submódulo), as duas raízes julgam e as flags são unidas (vale a mais estrita). O alvo tem `~` expandido e é resolvido; com `..` no caminho, a forma resolvida e a léxica são julgadas.
+
+- **Registro:** um alvo fora de toda raiz grava `area: "outside"` e `rel` igual ao caminho absoluto.
+- **Flags de ator** (`write_by_readonly_agent`, `design_director_write_outside`, `design_system_write_by_other`, esta pelo nome bruto ou resolvido) valem para qualquer caminho. **Flags de área** (`md_outside_docs`, `docs_write_by_implementer`, `backlog_write_by_other`) só valem dentro de um repositório.
+- **`out_of_scope_write` fora do repositório:** um ator de escopo fixo (implementers, `quality-fixer`, `test-writer`) em um run só escreve fora se o alvo casar com um glob **absoluto** aprovado em `approved_scope`, do diretório canônico (casado literalmente após expandir `~`, sem resolver symlinks: escrever por um alias symlink é sinalizado), ou for scratch (`<tempdir>/claude-*` ou `/tmp/claude-*`). Globs relativos e a lista sempre permitida (`ALWAYS_ALLOWED`, convenções do repositório) nunca cobrem caminhos fora dele.
+- **Falha fechada:** caminho que não resolve mantém as flags de ator e, para ator de escopo fixo com run ativo (ou run que não dá para determinar), soma `out_of_scope_write`.
 
 ---
 
@@ -1067,7 +1102,7 @@ Padrões: poderia cair no kit de cards SaaS; evita com tabela e divisórias, sem
 | `skills/implement/SKILL.md` | passo 5.2: exceção para pedidos de escopo no `DESIGN_SYSTEM.md` com os mesmos três ramos; a decisão do usuário continua registrada em `approved_scope`, mas o caminho nunca entra em `allowed_paths` (regra 29) |
 | `templates/node-ts-react/CLAUDE.md`, `templates/react-native/CLAUDE.md` | linha 25: sai o `frontend-design`; criação da direção pelo `design-director`, manutenção pela `design-system` |
 | `templates/project-root/DESIGN_SYSTEM.md` | comentário do topo: criado pelo `design-director`, mantido pela `design-system`; seção nova `Layout concept` depois de `Principles` (conceito, wireframe ASCII por plataforma, padrões evitados), aprovada pelo usuário em 2026-11-11 (D22 h); linha `Font family` com origem e licença de cada família (D22 i) |
-| `hooks/agent-audit.py` | regra por nome (13.5): `DESIGN_SYSTEM.md` em qualquer diretório, sem diferenciar maiúsculas; isenção de `md_outside_docs` para `design-director` nesse arquivo; flags `design_system_write_by_other` e `design_director_write_outside` (também sem raiz git); mensagens em `WHY`; alvos de `approved_scope` que casam com a regra saem dos caminhos permitidos derivados, para o `out_of_scope_write` continuar valendo; lista `docs_roots` (13.5) no lugar do `docs/` fixo |
+| `hooks/agent-audit.py` | regra por nome (13.5): `DESIGN_SYSTEM.md` em qualquer diretório, sem diferenciar maiúsculas; isenção de `md_outside_docs` para `design-director` nesse arquivo; flags `design_system_write_by_other` e `design_director_write_outside` (de ator, valem para qualquer caminho, dentro ou fora de repositório); escritas fora da raiz git (13.7): raiz governante, união com repositório aninhado, `..` nas formas resolvida e léxica, `area: outside`, glob absoluto aprovado ou scratch para `out_of_scope_write`, falha fechada; mensagens em `WHY`; alvos de `approved_scope` que casam com a regra saem dos caminhos permitidos derivados, para o `out_of_scope_write` continuar valendo; lista `docs_roots` (13.5) no lugar do `docs/` fixo |
 | `hooks/agent-audit.json` | `design_system_write_by_other: warn`, `design_director_write_outside: block`, `docs_roots: ["docs/", ".claude/docs/"]` |
 | `hooks/agent-metrics.py` | rótulos das duas categorias novas (alvo 0); seção `## design-director` (14.1) |
 | `settings.json` | sai `frontend-design@claude-plugins-official` de `enabledPlugins` (arquivo com regra `ask`: o usuário confirma) |
@@ -1461,8 +1496,8 @@ Spec: `~/dotfiles/.claude/docs/features/design-director/spec.md`; log: `log.md` 
 **Mudança de pasta de docs:** a pasta `docs/` desta config foi movida para `.claude/docs/` a pedido do usuário depois da r1, e não é ligada a `~/.claude`. Por isso a `docs_roots` e a nota em 13.5 sobre `project-docs` e `/implement`.
 
 **Decisões tomadas durante a execução:**
-- O `md_outside_docs` (`warn`) ao criar `agents/design-director.md` e o `out_of_scope_write` nas edições do template em paralelo são falsos positivos esperados (o hook lê só a `current_task`).
-- Heredoc no Bash é classificado como `docker_lifecycle` quando o corpo tem linhas parecidas com comandos: os harnesses são escritos com `Write` e rodados com `python3 -I`.
+- O `md_outside_docs` (`warn`) ao criar `agents/design-director.md` e o `out_of_scope_write` nas edições do template em paralelo são falsos positivos esperados (corrigido depois: o hook aceita a escrita que casa com qualquer task de `running_tasks`, além da `current_task`).
+- Na época, todo heredoc no Bash tinha o corpo classificado como comandos (um corpo com `docker compose up` virava `docker_lifecycle`), e por isso os harnesses foram escritos com `Write` e rodados com `python3 -I`. Corrigido depois (bug `2026-11-11-audit-heredoc-docker-lifecycle`): o corpo é dado para `cat`/`tee`, `git commit -F -` e `gh ... --body-file -`, e continua classificado nos demais (13.6). O `Write` deixou de ser necessário para esses casos; um script gravado e executado depois continua fora do alcance do hook.
 
 **Pendências:**
 - Sessão nova do Claude Code (o agent só carrega nela): cenários 37-45 da seção 14.3, `/new-project` com perfil react e com perfil só backend, e o relatório `agent-metrics.py` com a seção `## design-director`.

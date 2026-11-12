@@ -14,7 +14,7 @@ Arguments: `$ARGUMENTS`
 
 1. Find the bug entry in `docs/backlog/bugs/` (path in the arguments, or the bug named in the conversation; with several candidates, list them and ask). If it is not registered yet, delegate to `backlog-keeper` (user report mode) first. The entry is the source of truth for the symptom, steps and evidence.
 2. Set its status to `In progress` through `backlog-keeper` (update mode).
-3. **Run state** in `.claude/runs/bug-<slug>.json` (same rules as `/implement`: ignored by git, resumable, budgets), with `phase` (`reproduce | diagnose | regression | fix | gate | review | verify | document | done`), `current_task` (`regression` or `fix`, which the audit hook uses), `allowed_paths` per step, `approved_scope`, budgets and `agent_calls`. If it exists with `phase` other than `done`, resume from there.
+3. **Run state** in `.claude/runs/bug-<slug>.json` (same rules as `/implement`: ignored by git, resumable, budgets), with `phase` (`reproduce | diagnose | regression | fix | gate | review | verify | document | done`), `current_task` (`regression` or `fix`, which the audit hook uses; bug runs are sequential, so it stays a scalar and there is no `running_tasks`), `allowed_paths` per step, `approved_scope`, budgets and `agent_calls`. If it exists with `phase` other than `done`, resume from there.
 
 ## 2. Reproduce (`phase: reproduce`)
 

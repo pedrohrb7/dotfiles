@@ -26,12 +26,14 @@ Any error is swallowed: an audit hook must never break a session.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path, PurePosixPath
 
@@ -173,10 +175,218 @@ def strip_prefixes(segment: str) -> str:
     return text
 
 
+_SEPARATORS = ";&|\n"
+_WORD_END = set(" \t\n;&|<>()")
+# Constructs the scanner does not model: with any of them present nothing is stripped (fail closed).
+_UNMODELED = re.compile(
+    r"\$\{|\$'|\$\[|`|\r|[<>]\(|\bmkfifo\b|\bcoproc\b|\bexec\s+\d*[<>]"
+    r"|\b(?:cat|tee)\s*\(\s*\)|\bfunction\s+(?:cat|tee)\b|>&(?:[3-9]|\d{2,})|(?<![\w])(?:[3-9]|\d{2,})>"
+)
+# On the opener's logical line these can feed the body (or anything else) to code: not a data sink.
+_CODE_FEED = re.compile(r"(?<!\|)\|(?!\|)|<\(|>\(|\$\(")
+_STDIN_FILE_FLAGS = {"git": [["-F", "-"], ["--file", "-"], ["--file=-"]], "gh": [["--body-file", "-"], ["-F", "-"], ["--body-file=-"]]}
+_GIT_CONFIG = re.compile(r"(?:^|\s)-c\s*\S*(?:alias|core)\.")  # -c alias.x=!cmd / core.pager=cmd run code
+# `$(cat <<EOF ...)` is data only as the value of these options, right before the `$(` (and its `"`).
+_GIT_MESSAGE_VALUE = re.compile(r"^git\s.*\bcommit\b.*(?:\s-[A-Za-z]*m|\s--message)(?:=|\s+)?\"?$")
+_GH_MESSAGE_VALUE = re.compile(
+    r"^gh\s+(?:pr|issue|release)\s+(?:create|edit|comment|review)\b.*(?:\s(?:--body|-b|--title|-t))(?:=|\s+)?\"?$"
+)
+_GH_MESSAGE_CMD = re.compile(r"^gh\s+(?:pr|issue|release)\s+(?:create|edit|comment|review)\b")
+
+
+def _read_delimiter(text: str, i: int) -> tuple[str, int] | None:
+    """Parse a heredoc delimiter word at `text[i:]`; return (unquoted delimiter, end index) or None.
+
+    A backslash-newline inside the word is a line continuation and is skipped.
+    """
+    n = len(text)
+    if i >= n or not (text[i].isalpha() or text[i] in "_'\"\\"):
+        return None
+    delim: list[str] = []
+    while i < n and text[i] not in _WORD_END:
+        c = text[i]
+        if c in "'\"":
+            j = text.find(c, i + 1)
+            if j < 0:
+                return None
+            delim.append(text[i + 1:j])
+            i = j + 1
+        elif c == "\\" and text.startswith("\\\n", i):
+            i += 2
+        elif c == "\\" and i + 1 < n:
+            delim.append(text[i + 1])
+            i += 2
+        else:
+            delim.append(c)
+            i += 1
+    return "".join(delim), i
+
+
+def _is_data_sink(prefix: str, rest: str, outer: str | None, depth: int) -> bool:
+    """True when the heredoc opened by `prefix` (the simple command before `<<`) is provably data.
+
+    `rest` is the remainder of the opener's logical line; `outer` is the text before the enclosing
+    `$(` when the heredoc is inside a command substitution (else None); `depth` is the nesting of
+    groups/substitutions (1 = top level). Data sinks: top-level `cat`/`tee` that is not piped or fed
+    to a `$(`; `git commit -F -` and `gh pr|issue|release create|edit|comment|review -F -` (no
+    `-c alias.*`/`core.*`); and a lone `$(cat <<EOF ...)` that is the value of `git commit -m` or of
+    a `gh` message option.
+    """
+    if _CODE_FEED.search(prefix + rest):
+        return False
+    tokens = strip_prefixes(prefix.strip()).split()
+    if not tokens:
+        return False
+    text = " ".join(tokens)
+    head = tokens[0]
+    if head == "git" and _GIT_CONFIG.search(text):
+        return False
+    if outer is not None:
+        if tokens != ["cat"]:
+            return False
+        outer_text = strip_prefixes(outer.strip())
+        if _GIT_CONFIG.search(outer_text):
+            return False
+        return bool(_GIT_MESSAGE_VALUE.match(outer_text) or _GH_MESSAGE_VALUE.match(outer_text))
+    if head in ("git", "gh"):
+        pairs = _STDIN_FILE_FLAGS[head]
+        has_flag = any(tokens[k:k + len(p)] == p for p in pairs for k in range(len(tokens)))
+        if head == "git":
+            return has_flag and "commit" in tokens
+        return has_flag and bool(_GH_MESSAGE_CMD.match(text))
+    return depth == 1 and head in ("cat", "tee")
+
+
+def _scan_heredocs(command: str) -> str:
+    """Single pass over `command` (see strip_heredoc_bodies); may raise, the caller falls back."""
+    if _UNMODELED.search(command):
+        return command
+    n = len(command)
+    out: list[str] = []
+    # Context stack of (kind, outer): kind is cmd, sq, dq or arith; outer is the text before the
+    # `$(` that opened a command substitution, else None.
+    stack: list[tuple[str, str | None]] = [("cmd", None)]
+    pending: list[tuple[str, bool, bool]] = []  # (delimiter, strip leading tabs, body is data)
+    seg_start = 0  # index in `out` where the current simple command starts
+    i = 0
+    while i < n:
+        c = command[i]
+        ctx = stack[-1][0]
+        if c == "\n" and pending:
+            if ctx in ("sq", "dq"):  # bash starts the body after the newline that ends the command line
+                return command
+            out.append(c)
+            i += 1
+            for delim, strip_tabs, is_data in pending:
+                while i < n:
+                    j = command.find("\n", i)
+                    end = n if j < 0 else j
+                    line = command[i:end]
+                    i = end + 1 if j >= 0 else n
+                    if (line.lstrip("\t") if strip_tabs else line) == delim:
+                        break
+                    if not is_data:
+                        out.extend(line + "\n")
+            pending = []
+            seg_start = len(out)
+            continue
+        if ctx == "sq":
+            if c == "'":
+                stack.pop()
+        elif c == "\\" and i + 1 < n:
+            if command[i + 1] == "\n":  # line continuation
+                i += 2
+                continue
+            out.append(c)
+            i += 1
+            c = command[i]
+        elif ctx == "dq":
+            if c == '"':
+                stack.pop()
+            elif c == "$" and command.startswith("$(", i):
+                outer = "".join(out[seg_start:])
+                out.append(c)
+                i += 1
+                c = "("
+                stack.append(("arith" if command.startswith("((", i) else "cmd", outer))
+                seg_start = len(out) + 1
+        elif c == "'":
+            stack.append(("sq", None))
+        elif c == '"':
+            stack.append(("dq", None))
+        elif c == "(":
+            # `((` and `$((` open arithmetic, where `<<` is a shift; the second `(` sees ctx arith.
+            if ctx == "arith" or command.startswith("((", i):
+                stack.append(("arith", None))
+            else:
+                outer = "".join(out[seg_start:]) if out and out[-1] == "$" else None
+                stack.append(("cmd", outer))
+            seg_start = len(out) + 1
+        elif c == ")":
+            if len(stack) > 1:
+                stack.pop()
+            seg_start = len(out) + 1
+        elif ctx == "arith":
+            pass
+        elif c == "#" and (not out or out[-1] in " \t\n;&|()"):
+            j = command.find("\n", i)
+            end = n if j < 0 else j
+            out.extend(command[i:end])
+            i = end
+            continue
+        elif c in _SEPARATORS:
+            seg_start = len(out) + 1
+        elif c == "<" and command.startswith("<<<", i):
+            out.extend("<<<")
+            i += 3
+            continue
+        elif c == "<" and command.startswith("<<", i):
+            j = i + 2
+            strip_tabs = command.startswith("-", j)
+            if strip_tabs:
+                j += 1
+            while j < n and command[j] in " \t":
+                j += 1
+            parsed = _read_delimiter(command, j)
+            if parsed is not None:
+                delim, end = parsed
+                eol = re.search(r"(?<!\\)\n", command[end:])
+                rest = command[i:end + eol.start()] if eol else command[i:]
+                is_data = _is_data_sink("".join(out[seg_start:]), rest.replace("\\\n", ""), stack[-1][1], len(stack))
+                pending.append((delim, strip_tabs, is_data))
+                out.extend(command[i:end].replace("\\\n", ""))
+                i = end
+                continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def strip_heredoc_bodies(command: str) -> str:
+    """Return `command` without the bodies (and terminator lines) of heredocs that are provably data.
+
+    Fail closed: a body is stripped only for a data sink (see `_is_data_sink`): top-level `cat`/`tee`
+    not piped or fed to `$(`, `git commit -F -`, `gh pr|issue|release ... -F -`, or a lone
+    `$(cat <<EOF ...)` as the value of `git commit -m` or a `gh` message option. Every other heredoc
+    (bash, python, `| bash`, eval, xargs, ...) keeps its body so it is classified as commands; only its
+    terminator line is dropped. The opener line and everything after the terminator are kept.
+    Handles `<<`, `<<-` (tab-stripped terminator), quoted and escaped delimiters, several heredocs on
+    one line and backslash-newline continuations; ignores `<<<`, `$((1<<2))`, quoted text and comments.
+    An unterminated body runs to the end. Nothing is stripped (the command is returned unchanged) when
+    it has constructs the scanner does not model (`${`, `$'`, `$[`, backticks, `\\r`, process
+    substitution, mkfifo, coproc, exec redirections, cat/tee functions, fds >= 3), or a newline inside
+    quotes while a heredoc is pending. A scanner error also returns the original.
+    """
+    try:
+        return _scan_heredocs(command)
+    except Exception:
+        return command
+
+
 def classify_command(command: str) -> tuple[list[str], list[str]]:
     categories: list[str] = []
     flags: list[str] = []
-    for raw in SEGMENT_SPLIT.split(command or ""):
+    for raw in SEGMENT_SPLIT.split(strip_heredoc_bodies(command or "")):
         seg = strip_prefixes(raw.strip())
         if not seg or seg.startswith("cd "):
             continue
@@ -262,6 +472,21 @@ def active_run(root: Path) -> dict | None:
     return data
 
 
+def run_task_keys(run: dict) -> list[str]:
+    """Task ids (as strings) whose scope applies now: the valid `running_tasks` entries, then `current_task`.
+
+    A stale or malformed `running_tasks` can only widen the scope, never replace `current_task`.
+    An id is valid when it is an int or a non-empty string (not a bool).
+    """
+    candidates = list(run.get("running_tasks") or []) if isinstance(run.get("running_tasks"), (list, tuple)) else []
+    candidates.append(run.get("current_task"))
+    keys = [
+        str(t).strip() for t in candidates
+        if isinstance(t, (int, str)) and not isinstance(t, bool) and str(t).strip()
+    ]
+    return list(dict.fromkeys(keys))
+
+
 def matches(rel: str, patterns: list[str]) -> bool:
     p = PurePosixPath(rel)
     for pat in patterns:
@@ -277,60 +502,158 @@ def matches(rel: str, patterns: list[str]) -> bool:
     return False
 
 
+SCRATCH_BASES = ("/tmp",)  # literal scratch parents, besides tempfile.gettempdir()
+
+
+def is_scratch(target: Path) -> bool:
+    """True for an agent scratchpad: <tempdir>/claude-*/... or /tmp/claude-*/... (both resolved)."""
+    for base in {tempfile.gettempdir(), *SCRATCH_BASES}:
+        try:
+            parts = target.relative_to(Path(base).resolve()).parts
+        except (ValueError, OSError):
+            continue
+        if parts and fnmatch.fnmatchcase(parts[0], "claude-*"):
+            return True
+    return False
+
+
+def nearest_existing(path: Path) -> Path:
+    while not path.exists() and path != path.parent:
+        path = path.parent
+    return path
+
+
+def _under(target: Path, root: Path) -> str | None:
+    """`target` relative to `root` (tried resolved, then as given), or None when it is outside."""
+    for r in (root.resolve(), root):
+        try:
+            return str(target.relative_to(r))
+        except ValueError:
+            pass
+    return None
+
+
+def _assess_root(root: Path, forms: list[Path], actor: str, tool: str, created: bool, roots: list[str]) -> tuple[list[str], dict]:
+    """Judge the target (each path form: resolved, and lexical when it has `..`) against one git root and its run.
+    Returns the union of the flags (stricter wins) and the record fields of the first flagged form, else the first."""
+    run = active_run(root)
+    flags: list[str] = []
+    rec: dict | None = None
+    for form in forms:
+        rel = _under(form, root)
+        inside = rel is not None
+        if not inside:
+            rel = str(form)
+            area = "outside"
+        else:
+            area = "docs" if rel.startswith(tuple(roots)) else "run-state" if rel.startswith(".claude/runs/") else "code"
+        found: list[str] = []
+        is_ds = is_design_system(rel)
+        if (inside and rel.endswith(".md") and area != "docs" and (created or tool == "Write")
+                and not rel.endswith(("README.md", "CLAUDE.md", "CHANGELOG.md"))
+                and not (is_ds and actor == "design-director")):
+            found.append("md_outside_docs")
+        if inside and actor in IMPLEMENTERS and (area == "docs" or Path(rel).name in DOC_FILES):
+            found.append("docs_write_by_implementer")
+        if inside and rel.startswith(tuple(r + "backlog/" for r in roots)) and actor not in {"backlog-keeper", "unknown"}:
+            found.append("backlog_write_by_other")
+        cur: dict = {"rel": rel, "area": area, "in_run": bool(run)}
+        if run:
+            keys = run_task_keys(run)
+            cur["run"] = run.get("_slug")
+            cur["task"] = ",".join(keys)
+            if actor in IMPLEMENTERS or actor in {"quality-fixer", "test-writer"}:
+                by_task = run.get("allowed_paths") or {}
+                allowed = [p for k in keys for p in by_task.get(k, [])]
+                allowed += [
+                    s.get("target", "") for s in run.get("approved_scope", [])
+                    if str(s.get("task")) in keys and s.get("decision", "approved") == "approved"
+                    and not is_design_system(s.get("target", ""))  # never enters allowed paths
+                ]
+                if inside:
+                    in_scope = matches(rel, allowed + ALWAYS_ALLOWED)
+                else:  # ALWAYS_ALLOWED are repo conventions; outside, only approved ABSOLUTE globs
+                    # (matched literally after ~ expansion, never realpath'd: a planted symlink must not widen a
+                    # glob; relative ones never match) or scratch
+                    absolute = [os.path.expanduser(a.strip().strip("`")) for a in allowed]
+                    in_scope = is_scratch(form) or matches(rel, [a for a in absolute if a.startswith("/")])
+                cur["in_scope"] = in_scope
+                if not in_scope:
+                    found.append("out_of_scope_write")
+        flags += found
+        if rec is None or (found and not rec.get("_flagged")):
+            rec = {**cur, "_flagged": bool(found)}
+    rec = rec or {}
+    rec.pop("_flagged", None)
+    return flags, rec
+
+
 def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roots: list[str] | None = None) -> dict:
+    """Classify a write.
+
+    Actor-only flags (read-only agent, design-director, DESIGN_SYSTEM.md by file name) are computed first,
+    before any filesystem call, so any error below degrades to area "outside" with just those flags.
+    The target is `~`-expanded and resolved (symlinks, `..`); with a `..` component the lexical
+    normpath form is judged too and the stricter result wins. The governing root is the git root of
+    the session cwd (where the run lives); with no root there, the target's own. When the target's own
+    root is a different repo nested in the cwd root (submodule), both are judged, flags are unioned and
+    the record carries the nested (target) root's rel, area and run, unless only the other root flagged out_of_scope_write. A target outside every root has
+    rel = its absolute path and area "outside": area flags do not apply, and fixed-scope actors with a
+    run need an approved absolute glob (matched literally after ~ expansion, never realpath'd) or a <tempdir>|/tmp claude-* scratch path."""
     roots = roots or DEFAULT_DOCS_ROOTS
     out: dict = {"path": path_str}
-    path = Path(path_str)
-    if not path.is_absolute():
-        path = Path(cwd or ".") / path
-    root = git_root(path.parent if path.parent.exists() else Path(cwd or "."))
-    if not root:
-        out["in_run"] = False
-        if actor == "design-director" and not is_design_system(path_str):
-            out["flags"] = ["design_director_write_outside"]
-        return out
-    try:
-        rel = str(path.resolve().relative_to(root.resolve()))
-    except Exception:
-        rel = str(path)
-    out["rel"] = rel
-    out["area"] = "docs" if rel.startswith(tuple(roots)) else "run-state" if rel.startswith(".claude/runs/") else "code"
-    created = isinstance(response, dict) and response.get("type") == "create"
-    flags = []
-    is_ds = is_design_system(rel)
-    if (rel.endswith(".md") and out["area"] != "docs" and (created or tool == "Write")
-            and not rel.endswith(("README.md", "CLAUDE.md", "CHANGELOG.md"))
-            and not (is_ds and actor == "design-director")):
-        flags.append("md_outside_docs")
-    if is_ds and actor not in DESIGN_SYSTEM_WRITERS:
-        flags.append("design_system_write_by_other")
-    if actor == "design-director" and not is_ds:
-        flags.append("design_director_write_outside")
-    if actor in IMPLEMENTERS and (out["area"] == "docs" or Path(rel).name in DOC_FILES):
-        flags.append("docs_write_by_implementer")
-    if actor in READ_ONLY_AGENTS:
-        flags.append("write_by_readonly_agent")
-    if rel.startswith(tuple(r + "backlog/" for r in roots)) and actor not in {"backlog-keeper", "unknown"}:
-        flags.append("backlog_write_by_other")
+    scoped = actor in IMPLEMENTERS or actor in {"quality-fixer", "test-writer"}
 
-    run = active_run(root)
-    out["in_run"] = bool(run)
-    if run:
-        task = str(run.get("current_task", ""))
-        out["run"] = run.get("_slug")
-        out["task"] = task
-        if actor in IMPLEMENTERS or actor in {"quality-fixer", "test-writer"}:
-            allowed = list((run.get("allowed_paths") or {}).get(task, []))
-            allowed += [
-                s.get("target", "") for s in run.get("approved_scope", [])
-                if str(s.get("task")) == task and s.get("decision", "approved") == "approved"
-                and not is_design_system(s.get("target", ""))  # never enters allowed paths
-            ]
-            in_scope = matches(rel, allowed + ALWAYS_ALLOWED)
-            out["in_scope"] = in_scope
-            if not in_scope:
+    def actor_flags(ds_names: list[bool]) -> list[str]:
+        """`ds_names`: is each known name of the target (raw, resolved) a DESIGN_SYSTEM.md."""
+        found = []
+        if any(ds_names) and actor not in DESIGN_SYSTEM_WRITERS:
+            found.append("design_system_write_by_other")
+        if actor == "design-director" and not all(ds_names):
+            found.append("design_director_write_outside")
+        if actor in READ_ONLY_AGENTS:
+            found.append("write_by_readonly_agent")
+        return found
+
+    flags = actor_flags([is_design_system(path_str)])
+    try:
+        path = Path(os.path.expanduser(path_str))
+        if not path.is_absolute():
+            path = Path(cwd or ".") / path
+        resolved = path.resolve()
+        flags = actor_flags([is_design_system(path_str), is_design_system(str(resolved))])
+        forms = [resolved]
+        if ".." in path.parts:
+            lexical = Path(os.path.normpath(path))
+            if lexical != resolved:
+                forms.append(lexical)
+        cwd_root = git_root(Path(cwd)) if cwd and Path(cwd).is_dir() else None
+        target_root = git_root(nearest_existing(resolved.parent))
+        judged = [cwd_root] if cwd_root else [target_root] if target_root else []
+        if cwd_root and target_root and target_root != cwd_root and _under(target_root, cwd_root) is not None:
+            judged.append(target_root)  # nested repo / submodule: judged by its own root and run too
+        created = isinstance(response, dict) and response.get("type") == "create"
+        rec = {"rel": str(resolved), "area": "outside", "in_run": False}
+        rec_oos = False
+        for root in judged:
+            found, cur = _assess_root(root, forms, actor, tool, created, roots)
+            flags += found
+            oos = "out_of_scope_write" in found
+            if not (rec_oos and not oos):  # the nested root wins, unless an earlier root is the one that flagged
+                rec, rec_oos = cur, oos
+        out.update(rec)
+    except Exception:  # fail closed: unresolvable path -> outside, actor-only flags (+ out of scope in a run)
+        out.update({"rel": path_str, "area": "outside", "in_run": False})
+        if scoped:
+            try:
+                root = git_root(Path(cwd)) if cwd else None
+                in_run = bool(active_run(root)) if root else False
+            except Exception:
+                in_run = True  # cannot tell: assume a run is active
+            if in_run:
                 flags.append("out_of_scope_write")
-    out["flags"] = flags
+                out["in_run"] = True
+    out["flags"] = list(dict.fromkeys(flags))
     return out
 
 
@@ -461,7 +784,7 @@ def main() -> None:
         record["in_run"] = bool(run)
         if run:
             record["run"] = run.get("_slug")
-            record["task"] = str(run.get("current_task", ""))
+            record["task"] = ",".join(run_task_keys(run))
 
     session = record.get("session") or "unknown"
     METRICS_DIR.mkdir(parents=True, exist_ok=True)
