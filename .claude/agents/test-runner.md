@@ -23,7 +23,7 @@ The prompt says the scope:
    - `task`: suites with `Gate` = `task`, for the touched services;
    - `full`: suites with `Gate` = `task` or `full`;
    - `on-demand` suites (load, perf, long e2e) never run unless the prompt names them.
-2. Without the table, prefer, in order: what the prompt says, then what CI runs (`.github/workflows/*.yml`, `.gitlab-ci.yml`), then project scripts, then the ecosystem defaults below. Without the table, run only lint, typecheck and unit/integration tests; never e2e or load suites unless the prompt names them.
+2. Without the table, prefer, in order: what the prompt says, then what CI runs (`.github/workflows/*.yml`, `.gitlab-ci.yml`), then project scripts (package scripts, Makefile/justfile targets, `mise.toml` tasks), then the ecosystem defaults below. Without the table, run only lint, typecheck and unit/integration tests; never e2e or load suites unless the prompt names them.
 
 | Ecosystem | Lint | Typecheck | Test |
 |---|---|---|---|
@@ -32,7 +32,8 @@ The prompt says the scope:
 | Go | `golangci-lint run` if configured, else `go vet ./...` | (compile) | `go test ./...` |
 | Rust | `cargo clippy --all-targets -- -D warnings` | (compile) | `cargo test` |
 | Java/Kotlin | the wrapper's check task | (compile) | `./mvnw test` / `./gradlew test` |
-| Makefile/justfile | `make lint`, `just lint` | | `make test`, `just test` |
+| Lua (prefix `mise exec --` when the project uses mise) | `luacheck .` or `selene .` when configured (`.luacheckrc`, `selene.toml`); format check `stylua --check .` or `treefmt --ci` when configured | | `busted` when there is `.busted` or `spec/`; Neovim: `nvim --headless` with the project's `minimal_init` and `PlenaryBustedDirectory <dir>` (plenary) or `lua MiniTest.run()` (mini.test) |
+| Makefile/justfile/mise | `make lint`, `just lint`, `mise run lint` | | `make test`, `just test`, `mise run test` |
 
 Use non-interactive and CI flags: no watch mode, `CI=true`, and `--reporter=dot`/`-q` when supported. Prefix commands with `rtk` when available.
 
@@ -41,6 +42,7 @@ Use non-interactive and CI flags: no watch mode, `CI=true`, and `--reporter=dot`
 - Run each selected command once.
 - If a command fails because of the environment (missing dependencies, no DB, missing env var, a service that is not running), report it under `blocked` and do not try to fix it. Never start, build or restart services or containers to make a suite runnable.
 - If a test fails, re-run only that test once. A test that passes on rerun is `flaky`; one that fails again is a real failure.
+- A Neovim suite that needs the project's `minimal_init` (or the init file its command names) that does not exist: `blocked` with the reason; never create one. Never run Neovim without `--headless`.
 - Classify every failure by `failure_kind`: `assertion` (an expectation did not hold), `compile` (type or build error), `import` (missing module, file or symbol), `runtime` (an exception before any assertion ran), `timeout`, or `other`. The TDD and bug fix flows use it to tell "red for the right reason" from "the code does not exist".
 - Scope `files`: run only the test files the prompt lists (TDD red checks, regression tests). In this scope, failing is often the expected result: report it the same way and let the caller judge.
 

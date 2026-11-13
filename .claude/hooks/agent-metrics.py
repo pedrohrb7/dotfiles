@@ -38,6 +38,8 @@ FLAG_LABELS = {
     "git_push": "pushes (only with explicit authorization)",
     "visual_tool": "browser/screenshot tool calls outside ui-verifier (target 0)",
     "external_request": "requests to non-local hosts (target 0)",
+    "command_too_long": "Bash commands over 16384 chars, denied before classification - write large content with the Write tool (target 0)",
+    "analysis_timeout": "tool calls the hook could not analyze within its wall-clock limit, denied on PreToolUse - simplify or split the command (target 0)",
 }
 
 

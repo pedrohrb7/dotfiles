@@ -16,6 +16,8 @@
     "backlog_write_by_other": "warn",
     "design_system_write_by_other": "warn",
     "design_director_write_outside": "block",
+    "command_too_long": "block",
+    "analysis_timeout": "block",
     "external_request": "warn",
     "docker_build": "audit"
   }

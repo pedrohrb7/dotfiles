@@ -46,7 +46,8 @@ class ConfigContract(unittest.TestCase):
     def test_f2_floors_of_the_claude_md_rules(self):
         self.assertEqual(self.live["mode"], "enforce")
         categories = self.live["categories"]
-        for category in ("docker_lifecycle", "write_by_readonly_agent", "visual_tool", "design_director_write_outside"):
+        for category in ("docker_lifecycle", "write_by_readonly_agent", "visual_tool", "design_director_write_outside",
+                         "command_too_long", "analysis_timeout"):
             with self.subTest(category=category):
                 self.assertEqual(categories[category], "block")
         for category in ("git_commit", "git_push"):

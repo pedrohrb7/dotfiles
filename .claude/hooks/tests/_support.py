@@ -42,6 +42,8 @@ TEST_CONFIG: dict = {
         "write_by_readonly_agent": _BLOCK,
         "visual_tool": _BLOCK,
         "design_director_write_outside": _BLOCK,
+        "command_too_long": _BLOCK,
+        "analysis_timeout": _BLOCK,
         "git_commit": _ASK,
         "git_push": _ASK,
         "docker_build": _AUDIT,
@@ -216,7 +218,7 @@ class HookProcess:
         elif config is not None:
             (self.dir / "agent-audit.json").write_text(json.dumps(config), encoding="utf-8")
 
-    def run(self, stdin: "dict | str", cwd) -> CompletedProcess:
+    def run(self, stdin: "dict | str", cwd, extra_env: "dict[str, str] | None" = None) -> CompletedProcess:
         data = stdin if isinstance(stdin, str) else json.dumps(stdin)
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -225,6 +227,7 @@ class HookProcess:
             "LANG": "C.UTF-8",
             "GIT_CONFIG_NOSYSTEM": "1",
         }
+        env.update(extra_env or {})
         return subprocess.run(
             [sys.executable, "-I", "-B", str(self.script)],
             input=data, capture_output=True, text=True, cwd=str(cwd), env=env, timeout=self.TIMEOUT,

@@ -35,7 +35,7 @@
 
 ### Task 1 - <title>
 
-- **Stack:** <backend-node | backend-spring | backend-go | backend-rust | backend-python | frontend-react | mobile-react-native>
+- **Stack:** <backend-node | backend-spring | backend-go | backend-rust | backend-python | frontend-react | mobile-react-native | lua>
 - **Files:** `<path or glob>`, `<path or glob>`
 - **Depends on:** <- | Task N>
 - **Done when:** <observable criteria>

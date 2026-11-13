@@ -4,6 +4,7 @@
 - **Revisão**: 3 (incorpora os comentários das rodadas 1 e 2; ver Apêndices A e B)
 - **Status**: Aprovado (rodada 3 fechada em 2026-11-10); pronto para a etapa A
 - **Adendo 2026-11-11**: etapa H, agent `design-director` (D22), **Status: Implemented** (aprovada e implementada em 2026-11-11); ver 15.1. As linhas marcadas "(etapa H)" nas outras seções valem a partir desta aprovação; spec em `~/dotfiles/.claude/docs/features/design-director/spec.md`
+- **Adendo 2026-11-12**: etapa I, agent `lua` (D23), **Status: Implemented** (aprovada e implementada em 2026-11-13); ver 15.2. As linhas marcadas "(etapa I)" nas outras seções valem a partir desta aprovação; spec em `~/dotfiles/.claude/docs/features/lua-agent/spec.md`
 - **Escopo**: `~/.claude/agents/`, `~/.claude/skills/`, `~/.claude/templates/`, `~/.claude/CLAUDE.md`, `~/.claude/settings.json`
 - **Objetivo duplo**:
   1. Atender melhor o workflow diário: feature, bug, refactor, review de PR e projeto novo, em proporções parecidas.
@@ -646,6 +647,7 @@ Regra geral: **a skill guarda o know-how, o agent executa.** O agent pré-carreg
 | stack agents                            | `implementer-contract` + as da stack (já existentes) |
 | `frontend-react`, `mobile-react-native` | + `design-system`                                    |
 | `design-director` (etapa H)             | `design-system` (o know-how de direção fica no corpo do agent, não na skill) |
+| `lua` (etapa I)                         | `implementer-contract`, `design-system`, `neovim-plugin`, `lua-tui` (o know-how de Neovim e de TUI fica nas skills, não no corpo do agent) |
 | `security-reviewer`                     | `dep-audit`                                          |
 | `quality-fixer`                         | `bug-repro` (já existente)                           |
 
@@ -663,6 +665,8 @@ Regra geral: **a skill guarda o know-how, o agent executa.** O agent pré-carreg
 | `dep-audit`                                           | ativar           | pré-carregada pelo `security-reviewer`; reavaliar depois                                                                                                |
 | `design-system`                                       | ativar           | lê e escreve `DESIGN_SYSTEM.md`; pré-carregada pelos agents de UI; reavaliar depois. Etapa H: fica só com a **manutenção** (a criação passa ao `design-director`), também é pré-carregada pelo `design-director` e perde a referência ao plugin `frontend-design` |
 | `pr-description`                                      | ativar           | fase Entregar                                                                                                                                           |
+| `neovim-plugin` (etapa I)                             | **nova**         | know-how de plugin Neovim (API, autocmds, setup e lazy-loading, `:checkhealth`, `vim.validate`, testes headless, janelas e buffers como UI); pré-carregada pelo `lua`, usável sozinha |
+| `lua-tui` (etapa I)                                   | **nova**         | know-how de UI dentro do Neovim e de TUI de terminal (raw mode, alternate screen, `luv`, `SIGWINCH`, ANSI); pré-carregada pelo `lua`, usável sozinha |
 | `bug-repro`, `project-docs`, `new-project`, `onboard` | manter e ajustar | conforme as seções 6.1, 10 e 11                                                                                                                         |
 | `review`                                              | remover          | "o que foi entregue x intenção" vai para o `code-reviewer` (comparar com os critérios `Done when` da spec); o resto já está no agent                    |
 | `codebase-standards`                                  | remover          | já coberto pela fase 2 do `code-reviewer` (consistência com o codebase) e pelo "mirror a similar module" do `implementer-contract`                      |
@@ -741,6 +745,8 @@ Sem a flag, nada muda: o stack agent escreve código e testes da task, como na s
 
 *Adendo 2026-11-13 (feature `audit-md-outside-docs`):* o falso positivo S5 do `md_outside_docs` está resolvido (ver 13.5, 13.7 e a spec da feature) e a flag está pronta para a análise de promoção a `block` do item 3. A promoção segue como decisão posterior, que exige dados de uso real.
 
+*Adendo 2026-11-13 (etapa I, feature `lua-agent`):* duas categorias novas nascem direto em `block`, por serem guardas do próprio classificador e não regras de fluxo: `command_too_long` e `analysis_timeout` (13.6, adendo; 15.2, adendo). Aprovadas pelo usuário durante a revisão.
+
 ### 13.4 Protocolo de pedido de escopo
 
 Pedido da rodada 2: _"o agent pare e pergunte se pode alterar/criar arquivo fora do escopo, explicando por que precisa daquela ação; após autorização, segue."_
@@ -812,6 +818,8 @@ Todo o resto (`bash`, `sh`, `python3`, `... | bash`, `eval`, `xargs`, `cat <<EOF
 
 **Testes:** `hooks/tests/` (`unittest` da biblioteca padrão), suite `claude-hooks` da tabela `Test suites` do `CLAUDE.md` da raiz do repo: `python3 -I -B -m unittest discover -s .claude/hooks/tests -t .claude/hooks`, a partir de `~/dotfiles` (`-I -B` isola do ambiente e não cria `__pycache__`).
 
+*Adendo 2026-11-13 (etapa I, feature `lua-agent`):* o classificador reconhece comandos Lua (busted, `luarocks test`, `nvim --headless` com plenary ou mini.test, tasks do mise, luacheck, selene, stylua, treefmt) e classifica os shell escapes do Neovim (`-c`, `--cmd`, `+`: `!`, `:!`, `silent !`, `w !`, `r !`) até 3 níveis de aninhamento (além disso, falha fechada com a flag `nested_shell_unclassified`). `strip_prefixes` remove, para toda stack, `timeout [opções] <duração>` (qualquer forma GNU; ilegível, a leitura falha fechada), `mise exec|x [flags] --` e o caminho de `busted`, `luacheck`, `selene`, `stylua` e `nvim`. Duas categorias novas em `block`, para todo ator: `command_too_long` (comando Bash acima de 16384 caracteres) e `analysis_timeout` (guarda de 7 s de relógio; `AGENT_AUDIT_ANALYSIS_TIMEOUT` só em testes, só baixa o limite). Mais de 32 abridores de heredoc (`MAX_HEREDOC_OPENERS`) deixam o comando classificado como comandos, não como dado. A suite `claude-hooks` tem 317 testes. Ver 15.2 (adendo) e a spec da feature `lua-agent`.
+
 > 💬
 
 ### 13.7 Escritas fora da raiz git
@@ -858,6 +866,7 @@ O mesmo hook da seção 13 grava um JSONL por sessão (por exemplo em `~/.claude
 | Commits sem autorização                                             | não medido            | 0                                                 |
 | Escritas em `DESIGN_SYSTEM.md` fora do `design-director` e da sessão principal (etapa H) | não medido | 0 |
 | Chamadas do `design-director` sem um sim do usuário antes (etapa H) | não existe | 0 |
+| Neovim interativo, app TUI ou app hospedeiro (wezterm, awesome, hammerspoon) aberto ou recarregado por agents (etapa I) | não existe | 0 |
 
 A métrica "pedidos de escopo por run" também avalia o `specker`: se as tasks sempre precisam de arquivos extras, o campo `Files` da spec está sendo escrito estreito demais.
 
@@ -912,6 +921,16 @@ Um conjunto fixo de cenários, rodado igual na config pura e via Briareu:
 | 43 | Etapa H: stack agent edita `DESIGN_SYSTEM.md` | hook `warn` (`design_system_write_by_other`) | o valor vai para `scope_requests`; a sessão principal aplica depois do sim |
 | 44 | Etapa H: monorepo com web e mobile | um só `DESIGN_SYSTEM.md` na raiz | uma direção para as duas plataformas; wireframe por plataforma na rodada 2 |
 | 45 | Etapa H: "cria a identidade visual" num projeto com UI e tokens próprios em código, sem `DESIGN_SYSTEM.md` | sessão principal segue para a extração com a `design-system` | `design-director` não roda (ou termina `blocked`); os tokens documentados são os do código, sem direção nova |
+| 46 | Etapa I: task de um plugin Neovim (`lua/` + `plugin/`, busted, luacheck), spec com `Stack: lua` | implement -> `lua` -> test-runner (task) -> ... | só checks estreitos (arquivo de teste, lint dos arquivos tocados); runtime e versão detectados em `notes`; nenhum `nvim` sem `--headless` no registro do hook |
+| 47 | Etapa I: task de janela flutuante no plugin | `lua` | highlights com link a grupo padrão, sem cor fixa; layout refeito em `VimResized`; `manual_checks` com o comando de abertura, redimensionamento, janela pequena demais, tema claro e escuro e cada estado |
+| 48 | Etapa I: task de TUI de terminal standalone | `lua` | raw mode e alternate screen restaurados na saída normal, no erro e em Ctrl-C (lido no código e coberto por teste quando o projeto tem framework); `SIGWINCH` tratado; sem `DESIGN_SYSTEM.md`, só cores ANSI nomeadas e atributos, sem pedido de escopo; nenhuma dependência nova; o app não foi executado; `manual_checks` inclui "Ctrl-C e erro deixam o terminal normal" |
+| 49 | Etapa I: `test-runner` num projeto Lua sem `## Test suites` | detecção (prompt, CI, tasks do mise, Makefile/justfile, padrões Lua) | busted ou `nvim --headless` com plenary/mini.test e o `minimal_init` do projeto; lint luacheck/selene; sem `minimal_init`: `blocked` com o motivo, nada criado |
+| 50 | Etapa I: repo com serviço Go e gateway OpenResty | `specker` -> tasks separadas por stack -> implement | cada task com um stack só; a de Lua vai ao `lua`, a de Go ao `backend-go`; a task OpenResty faz a validação por request + logs (contract, seção 4) |
+| 51 | Etapa I: repo de config do Neovim (`init.lua` + `lua/`, sem testes) | `lua` | nenhuma convenção de plugin imposta (`setup`, `health.lua`, `<Plug>`); nenhum framework de teste adicionado sem pedido de escopo; `manual_checks` com o que conferir |
+| 52 | Etapa I: config embarcada (wezterm, hammerspoon ou awesome) | `lua` | API do hospedeiro respeitada; o hospedeiro não foi executado nem recarregado; `manual_checks` com "recarregar `<app>`" e o resultado esperado |
+| 53 | Etapa I: projeto preso à semântica do Lua 5.1 (`std = lua51`, rockspec `lua >= 5.1, < 5.2`) | `lua` | nenhuma construção acima de 5.1 (`//`, operadores bit a bit nativos, `utf8`, `<const>`/`<close>`, `goto` em PUC 5.1) |
+| 54 | Etapa I: `onboard` num plugin Neovim sem pastas de serviço | `onboard` | projeto reconhecido como Lua; `LUA.md` na raiz com todas as seções; `Test suites` e `Workflow` propostos ao usuário e escritos só depois do sim; sem `Local runtime` |
+| 55 | Etapa I: hook com o ator `lua` | stdin + suite `claude-hooks` | `lua` em `IMPLEMENTERS` e no conjunto literal de E9; regras de implementer valem para ele; `busted` e `mise run test` sinalizados como `suite_by_non_runner`, `busted tests/x_spec.lua` não; luacheck, selene e stylua como lint |
 
 > 💬
 
@@ -919,7 +938,7 @@ Um conjunto fixo de cenários, rodado igual na config pura e via Briareu:
 
 ## 15. Plano de execução
 
-A ordem A -> G foi aprovada. As decisões da rodada 2 entram nas etapas já existentes, sem etapa nova. A etapa H (adendo de 2026-11-11, implementada) vem depois da G e não muda as anteriores (15.1).
+A ordem A -> G foi aprovada. As decisões da rodada 2 entram nas etapas já existentes, sem etapa nova. A etapa H (adendo de 2026-11-11, implementada) vem depois da G e não muda as anteriores (15.1). A etapa I (adendo de 2026-11-12, implementada) vem depois da H e também não muda as anteriores (15.2).
 
 | Etapa | Conteúdo                                                                                                                                                                                                                                                                                     | Ataca                                                               |
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
@@ -931,6 +950,7 @@ A ordem A -> G foi aprovada. As decisões da rodada 2 entram nas etapas já exis
 | **F** | `fix-bug` + consolidação de skills (seção 12.2), incluindo a `tdd` evoluída e o `implement --tdd` (12.4)                                                                                                                                                                                                           | fluxo de bug, sobreposição                                          |
 | **G** | `block` por categoria, com base nos dados da etapa D                                                                                                                                                                                                                                         | garantia mecânica                                                   |
 | **H** (implementada) | `design-director` (criação de `DESIGN_SYSTEM.md`) + `design-system` só com a manutenção + pontos de entrada (`new-project`, Workflow, `design-system`) + hook (`design_system_write_by_other`, `design_director_write_outside`, isenção de `md_outside_docs`, `docs_roots`) + remoção do plugin `frontend-design` (15.1) | criação da direção visual sem dono, dependência de fonte externa desligada |
+| **I** (implementada) | agent `lua` + skills `neovim-plugin` e `lua-tui` + `Stack: lua` no `implement`, no `specker` e no template de spec + detecção de Lua no `test-runner` e no `onboard` + `lua` no hook (`IMPLEMENTERS` e E9) (15.2) | código Lua (Neovim, TUI, configs embarcadas) sem dono; inferência de stack sem Lua |
 
 Cada etapa termina com os cenários relevantes da seção 14.3 rodados e as métricas comparadas.
 
@@ -1157,6 +1177,325 @@ Nenhuma. As quatro perguntas foram respondidas em 2026-11-11 (D22 g-j) e viraram
 
 > 💬
 
+### 15.2 Etapa I - agent `lua` (adendo 2026-11-12)
+
+- **Status**: Implemented (2026-11-13; aprovado ao pedir a spec, implementado no mesmo dia, ver Registro de execução)
+- **Origem**: grill-me de 2026-11-12 (D23; Apêndice E)
+- **Spec**: `~/dotfiles/.claude/docs/features/lua-agent/spec.md` (Index: `lua-agent`); log na mesma pasta. O adendo de 2026-11-13 da spec (A1-A7) vale sobre o corpo
+
+#### Objetivo
+
+Código Lua ganha um dono no workflow: plugins e configs de Neovim, UI dentro do Neovim, TUIs de terminal, jogos LÖVE, OpenResty, bibliotecas e configs embarcadas (wezterm, hammerspoon, awesome, conky) passam por um stack agent que conhece o runtime, a versão da linguagem e as ferramentas do projeto. O `implement` e o `specker` passam a rotear tasks Lua, e o `test-runner` e o `onboard` reconhecem projetos Lua sem configuração extra.
+
+| Critério de sucesso | Como medir | Alvo |
+|---|---|---|
+| Task Lua chega ao `lua` | cenários 46 e 50: `Stack: lua` na spec ou inferido pelo `implement`; tasks Lua entregues a outro stack agent | 0 tasks mal roteadas |
+| Corpo do agent curto | tamanho de `agents/lua.md` comparado aos stack agents irmãos (hoje 3,4k a 4,6k bytes) | dentro da faixa |
+| UI do Neovim segue o tema | cenário 47: cores fixas (hex, `guifg`/`guibg` literais) em código de UI do Neovim escrito pelo agent | 0 |
+| Terminal sempre restaurado | cenário 48: caminhos de saída (normal, erro, Ctrl-C) que restauram raw mode, cursor e alternate screen | 100% |
+| Nada interativo | registro do hook (comando gravado, E11) com ator `lua`: `nvim` sem `--headless`, execução de app TUI ou LÖVE, recarga de hospedeiro ou de nginx | 0 |
+| Checks estreitos | `suite_by_non_runner` com ator `lua` no relatório de métricas (comandos Lua classificados pelo hook, D23 f) | 0 |
+| UI com `manual_checks` | tasks de UI do `lua` (Neovim ou terminal) com `manual_checks` preenchido | 100% |
+| Versão respeitada | cenário 53: construções acima da menor versão de Lua declarada pelo projeto | 0 |
+| `test-runner` acha as suites | cenário 49: projeto Lua sem `## Test suites` | suites certas, sem e2e |
+| Hook reconhece o ator e os comandos | cenário 55: suite `claude-hooks` passa com `lua` em `IMPLEMENTERS`, no conjunto literal de E9 e com os casos novos de classificação Lua | 100% |
+| Projeto Lua documentado no `onboard` | cenário 54: `LUA.md` com todas as seções do template preenchidas (ou "não se aplica" explícito), mais `Test suites` e `Workflow` | 100% |
+
+#### Contexto
+
+- Os stack agents cobrem Node, Spring, Go, Rust, Python, React e React Native. Código Lua não tem dono: cai na sessão principal ou num agent sem o know-how, e o `implement` não infere o stack (a lista de inferência não tem Lua). O próprio repo dotfiles tem Lua embarcado (`awesome/`, `conky/`).
+- Neovim e TUI têm armadilhas que o contract genérico não cobre: chamadas de `vim.api` em callbacks assíncronos, temas que só se aplicam via grupos de highlight padrão, layout que quebra em `VimResized`, raw mode que deixa o terminal do usuário quebrado quando o app cai, diferenças entre LuaJIT/5.1 e 5.4.
+- Base já existente: `implementer-contract` (etapa A), tasks estruturadas com **Stack** (B), `implement` com inferência de stack (C), hook em `enforce` (G), `design-system` só com manutenção (H) e a regra global de UI validada pelo usuário.
+- Fora desta etapa: `new-project` (um template de plugin Neovim é uma feature própria).
+
+#### Decisões (D23, grill-me de 2026-11-12)
+
+| # | Decisão |
+|---|---|
+| a | **Agent novo `lua`**, especialista geral em Lua com profundidade em Neovim e TUIs, no padrão de `backend-go` e irmãos: `model: sonnet`, `effort: medium`, pré-carrega `implementer-contract`. Detecta o runtime (Neovim por `lua/` + `plugin/` ou `vim.*`, LÖVE por `conf.lua`, OpenResty, LuaJIT/5.x standalone) e a versão (LuaJIT/5.1 no Neovim, 5.4 standalone). Segue as ferramentas que o projeto já tem: busted, plenary ou mini.test; luacheck ou selene; stylua ou treefmt; mise |
+| b | **TUI nos dois mundos, Neovim primeiro.** Dentro do Neovim: janelas flutuantes, buffers como UI (`nofile`, keymaps buffer-local), namespaces de extmark, highlights com link a grupos padrão, layout responsivo em `VimResized`, cuidado com `vim.schedule` e redraw. Terminal standalone: dependências mínimas, raw mode com restauração garantida, alternate screen, event loop `luv`, `SIGWINCH`, ANSI; biblioteca só se o projeto já usa uma |
+| c | **Duas skills de conhecimento novas**, pré-carregadas pelo agent e usáveis sozinhas: `neovim-plugin` e `lua-tui`. O corpo do agent fica curto. O agent também pré-carrega `design-system`, como o `frontend-react`, porque TUI é UI |
+| d | **Integração ao workflow**: hook (`lua` em `IMPLEMENTERS` e nos conjuntos literais de E9); `implement` e `specker` inferem `Stack: lua` por `*.rockspec`, `.luarc.json`, `stylua.toml`, `.luacheckrc` ou `lua/` + `plugin/`; `test-runner` detecta suites Lua sem `## Test suites` (busted, `nvim --headless` com plenary ou mini.test); `onboard` reconhece projetos Lua e Neovim e preenche `Test suites` e `Workflow`. `new-project` fica fora |
+| e | **Política de UI**: segue o `implementer-contract` e a regra global de validação visual pelo usuário. Pode rodar `nvim --headless` para testes; nunca abre um Neovim interativo nem roda um app TUI interativamente; lista o que o usuário deve conferir |
+| f | **Comandos Lua no hook** (resposta de 2026-11-12 à pergunta 1, opção a): `classify_command` reconhece busted, `nvim --headless` com plenary ou mini.test, as tasks do mise que rodam testes, lint ou formatação, luacheck, selene e stylua, e classifica cada um como teste ou lint do mesmo jeito que as outras stacks (formatadores contam como lint, como `gofmt` e `prettier`); `_spec.lua` e `_test.lua` contam como teste de arquivo único; com isso, `suite_by_non_runner` (E9) vale para o `lua`; a suite `claude-hooks` cobre tudo isso (regras 37, 46) |
+| g | **`test-writer` e `tdd` conhecem Lua** (pergunta 2, opção a): busted, plenary e mini.test na lista de frameworks do `test-writer`; a forma de stub `error("not implemented")` na `tdd` (regra 47) |
+| h | **`onboard` com documento Lua** (pergunta 3, opções a e c): preenche `Test suites` e `Workflow` e escreve um documento do projeto a partir de um template novo `templates/onboarding/LUA.md`, ao lado de `BACKEND.md`, `FRONTEND.md` e `MOBILE.md`, para projetos Lua e Neovim, inclusive sem pastas de serviço; criação do template aprovada pelo usuário (regras 43, 48-50) |
+| i | **TUI de terminal sem `DESIGN_SYSTEM.md`** (pergunta 4, opção a): as 16 cores ANSI nomeadas mais atributos, que herdam o tema do terminal do usuário, sem pedido de escopo; vale só sem o arquivo; com ele, o arquivo vence (regra 24) |
+| j | **Lua como uma unidade entre outras no `onboard`** (resposta de 2026-11-12 à pergunta que nasceu de h, opção a): um só `LUA.md` na raiz do repo, com um bloco por unidade Lua (ex.: gateway OpenResty em `services/`, pastas `awesome/` e `conky/`); as outras unidades seguem com os seus documentos (regras 48-49) |
+
+#### Escopo
+
+| Dentro | Fora |
+|---|---|
+| Agent `agents/lua.md` | `new-project` e um template de plugin Neovim (feature própria) |
+| Lua no `test-writer` e na `tdd` | |
+| Skills `neovim-plugin` e `lua-tui` | `templates/lua/STRUCTURE.md` ou qualquer template novo de stack (o `LUA.md` é de onboarding, não de stack) |
+| `Stack: lua` no `implement`, no `specker` e no template de spec | Executar Neovim interativo, apps TUI, jogos LÖVE ou apps hospedeiros, inclusive para "conferir" |
+| Detecção de suites Lua no `test-runner` | Prints ou captura de tela de terminal |
+| Reconhecimento de projetos Lua e Neovim no `onboard`, com o template novo `templates/onboarding/LUA.md` | Linguagens que compilam para Lua (Fennel, MoonScript, Teal) |
+| `lua` no hook (`IMPLEMENTERS`, conjunto literal de E9) e classificação de comandos Lua | Instalar ferramentas no ambiente (`mise install`, `luarocks install` global) por conta própria |
+| Descrições que listam os stack agents (`implementer-contract`, `design-system`) e a seção de UI do contract | Publicação de rocks ou releases de plugin |
+| Cenários 46-55 (14.3) e a métrica nova (14.2) | Mudança no `ui-verifier` (segue só para browser e simulador) |
+
+#### Regras de negócio
+
+**Definição do agent**
+
+1. Agent novo `agents/lua.md`, no padrão dos stack agents: `model: sonnet`, `effort: medium`, todas as tools, `skills: [implementer-contract, design-system, neovim-plugin, lua-tui]`.
+2. A description o apresenta como especialista geral em Lua, com profundidade em Neovim e TUIs, e o auto-invoca ("Use proactively when...") para código Lua: plugins e configs de Neovim, UI dentro do Neovim, TUIs de terminal, LÖVE, OpenResty, bibliotecas, scripts e configs embarcadas, e seus testes. A redação final fica na spec.
+3. O corpo segue o `implementer-contract` e acrescenta só o que é de Lua: detecção de runtime e versão, regras por runtime, checks estreitos, arquivos gerados e extras do report. O know-how de Neovim e de TUI fica nas skills (regras 27-31), e o tamanho do corpo fica na faixa dos stack agents irmãos.
+4. O `lua` entra em toda lista de stack agents da config: hook, `implement`, `specker`, template de spec e as descrições do `implementer-contract` e da `design-system` (regras 37-44).
+
+**Runtime e versão (antes de codar)**
+
+5. O runtime sai dos sinais do projeto, perto dos arquivos da task:
+
+   | Sinal | Runtime | Lua padrão |
+   |---|---|---|
+   | `lua/` + `plugin/`, ou uso de `vim.*` | Neovim (plugin) | LuaJIT (5.1) |
+   | `init.lua` + `lua/`, sem `plugin/` nem rockspec | Neovim (config) | LuaJIT (5.1) |
+   | `conf.lua`, ou `main.lua` com `love.*` | LÖVE | LuaJIT (5.1) |
+   | diretivas `*_by_lua*` em config do nginx, ou dependências `lua-resty-*` | OpenResty | LuaJIT (5.1) |
+   | API de um app hospedeiro (`wezterm`, `hs`, `awesome`, `conky_*`) | embarcado (regra 8) | a do hospedeiro |
+   | nenhum dos acima | standalone | 5.4 |
+
+6. Declaração explícita vence o padrão: `runtime.version` do `.luarc.json`, `std` do `.luacheckrc` ou do `selene.toml`, `dependencies` do rockspec (`lua >= x, < y`), ferramenta `lua`/`luajit` no `mise.toml`, matriz da CI. Declarações em conflito: vale a menor versão, registrada em `assumptions`.
+7. O código respeita a menor versão suportada pelo projeto. Abaixo de 5.3: sem `//`, sem operadores bit a bit nativos (usa `bit` no LuaJIT ou `bit32`, conforme o projeto), sem `utf8`; abaixo de 5.4: sem `<const>`/`<close>`; `goto` só em LuaJIT ou 5.2+. Projeto que suporta várias versões usa a camada de compatibilidade que já tem (ex.: `table.unpack or unpack`).
+8. Embarcado: a API do hospedeiro é tratada como globais do ambiente. A versão de Lua é a que o projeto ou a doc do hospedeiro declara; desconhecida, o código fica no subconjunto comum de 5.1 a 5.4 e a suposição vai para `assumptions`. O hospedeiro nunca é executado nem recarregado (regra 34).
+9. Neovim: a versão mínima suportada sai do README, da matriz da CI, do `health.lua` ou das guardas `vim.fn.has('nvim-0.x')`. Nenhuma API mais nova que ela é usada; com mínimo abaixo de 0.10, `vim.uv or vim.loop`. Sem nenhuma declaração, vale a versão do `mise.toml` ou da CI, registrada em `assumptions`.
+10. Sinais de dois runtimes no mesmo lugar: segue o do módulo parecido mais próximo do arquivo da task e registra em `assumptions`. A spec pode fixar o runtime na task, e isso vence a detecção.
+
+**Ferramentas do projeto**
+
+11. Usa as ferramentas que o projeto já tem e nunca introduz outra que duplique uma em uso: testes com busted, plenary.nvim ou mini.test; lint com luacheck ou selene; formatação com stylua ou treefmt; versões e comandos pelo mise (`mise exec --`) quando o projeto usa mise.
+12. Projeto sem framework de teste: o agent não adiciona um por conta própria. Se a task pede testes, termina `blocked` com um `scope_requests` que propõe o framework do runtime (o que a `neovim-plugin` indica para Neovim; busted para os demais). Sem testes pedidos, valida com o lint e o formatador configurados, registra a falta de testes em `notes` e lista em `manual_checks` como conferir.
+13. Dependência nova (rock, plugin Neovim, biblioteca de TUI) só quando a task a nomeia; senão, `scope_requests` com o motivo.
+14. Ferramentas do projeto ausentes no ambiente (ex.: tool do `mise.toml` não instalada): o agent não instala; o check vai para `blocked` no report, com o comando que o usuário roda.
+
+**Neovim (know-how na `neovim-plugin`)**
+
+15. Plugin: `plugin/<nome>.lua` mínimo, com `require` adiado para dentro dos comandos e mapeamentos (lazy-loading); `setup(opts)` só sobrescreve defaults, e a config mesclada passa por `vim.validate`; nenhum keymap padrão criado sem pedido (mapeamentos `<Plug>`); autocmds sempre num augroup nomeado com `clear = true`; `lua/<nome>/health.lua` cobre config e dependências externas e é atualizado quando a task muda uma delas.
+16. Toda chamada de `vim.api` vinda de callback de `vim.uv` (ou de outro contexto assíncrono) passa por `vim.schedule` ou `vim.schedule_wrap`.
+17. UI no Neovim: buffers de UI com `buftype=nofile`, sem swap e com `bufhidden` definido; keymaps buffer-local; um namespace de extmarks por plugin ou feature, limpo a cada re-render; highlights próprios com link a grupos padrão (`NormalFloat`, `FloatBorder`, `Comment`, `Diagnostic*`...) e `default = true`, nunca cor fixa, para o tema e os overrides do usuário valerem; layout recalculado em `VimResized`, com tamanho mínimo e limitado à área do editor; atualizações em lote, sem redraw em laço.
+18. Fechar a UI por qualquer caminho (`:q`, `<C-w>o`, comando do plugin, troca de tabpage) limpa o estado: autocmds, timers, handles de `vim.uv` e extmarks. Reabrir funciona como na primeira vez.
+19. Config de Neovim (não plugin): nenhuma convenção de plugin imposta (`setup`, `health.lua`, `<Plug>`); a estrutura existente manda.
+
+**TUI de terminal (know-how na `lua-tui`)**
+
+20. Dependências mínimas: sequências ANSI diretas e `luv` como event loop. Biblioteca de TUI só se o projeto já usa uma.
+21. Raw mode com restauração garantida em todo caminho de saída: término normal, erro (tratador em volta do loop) e sinais de término (SIGINT, SIGTERM). Restaurar = sair do raw mode, mostrar o cursor e sair do alternate screen; o erro, se houver, é impresso depois da restauração.
+22. Alternate screen ao entrar e saída dele ao terminar; `SIGWINCH` recalcula o layout.
+23. Sem TTY (entrada ou saída redirecionada): não entra em raw mode nem emite sequências de controle; o comportamento visível (mensagem ou saída em texto) segue a spec da feature. A variável `NO_COLOR` desliga cores.
+24. Cores: com `DESIGN_SYSTEM.md`, os tokens dele vencem. Sem o arquivo, a TUI usa só as 16 cores ANSI nomeadas (as 8 básicas e as 8 brilhantes) e atributos (negrito, dim, sublinhado, reverso), que herdam o tema do terminal do usuário; nada de cor 256 ou RGB fixa, e nenhum pedido de escopo para criar o arquivo (D23 i).
+
+**Estados de UI (Neovim e terminal)**
+
+25. Toda UI cobre no código os estados carregando, vazio, erro, sucesso, área pequena demais (janela ou terminal abaixo do mínimo, com aviso em vez de layout quebrado) e redimensionamento.
+26. Uma operação assíncrona que termina depois de a UI fechar não escreve em buffer, janela ou terminal que não existe mais.
+
+**Skills**
+
+27. `neovim-plugin`: API (`vim.api`, `vim.uv`, `vim.schedule`), autocmds e augroups, setup e lazy-loading, `:checkhealth`, `vim.validate`, testes headless (busted, plenary, mini.test, `minimal_init`), janelas e buffers como UI.
+28. `lua-tui`: a UI dentro do Neovim (regras 17-18) e a TUI de terminal (regras 20-23), com os estados das regras 25-26.
+29. As duas são usáveis sozinhas: carregadas pela description (não `user-invocable: false`) quando a sessão principal, o `code-reviewer` ou outro agent trabalha com Lua, sem depender do agent `lua` para fazer sentido.
+30. As duas são compactas: conteúdo pré-carregado é pago em todo run (regra de economia de tokens do `README.md`).
+31. `design-system` pré-carregada: vale para os tokens de TUI de terminal quando o `DESIGN_SYSTEM.md` existe (regra 24). No Neovim, o design system é o link a grupos padrão (regra 17). Nem plugin Neovim nem TUI de terminal sem `DESIGN_SYSTEM.md` geram pedido de escopo para o arquivo.
+
+**Checks e política de UI**
+
+32. Checks estreitos: um arquivo ou nome de teste (busted com o arquivo; `nvim --headless` com plenary ou mini.test num arquivo, com o `minimal_init` do projeto), lint e verificação de formato nos arquivos tocados. Nunca a suite inteira nem tasks do mise, Makefile ou justfile que rodam suites (`test`, `all`, `check`): o gate é do `test-runner`.
+33. `nvim --headless` só para testes e checks não interativos. O agent nunca abre um Neovim interativo, nunca roda app TUI ou jogo LÖVE e nunca executa ou recarrega um app hospedeiro ou o nginx.
+34. `manual_checks` de toda task de UI ou config embarcada: o comando, keymap ou ação que abre a UI (ou "recarregar `<app>`"), o tamanho de janela ou terminal (inclusive redimensionar e pequeno demais), o tema (colorscheme claro e escuro no Neovim, tema do terminal na TUI), cada estado da regra 25 e o resultado esperado. TUI de terminal acrescenta "Ctrl-C e erro deixam o terminal normal".
+35. OpenResty faz a validação de runtime do contract (seção 4: request + logs na instância local), como os backends; recarga do nginx é reinício e vai para `manual_checks`. Os outros runtimes não têm serviço: `local_checks` fica vazio.
+36. Fase `scaffold` (TDD): módulos com a forma real (tabela retornada, assinaturas, anotações LuaCATS) e corpos `error("not implemented")`. Arquivos gerados (`doc/tags`, vimdoc gerado por ferramenta) são regenerados, nunca editados. No report, `needs_docs` lista README, vimdoc escrito à mão (`doc/<plugin>.txt`) e opções novas de `setup`; anotações LuaCATS são código, escritas com ele; `notes` traz o runtime, a versão de Lua e a versão mínima do Neovim detectados.
+
+**Integração ao workflow**
+
+37. Hook: `lua` entra em `IMPLEMENTERS`, e com isso valem para ele as regras de implementer (escopo de run por `allowed_paths`, `docs_write_by_implementer`, `suite_by_non_runner`). O conjunto literal de `hooks/tests/test_hook_main.py` (E9) recebe `lua`, e os comandos Lua passam a ser classificados (regra 46).
+38. `implement`: o stack vem do **Stack** da task; na inferência pelos arquivos (spec antiga), `*.rockspec`, `.luarc.json`, `stylua.toml`, `.luacheckrc` ou `lua/` + `plugin/` perto dos arquivos da task, ou arquivos `.lua` na task, levam ao `lua`. Arquivos de outro stack vão ao agent desse stack, mesmo num repo com marcadores Lua.
+39. `specker`: a lista de **Stack** ganha `lua`, inferido pelos mesmos sinais. Uma task, um stack: trabalho Lua e de outro stack ficam em tasks separadas.
+40. Template de spec (`templates/docs-structure/features/_template/spec.md`): a linha **Stack** ganha `lua`.
+41. `test-runner`, sem `## Test suites`: segue a ordem atual (prompt, CI, scripts do projeto, padrões do ecossistema); tasks do `mise.toml` contam como scripts do projeto. A tabela de padrões ganha a linha Lua: lint com luacheck ou selene quando configurados; verificação de formato com `stylua --check` ou `treefmt --ci` quando configurados; testes com busted quando há `.busted` ou `spec/`; testes Neovim com `nvim --headless` e plenary ou mini.test, usando o `minimal_init` do projeto.
+42. `test-runner` sem o `minimal_init` que a suite Neovim exige: `blocked` com o motivo; nunca cria um.
+43. `onboard`: sem pastas de serviço e com sinais Lua na raiz (regras 5 e 38), reconhece o repo como um projeto Lua. Preenche `## Test suites` (CI primeiro, depois tasks do mise, Makefile/justfile, `.busted` e pastas de teste) e `## Workflow`, propondo ao usuário e escrevendo só depois do sim, como hoje. `## Local runtime` só quando o Lua roda como serviço (OpenResty); plugin, config, LÖVE e biblioteca não têm a seção. Além das seções, escreve o documento do projeto a partir do `LUA.md` (regras 48-50).
+44. Descrições: o `implementer-contract` lista o `lua` entre os stack agents, e a seção 5 (UI) passa a valer também para UI de terminal, com `nvim --headless` permitido para testes e Neovim interativo, app TUI e recarga de hospedeiro na lista do que nunca se abre. A description da `design-system` lista o `lua` entre os que a pré-carregam.
+
+**Documentação (pelo `docs-writer`, no fim)**
+
+45. `README.md`: linha do `lua` na tabela de agents; linhas de `neovim-plugin` e `lua-tui` na tabela de skills; `lua` em "preloaded by" da `design-system` e do `implementer-contract`; "the seven agent files" vira oito; o parágrafo de `onboarding/` cita o `LUA.md` ao lado de `BACKEND.md`/`FRONTEND.md`/`MOBILE.md`. O `CLAUDE.md` global não tem lista de agents (conferido em 2026-11-12) e a tabela Workflow roteia para o `implement` sem nomear stacks: nada muda nele.
+
+**Perguntas respondidas em 2026-11-12**
+
+46. Classificação de comandos Lua no hook (`classify_command`), com as mesmas dicas de estreito, pacote e completo das outras stacks (D23 f):
+
+    | Comando | Categoria |
+    |---|---|
+    | `busted` | teste: estreito com um arquivo `_spec.lua`/`_test.lua` ou filtro (`--filter`, `-t`); pacote com um caminho de pasta; completo sem argumento |
+    | `nvim --headless` com plenary (`PlenaryBustedFile`, `PlenaryBustedDirectory`) | teste: estreito com um arquivo; pacote ou completo com pasta, pelas mesmas dicas |
+    | `nvim --headless` com mini.test (`MiniTest.run_file`, `MiniTest.run`) | teste: estreito com `run_file`; completo com `run` |
+    | `nvim --headless` sem plenary nem mini.test | não é teste (categoria atual) |
+    | `mise run <task>` / `mise r <task>`, task `test*` | teste, como `make test` (completo sem dica de estreito ou pacote) |
+    | `mise run <task>`, task `lint*`, `format*` ou `fmt*` | lint, como `make lint` |
+    | `mise run all`, `check` ou `ci` | teste completo (rodam a suite; regra 32) |
+    | `mise exec -- <cmd>` / `mise x -- <cmd>` | a categoria do `<cmd>` |
+    | `luacheck`, `selene` | lint |
+    | `stylua` (com ou sem `--check`) | lint, como `gofmt` e `prettier` (formatador conta como lint) |
+
+    Arquivos `_spec.lua` e `_test.lua` num comando de teste contam como teste de arquivo único. Com isso, `suite_by_non_runner` (E9) sinaliza o `lua` rodando suite completa ou de pacote e não sinaliza o teste de arquivo único. A suite `claude-hooks` cobre cada linha da tabela (`test_classify.py`) e o E9 com o ator `lua` (`test_hook_main.py`).
+47. `test-writer` e `tdd` conhecem Lua (D23 g): busted, plenary e mini.test entram na lista de frameworks e runners do `test-writer` (que continua sem introduzir framework novo); a `tdd`, no passo de scaffold, dá a forma do stub Lua: módulo com a forma real (tabela retornada, assinaturas, anotações LuaCATS) e corpos `error("not implemented")`, a mesma da fase `scaffold` do `lua` (regra 36).
+48. `onboard` usa o `LUA.md` para um projeto Lua ou Neovim: repo sem pastas de serviço com sinais Lua na raiz (regras 5 e 38), inclusive config de Neovim e config embarcada, e também cada unidade Lua de um repo com outras unidades: serviço Lua num monorepo (ex.: gateway OpenResty em `services/`) ou pasta Lua num repo misto (ex.: `awesome/` e `conky/` neste dotfiles). Há um só `LUA.md`, na raiz do repo, como `BACKEND.md`, `FRONTEND.md` e `MOBILE.md`, com um bloco por unidade Lua; as outras unidades seguem com os seus documentos (um gateway OpenResty vai para o `LUA.md`, não para o `BACKEND.md`). Só entram as unidades que o usuário escolheu onboardar (passo 2 do `onboard`) (D23 h, j).
+49. Template novo `templates/onboarding/LUA.md`, aprovado pelo usuário, com a mesma forma dos outros (comentário de topo "realidade atual, não aspiração"; seções com comentários-guia). Um bloco por unidade Lua (regra 48): título `## <caminho da unidade>` (`## .` quando o repo inteiro é a unidade), e as seções abaixo dentro de cada bloco, um nível abaixo; um projeto inteiramente Lua tem um bloco só:
+
+    | Seção | Conteúdo |
+    |---|---|
+    | `Stack` | runtime (Neovim plugin, Neovim config, LÖVE, OpenResty, standalone, embarcado com o nome do hospedeiro); versão de Lua e onde está declarada; versão mínima do Neovim (só Neovim); dependências principais (rocks, plugins como plenary); ferramentas (testes, lint, formatação, mise) |
+    | `Folder structure` | a árvore real, anotada |
+    | `Design patterns in use` | organização de módulos e API pública; pontos de entrada e carga (`plugin/`, `setup`, lazy-loading, comandos, entrada do hospedeiro); configuração e validação; assíncrono e event loop (`vim.uv`/`luv`, `vim.schedule`, coroutines); UI (janelas, buffers, extmarks, highlights; ou raw mode e alternate screen; ou "não se aplica"); tratamento de erro e notificação; health check; testes (framework, `minimal_init`, helpers, onde ficam) |
+    | `Conventions observed` | nomes; organização de arquivos; anotações LuaCATS |
+    | `Inconsistencies` | o mesmo problema resolvido de jeitos diferentes |
+    | `Recommendations` | comparação com as convenções das skills `neovim-plugin` e `lua-tui` (não há `STRUCTURE.md` de Lua); ponto de partida para conversa, não mandato de refactor |
+    | `Open questions` | o que o código sozinho não responde |
+
+50. Preenchimento do `LUA.md`: como os outros documentos do `onboard` (prosa no idioma de `Documentation language`, identificadores como estão no código); item que não se aplica ao runtime diz isso explicitamente (ex.: "não se aplica: biblioteca sem UI"), nunca fica com placeholder.
+
+#### Casos de borda
+
+| Situação | Comportamento esperado |
+|---|---|
+| Repo com Lua e outro stack (serviço Go + gateway OpenResty; este dotfiles, com hooks Python e configs `awesome/`/`conky/`) | stack por task, pelos arquivos (regra 38); o `specker` separa as tasks (regra 39); o `test-runner` em escopo `task` roda só as suites do que foi tocado; no `onboard`, um bloco por unidade Lua no `LUA.md` (regra 48) |
+| Repo de config do Neovim, não plugin | runtime Neovim (config); nenhuma convenção de plugin (regra 19); sem testes, vale a regra 12 |
+| Lua embarcado (wezterm, hammerspoon, awesome, conky) | API do hospedeiro como globais; versão do hospedeiro ou subconjunto 5.1-5.4 (regra 8); hospedeiro nunca executado ou recarregado; `manual_checks` com "recarregar `<app>`" |
+| Projeto sem framework de teste | nenhum framework adicionado sem pedido; `scope_requests` se a task pede testes (regra 12) |
+| Projeto preso à semântica do 5.1 | nada acima de 5.1 (regra 7); o `std` do luacheck é respeitado; recursos só do LuaJIT (`goto`, `ffi`, `bit`) evitados se o projeto também roda em PUC 5.1 |
+| Suite que exige LuaJIT (ex.: yield de coroutine atravessando `pcall`) | os checks rodam sob o LuaJIT que o projeto declara; o agent não troca o runtime para "consertar" o teste |
+| Plugin que suporta Neovim abaixo de 0.10 | `vim.uv or vim.loop`; nenhuma API mais nova que o mínimo (regra 9) |
+| Plugin com testes plenary sem `minimal_init` | o check estreito vai para `blocked` no report; o `test-runner` termina `blocked` (regra 42); ninguém cria o arquivo sem pedido |
+| Usuário fecha a janela flutuante com `:q` ou `<C-w>o` | estado limpo; reabrir funciona (regra 18) |
+| Resposta assíncrona chega depois de a UI fechar | descartada sem erro (regra 26) |
+| Terminal ou janela abaixo do tamanho mínimo | estado "pequeno demais", sem quebra nem erro (regra 25) |
+| TUI recebe Ctrl-C ou lança erro | terminal restaurado; o erro aparece depois da restauração (regra 21) |
+| TUI com saída redirecionada (pipe, arquivo) | sem raw mode nem sequências de controle (regra 23) |
+| TUI de terminal sem `DESIGN_SYSTEM.md` | 16 cores ANSI nomeadas e atributos, herdando o tema do terminal; nenhum pedido de escopo (regra 24) |
+| TUI de terminal com `DESIGN_SYSTEM.md` | os tokens do arquivo vencem as cores ANSI (regra 24) |
+| `lua` roda `mise run test` ou `busted` sem argumento | hook sinaliza `suite_by_non_runner` (regra 46); a suite fica com o `test-runner` |
+| `onboard` num repo de config embarcada ou de config do Neovim, sem pastas de serviço | projeto Lua: `LUA.md` na raiz com um bloco só, com os itens de UI ou health check marcados "não se aplica" quando for o caso (regras 48-50) |
+| `onboard` num monorepo com gateway OpenResty em `services/` e serviços de outra linguagem | `LUA.md` na raiz com o bloco do gateway; os outros serviços seguem com `BACKEND.md`, `FRONTEND.md` ou `MOBILE.md` (regra 48) |
+| `onboard` num repo misto com pastas Lua (`awesome/`, `conky/`) e código de outra linguagem | um `LUA.md` na raiz com um bloco por pasta Lua escolhida; o resto segue o fluxo atual (regra 48) |
+| Projeto LÖVE | o jogo nunca é executado; testes só se o projeto tem framework; `manual_checks` com o que conferir no jogo |
+| OpenResty | validação por request + logs na instância local (regra 35); recarga do nginx em `manual_checks` |
+| Biblioteca Lua só com rockspec | runtime standalone; versão pelo rockspec (regra 6); busted se configurado |
+| Spec com `Stack: lua` num projeto sem marcador Lua (primeiro módulo Lua) | o agent segue a spec; runtime pela task ou pela regra 10, em `assumptions` |
+| Tool do `mise.toml` não instalada | nada instalado; check em `blocked` com o comando para o usuário (regra 14) |
+| Prompt pede print ou conferência visual | não faz; registra em `notes` e lista os estados em `manual_checks` (contract, seção 5) |
+| Fennel, MoonScript ou Teal no repo | fora do escopo; o agent só toca o Lua e reporta em `notes` quando a task exigiria a outra linguagem |
+
+#### Abordagem (nível de produto)
+
+**Pontos de entrada:**
+
+| Entrada | Quem escolhe o `lua` | Resultado |
+|---|---|---|
+| Task do `implement` com `Stack: lua` | a spec | `lua` em `implement`, `scaffold` (TDD) ou `fix` |
+| Task de spec antiga, sem **Stack**, com arquivos Lua | inferência do `implement` (regra 38) | `lua` |
+| Pedido direto na sessão ("ajusta a janela flutuante do plugin") | description do agent | `lua`, com o escopo do pedido |
+| Bug em código Lua (`fix-bug`) | dono dos arquivos | `lua` nas fases `diagnose` e `fix` |
+| Gate de uma task Lua | `test-runner` (`Test suites` ou detecção, regra 41) | resumo YAML das suites Lua |
+| Projeto Lua ou Neovim no `onboard` | `onboard` (regras 43, 48) | `LUA.md` na raiz, mais `Test suites` e `Workflow` propostos e escritos depois do sim |
+
+**Estados de cada chamada do `lua`:**
+
+| Estado | Quando | O que o usuário vê |
+|---|---|---|
+| Concluído (`done`) | task feita, checks estreitos passando | arquivos, checks, runtime e versão em `notes`, `manual_checks` (UI ou embarcado), `local_checks` (OpenResty) |
+| Parcial (`partial`) | pedido de escopo negado (dependência, framework de teste, arquivo fora de `allowed_paths`) | o que foi feito, o que ficou de fora e por quê |
+| Bloqueado (`blocked`) | precisa de escopo, ação negada pelo hook ou ferramenta ausente no ambiente | o pedido com o motivo, ou o comando que o usuário roda |
+| Sem serviço (`local_checks` vazio) | runtime sem serviço (Neovim, LÖVE, standalone, embarcado) | só `manual_checks` |
+| Validação de runtime pulada | OpenResty parado, sem `reload: auto` ou sem dados no `Local runtime` | `skipped` com o motivo e o `curl` em `manual_checks` (contract, seção 4) |
+
+**Exemplo de `manual_checks` de uma janela flutuante** (ilustrativo):
+
+```
+- :MeuPlugin open -> janela centralizada, borda e cores do tema atual
+- redimensionar o terminal com a janela aberta -> janela recentralizada, sem corte
+- terminal com 40 colunas -> aviso "janela pequena demais", sem erro
+- :colorscheme de tema claro e de tema escuro -> cores acompanham o tema
+- lista vazia / erro de rede / carregando -> textos de cada estado
+- :q na janela e reabrir -> abre igual à primeira vez, sem erro em :messages
+```
+
+**Arquivos (em `~/dotfiles/.claude/`):**
+
+| Arquivo | Mudança |
+|---|---|
+| `agents/lua.md` | **novo**: frontmatter de D23 (a, c); corpo com detecção de runtime e versão, ferramentas, checks estreitos, política de UI, arquivos gerados e extras do report (regras 1-14, 32-36) |
+| `skills/neovim-plugin/SKILL.md` | **nova** (regras 15-19, 27, 29-30) |
+| `skills/lua-tui/SKILL.md` | **nova** (regras 17-18, 20-26, 28-30) |
+| `skills/implementer-contract/SKILL.md` | description lista o `lua`; seção 5 vale para UI de terminal, com `nvim --headless` permitido para testes e Neovim interativo, app TUI e recarga de hospedeiro proibidos (regra 44) |
+| `skills/design-system/SKILL.md` | description: o `lua` entre os que a pré-carregam (regra 44) |
+| `skills/implement/SKILL.md` | inferência de stack com Lua (regra 38) |
+| `agents/specker.md` | `lua` na lista de **Stack** e inferência (regra 39) |
+| `templates/docs-structure/features/_template/spec.md` | `lua` na linha **Stack** (regra 40) |
+| `agents/test-runner.md` | tasks do mise como scripts do projeto; linha Lua na tabela de padrões; `minimal_init` ausente = `blocked` (regras 41-42) |
+| `skills/onboard/SKILL.md` | reconhecimento de projeto Lua sem pastas de serviço; fontes de `Test suites`; `Local runtime` só com serviço; padrões a observar num projeto Lua; `LUA.md` no passo de escrita, um só na raiz com um bloco por unidade Lua (regras 43, 48-50) |
+| `templates/onboarding/LUA.md` | **novo**, aprovado pelo usuário; um bloco por unidade Lua (regra 49) |
+| `hooks/agent-audit.py` | `lua` em `IMPLEMENTERS` (regra 37); classificação de comandos Lua em `classify_command` (regra 46) |
+| `hooks/tests/test_hook_main.py` | `lua` no conjunto literal de E9; E9 com o ator `lua` (suite sinalizada, arquivo único não) (regras 37, 46) |
+| `hooks/tests/test_classify.py` | um caso por linha da tabela da regra 46 |
+| `agents/test-writer.md` | busted, plenary e mini.test na lista de frameworks (regra 47) |
+| `skills/tdd/SKILL.md` | forma do stub Lua no scaffold (regra 47) |
+| `README.md` | pelo `docs-writer`, no fim (regra 45) |
+| `agent-workflow.md` | "Registro de execução" da etapa I, depois de executada |
+
+#### Verificação
+
+- **Estática**: frontmatter do `lua` válido (`model`, `effort`, `skills`, todas as skills existentes); `neovim-plugin` e `lua-tui` com description que dispara em código Lua e sem `user-invocable: false`; `grep` de `mobile-react-native` em listas de stack (hook, testes do hook, `implement`, `specker`, template de spec, `implementer-contract`, `design-system`) mostra o `lua` em todas; tamanho de `agents/lua.md` na faixa dos irmãos; nenhum em dash nos arquivos tocados.
+- **Hook**: a suite `claude-hooks` (`## Test suites` do `CLAUDE.md` do repo) passa, com o conjunto literal novo, um caso de `test_classify.py` por linha da tabela da regra 46 e o E9 com o ator `lua` (suite completa ou de pacote sinalizada; `_spec.lua`/`_test.lua` de arquivo único não).
+- **Template**: `templates/onboarding/LUA.md` com as seções da regra 49, na mesma forma de `BACKEND.md` (comentário de topo, comentários-guia), e a instrução de um bloco por unidade Lua.
+- **`onboard`**: a skill manda escrever um só `LUA.md` na raiz, com um bloco por unidade Lua, e deixa as outras unidades com os seus documentos (regra 48).
+- **Uso real** (sessão nova do Claude Code, porque agents e skills novos só aparecem nela): cenários 46-55 da seção 14.3, num plugin Neovim com busted e luacheck, numa TUI de terminal de teste (com e sem `DESIGN_SYSTEM.md`) e numa config embarcada; mais o relatório `agent-metrics.py` (métrica nova de 14.2 e escritas do `lua`).
+
+#### Riscos e mitigações
+
+| Risco | Mitigação |
+|---|---|
+| Quatro skills pré-carregadas pesam em toda task Lua, até em OpenResty ou biblioteca | skills compactas (regra 30); tokens por task medidos contra o baseline (14.2); se pesar, o detalhe sai para carga sob demanda |
+| Runtime detectado errado (config x plugin, hospedeiro desconhecido) | tabela de sinais e precedência (regras 5-6, 10); dúvida vai para `assumptions`; a spec pode fixar o runtime |
+| Código usa recurso de versão mais nova que a do projeto | regra 7; `std` do luacheck/selene pega parte; cenário 53 |
+| Classificação nova do hook pega comando que não é teste (ex.: `nvim --headless` de outra coisa) | só `nvim --headless` com plenary ou mini.test é teste (regra 46); caso negativo na suite `claude-hooks` |
+| Task do mise com nome fora do padrão (`spec`, `unit`) roda a suite sem ser sinalizada | o padrão segue o de `make`/`just` das outras stacks; nomes novos entram quando os dados do registro mostrarem (13.3) |
+| `LUA.md` muda os templates de todos os projetos | aprovado pelo usuário (D23 h); só é usado em projetos Lua, e os outros templates não mudam |
+| Agent tenta abrir `nvim` ou o app TUI e trava o `Bash` | regras 33-34 no corpo e no contract; métrica nova (14.2) pelo comando gravado no registro do hook |
+| TUI que cai deixa o terminal do usuário quebrado | regra 21 em todos os caminhos de saída; item fixo em `manual_checks` |
+| Inferência marca como Lua uma task de outro stack num repo com `.luarc.json` | arquivos da task vencem os marcadores do repo (regra 38) |
+| API do Neovim muda entre versões (ex.: forma de `vim.validate`, `vim.loop` -> `vim.uv`) | versão mínima detectada (regra 9); `notes` traz a versão usada |
+
+#### Perguntas em aberto
+
+Nenhuma. As quatro perguntas da primeira versão foram respondidas em 2026-11-12 (D23 f-i) e viraram as regras 24, 31, 37, 43 e 46-50; a que nasceu da resposta sobre o `LUA.md` (Lua como uma unidade entre outras) foi respondida no mesmo dia (D23 j) e entrou nas regras 48-49.
+
+#### Adendo 2026-11-13 (implementação)
+
+Registrado depois da implementação e da revisão; não reabre as decisões a-j.
+
+- **Stub Lua (muda D23 g e as regras 36 e 47)**: o stub Lua da fase `scaffold` do `lua` e do passo de scaffold da `tdd` devolve um valor vazio ou zero do tipo certo (`{}`, `""`, `0`, `false`, `nil` documentado, iterador ou callback vazio), nunca `error("not implemented")`. Motivo: o busted reporta `error()` como Error, e o `test-runner` o classificaria como falha de runtime em vez de falha de asserção. Onde D23 (g) e as regras 36 e 47 dizem `error("not implemented")`, vale esta linha. Decisão do usuário durante a task 8; registrada no log e no adendo da spec.
+- **Decisões da spec aceitas pelo usuário (S3-S10)**, além do texto do plan:
+  - S3: busted, `luarocks test`, luacheck, selene, stylua e treefmt entram nas regex genéricas do hook; `mise` e `nvim` ganham ramos próprios; a dica `--filter` vale só para o busted (`pnpm --filter api test` segue `test-package`).
+  - S4: formas do mise além da regra 46: `mise tasks run <task>`, o atalho `mise <task>`, várias tasks com `:::` e flags antes do nome da task; `mise test-tool` não é task.
+  - S5: `luarocks test` é teste completo; `treefmt` (com ou sem `--ci`) é lint.
+  - S6: `timeout [opções] <duração>` é prefixo removido pelo `strip_prefixes` **para todas as stacks** (`timeout 5 git push` passa a ser `git-push`, `timeout 60 pytest` passa a ser `test-full`). O adendo A2 da spec estende a toda forma GNU, com falha fechada.
+  - S7: `busted`, `luacheck`, `selene`, `stylua` e `nvim` chamados por caminho (`./.luarocks/bin/busted`) contam pelo nome do arquivo.
+  - S8: marcadores de roteamento `.stylua.toml` e `selene.toml`, além dos da regra 38.
+  - S9: a `design-system` ganha um bullet no passo 1: UI de Neovim ou TUI de terminal sem `DESIGN_SYSTEM.md` não abre pedido de escopo (evita o conflito com as regras 24 e 31).
+  - S10: `agents/lua.md` entre 3.400 e 4.600 bytes; cada skill nova com no máximo 120 linhas e 7.000 bytes.
+- **Duas categorias novas de bloqueio no hook, aprovadas pelo usuário durante a revisão** (não estavam no plan; entram em `agent-audit.json` como `block`, valem para todo ator):
+  - `command_too_long`: comando Bash com mais de 16384 caracteres é negado sem ser analisado (`MAX_COMMAND_LEN`); o texto orienta a gravar conteúdo grande com a ferramenta Write.
+  - `analysis_timeout`: guarda de 7 s de relógio em torno da classificação (`ANALYSIS_TIMEOUT_S`); uma chamada complexa demais para analisar a tempo é negada. A variável `AGENT_AUDIT_ANALYSIS_TIMEOUT` é só de teste e só pode baixar o limite. O hook imprime a decisão antes de gravar o registro, e mais de 32 abridores de heredoc (`MAX_HEREDOC_OPENERS`) classificam o comando como comandos.
+- **Escopo do hook ampliado pela revisão**: shell escapes do Neovim (`-c`, `--cmd`, `+`) são classificados; `timeout` e `mise exec|x --` são prefixos removidos; flags globais do mise e do luarocks são puladas. Detalhes em 13.6 (adendo) e na spec (A2-A5).
+
+**Fontes**: Neovim, [Lua plugin guide](https://neovim.io/doc/user/lua-plugin/) (lazy-loading, `setup`, `vim.validate`, `health.lua`, `<Plug>`) e [Lua API](https://neovim.io/doc/user/lua/) (`vim.uv`: "It is an error to directly invoke `vim.api` functions (except api-fast) in `vim.uv` callbacks"; `vim.validate(name, value, validator[, optional][, message])`, com a forma de tabela marcada como DEPRECATED); [NO_COLOR](https://no-color.org/).
+
+> 💬
+
 ---
 
 ## 16. Decisões
@@ -1189,10 +1528,11 @@ Rótulos fixos (`D<n>`) para não serem renumerados por formatadores de Markdown
 | D20 | Modo TDD no `implement` | flag opt-in `--tdd`; o stack agent não altera testes sem `scope_request` aprovado (12.4) |
 | D21 | Migração para `docs/features/` | oferecer uma vez **e** manter compatibilidade com o layout legado; a recusa fica gravada no `CLAUDE.md` do projeto (6.1.1) |
 | D22 | `design-director` (etapa H, implementada) | agent novo cria a direção visual de projetos sem frontend definido, em rodadas via `needs_input` (duas direções contrastantes, o usuário escolhe), e escreve só `DESIGN_SYSTEM.md`; a manutenção fica com a `design-system`; três pontos de entrada, nenhum automático; plugin `frontend-design` não adotado, só ideias reescritas; opus, effort alto, sem `Bash`; hook com isenção, categoria `design_system_write_by_other` (`warn`) e categoria `design_director_write_outside` (`block`); UI já existente em código fica com a extração pela `design-system`; seção nova `Layout concept` no template; só fontes de licença aberta ou do sistema; light e dark sempre (15.1, decisões a-j) |
+| D23 | Agent `lua` (etapa I, implementada) | stack agent novo `lua` (sonnet, effort médio), especialista geral em Lua com profundidade em Neovim e TUI; detecta runtime (Neovim, LÖVE, OpenResty, standalone) e versão (LuaJIT/5.1 no Neovim, 5.4 standalone) e segue as ferramentas do projeto; TUI nos dois mundos, Neovim primeiro; skills novas `neovim-plugin` e `lua-tui`, pré-carregadas com `implementer-contract` e `design-system` e usáveis sozinhas; `Stack: lua` no `implement` e no `specker`, detecção no `test-runner` e no `onboard`, `lua` no hook; `nvim --headless` só para testes, nada interativo; `new-project` fora; respostas de 2026-11-12: comandos Lua classificados no hook (E9 vale para o `lua`), `test-writer` e `tdd` conhecem Lua, `onboard` escreve `LUA.md` a partir de template novo aprovado, TUI sem `DESIGN_SYSTEM.md` usa as 16 cores ANSI nomeadas, um só `LUA.md` na raiz com um bloco por unidade Lua (15.2, decisões a-j) |
 
 ### 16.2 Em aberto
 
-Nenhuma. As perguntas da etapa H foram respondidas em 2026-11-11 (15.1, D22 g-j).
+Nenhuma. As perguntas da etapa I foram respondidas em 2026-11-12 (15.2, D23 f-j); as da etapa H, em 2026-11-11 (15.1, D22 g-j).
 
 ---
 
@@ -1253,6 +1593,21 @@ Nenhuma. As perguntas da etapa H foram respondidas em 2026-11-11 (15.1, D22 g-j)
 | D22 (h) | resposta à pergunta 2: seção nova `Layout concept` no template `project-root/DESIGN_SYSTEM.md`, aprovada | 15.1 (regras 24, 34; arquivos; verificação; riscos), cenário 37 |
 | D22 (i) | resposta à pergunta 3: só fontes de licença aberta (ex.: SIL OFL) ou do sistema, com a origem registrada | 15.1 (regras 12, 22; casos de borda; arquivos; riscos), cenário 37 |
 | D22 (j) | resposta à pergunta 4: light e dark sempre, mesmo com o `PRD.md` excluindo tema escuro | 15.1 (regra 20; casos de borda) |
+
+## Apêndice E: decisões do grill-me de 2026-11-12 (etapa I) e onde foram tratadas
+
+| Decisão | Resumo | Tratado em |
+|---|---|---|
+| D23 (a) | agent `lua` no padrão dos stack agents (sonnet, effort médio, `implementer-contract`); detecção de runtime e versão; ferramentas do projeto | 12.1, 15.2 (regras 1-14; casos de borda), cenários 46, 51-53 |
+| D23 (b) | TUI dentro do Neovim e no terminal, Neovim primeiro | 15.2 (regras 15-26; casos de borda), cenários 47-48 |
+| D23 (c) | skills `neovim-plugin` e `lua-tui`, pré-carregadas e usáveis sozinhas; corpo curto; `design-system` pré-carregada | 12.1, 12.2, 15.2 (regras 3, 27-31) |
+| D23 (d) | hook, `implement`, `specker`, `test-runner` e `onboard`; `new-project` fora | 15.2 (regras 37-44), cenários 49-50, 54-55 |
+| D23 (e) | política de UI: `nvim --headless` só para testes, nada interativo, `manual_checks` | 14.2, 15.2 (regras 32-35, 44), cenários 46-48, 52 |
+| D23 (f) | resposta à pergunta 1: `classify_command` reconhece busted, `nvim --headless` com plenary ou mini.test, tasks do mise, luacheck, selene e stylua; `_spec.lua`/`_test.lua` estreitos; E9 vale para o `lua`; suite `claude-hooks` cobre | 15.2 (regras 37, 46; critérios; casos de borda; arquivos; verificação; riscos), cenário 55 |
+| D23 (g) | resposta à pergunta 2: busted, plenary e mini.test no `test-writer`; stub `error("not implemented")` na `tdd` | 15.2 (regra 47; escopo; arquivos) |
+| D23 (h) | resposta à pergunta 3 (opções a e c): `Test suites`, `Workflow` e documento do projeto a partir do template novo `templates/onboarding/LUA.md`, aprovado | 15.2 (regras 43, 45, 48-50; critérios; casos de borda; arquivos; verificação; riscos), cenário 54 |
+| D23 (i) | resposta à pergunta 4: TUI sem `DESIGN_SYSTEM.md` usa as 16 cores ANSI nomeadas e atributos, sem pedido de escopo; com o arquivo, ele vence | 15.2 (regras 24, 31; casos de borda), cenário 48 |
+| D23 (j) | resposta à pergunta que nasceu de h: um só `LUA.md` na raiz, um bloco por unidade Lua (gateway OpenResty em `services/`, pastas `awesome/` e `conky/`); as outras unidades seguem com os seus documentos | 15.2 (regras 48-49; casos de borda; verificação), cenário 54 |
 
 ---
 
@@ -1511,3 +1866,41 @@ Spec: `~/dotfiles/.claude/docs/features/design-director/spec.md`; log: `log.md` 
 **Pendências:**
 - Sessão nova do Claude Code (o agent só carrega nela): cenários 37-45 da seção 14.3, `/new-project` com perfil react e com perfil só backend, e o relatório `agent-metrics.py` com a seção `## design-director`.
 - Promover a `design_system_write_by_other` a `block` só com os dados do uso real.
+
+### Etapa I - 2026-11-13 (concluída; uso real pendente)
+
+Spec: `~/dotfiles/.claude/docs/features/lua-agent/spec.md` (adendo de 2026-11-13, A1-A7, vale sobre o corpo); log: `log.md` na mesma pasta. Nove tasks, cinco rodadas de correção do hook (review de código e de segurança). Tasks de Markdown rodaram pelo `frontend-react`, porque o `lua` ainda não existia na sessão.
+
+**O que foi feito (em `~/dotfiles/.claude/`):**
+
+| Arquivo | Mudança |
+|---|---|
+| `agents/lua.md` | **novo**: sonnet, effort médio, pré-carrega `implementer-contract`, `design-system`, `neovim-plugin` e `lua-tui`; corpo em inglês com detecção de runtime e versão, comandos estreitos (`timeout 60 nvim --headless` com o `minimal_init` do projeto), política de UI com `manual_checks`, fase `scaffold` e extras do report |
+| `skills/neovim-plugin/SKILL.md`, `skills/lua-tui/SKILL.md` | **novas**, sem `user-invocable: false`, dentro dos limites S10 |
+| `skills/implementer-contract/SKILL.md`, `skills/design-system/SKILL.md` | `lua` nas descriptions; seção 5 do contract vale para Neovim e terminal; bullet S9 na `design-system` |
+| `skills/implement/SKILL.md`, `agents/specker.md`, `templates/docs-structure/features/_template/spec.md` | `Stack: lua` e inferência por marcadores (`*.rockspec`, `.luarc.json`, `stylua.toml`/`.stylua.toml`, `selene.toml`, `.luacheckrc`, `lua/` + `plugin/`); os arquivos da task vencem os marcadores do repo |
+| `agents/test-runner.md` | tasks do mise como scripts do projeto; linha Lua na tabela de padrões; `minimal_init` ausente = `blocked`, nada criado |
+| `agents/test-writer.md`, `skills/tdd/SKILL.md` | busted, plenary e mini.test; stub Lua com valor vazio do tipo certo (ver adendo de 15.2) |
+| `skills/onboard/SKILL.md`, `templates/onboarding/LUA.md` | reconhece unidades Lua sem pastas de serviço; um só `LUA.md` na raiz com um bloco por unidade; `Local runtime` só com serviço (OpenResty) |
+| `hooks/agent-audit.py`, `hooks/agent-audit.json` | `lua` em `IMPLEMENTERS`; comandos Lua, `timeout`, `mise exec|x` e shell escapes do Neovim; categorias `command_too_long` e `analysis_timeout` em `block` (13.6, adendo) |
+| `hooks/tests/test_classify.py`, `test_hook_main.py`, `test_hook_process.py`, `_support.py`, `test_config_contract.py` | casos L1-L25, LR1-LR13, LE1-LE7, cap de tamanho, guarda de tempo e ordem decisão-antes-do-registro; suite com 317 testes |
+| `README.md` | agents, skills, hook (comandos Lua, prefixos, categorias novas), `onboarding/`, contagem de testes |
+
+**Verificação:** suite `claude-hooks` com 317 testes passando (264 após a task 1; 268, 272, 286, 310 e 317 após cada rodada de correção); frontmatters válidos; `agents/lua.md` com 4.591 bytes (faixa S10); nenhum em dash nos arquivos tocados. Cenários 46-55 da seção 14.3 ainda não rodados em sessão nova.
+
+**Achados do review corrigidos (cinco rodadas, todas na task 1, `backend-python`):**
+- r1: parser do `timeout` reescrito como parse GNU estrito com leitura de fallback que falha fechada; flags globais do mise; shell escapes do Neovim classificados; formas `test_harness` e `require"mini.test"`; `luarocks [flags] test`.
+- r2: regressão de tempo no `_NUM` (token de dígitos longo passava de 10 s, e o hook falha aberto); espaço em branco de `strtod`; floats hexadecimais; variantes de leitura do `timeout`; aninhamento de shell escape acima de 3 níveis falha fechado.
+- r3: opções com valor (`-s`, `-k`, `--signal`, `--kill-after`) seguidas de duração ilegível; cache do trabalho de nvim; cap de 16384 caracteres (`command_too_long`, aprovado pelo usuário); `SEGMENT_SPLIT` linear.
+- r4: guarda de 7 s (`analysis_timeout`, aprovada pelo usuário); veredito de sink de heredoc calculado uma vez e limite de 32 abridores; regex do nvim sem ambiguidade; `NARROW_HINT` dividido (token de nome de arquivo acima de 512 caracteres é `test-full`).
+- r5 (estreita): `AGENT_AUDIT_ANALYSIS_TIMEOUT` só baixa o limite e valores não finitos são rejeitados; a decisão é impressa antes de gravar o registro.
+
+**Decisões tomadas durante a execução:**
+- Stub Lua com valor vazio em vez de `error("not implemented")` (decisão do usuário; adendo de 15.2).
+- S6 vale para todas as stacks: `timeout 5 git push` é `git-push`.
+- Um guarda contra programas interativos no hook (`nvim` sem `--headless`, `love`, apps hospedeiros) ficou fora da spec e foi registrado como refactor no backlog; decide-se com os dados da métrica de 14.2.
+- Limites conhecidos do hook, levados ao backlog (a maior parte para uma spec dedicada de endurecimento): trabalho pós-decisão do hook, sink de heredoc após `)`, `nvim -l ... --busted`, `SEGMENT_SPLIT` cego a aspas, `mise exec -c`, binários não Lua por caminho, `exe "!..."`, `system()`, `os.execute`, `io.popen`, `jobstart` e `:terminal`.
+
+**Pendências:**
+- Sessão nova do Claude Code (agents e skills novos só aparecem nela): cenários 46-55 da seção 14.3 num plugin Neovim com busted e luacheck, numa TUI de teste (com e sem `DESIGN_SYSTEM.md`) e numa config embarcada; relatório `agent-metrics.py` com a métrica nova de 14.2.
+- Medir tokens por task com quatro skills pré-carregadas contra o baseline (riscos de 15.2).

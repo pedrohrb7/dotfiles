@@ -75,7 +75,7 @@ The run state lives in `.claude/runs/<slug>.json` at the project root (`<slug>` 
 
 A structured task block gives every field directly (**Stack**, **Files**, **Depends on**, **Done when**, **Status**). For an older free-form list, derive them from the task text. Each task has:
 - its number and title;
-- its stack (from **Stack**, or inferred from its files: `package.json` with Nest/Express means `backend-node`, `pom.xml`/`build.gradle` means `backend-spring`, `go.mod` means `backend-go`, `Cargo.toml` means `backend-rust`, `pyproject.toml` means `backend-python`, React web means `frontend-react`, React Native/Expo means `mobile-react-native`);
+- its stack (from **Stack**, or inferred from its files: `package.json` with Nest/Express means `backend-node`, `pom.xml`/`build.gradle` means `backend-spring`, `go.mod` means `backend-go`, `Cargo.toml` means `backend-rust`, `pyproject.toml` means `backend-python`, React web means `frontend-react`, React Native/Expo means `mobile-react-native`, Lua means `lua` (`.lua` files in the task, or `*.rockspec`, `.luarc.json`, `stylua.toml`/`.stylua.toml`, `selene.toml`, `.luacheckrc`, or `lua/` + `plugin/` near the task's files). The task's own files decide: files of another stack go to that stack's agent, even in a repo with Lua markers);
 - its `allowed_paths` (from **Files**, or the files the task text names, plus scope approved earlier in `approved_scope`);
 - its dependencies and its done criteria.
 

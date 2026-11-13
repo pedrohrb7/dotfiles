@@ -25,10 +25,11 @@ The prompt says the mode; the default is `coverage`.
 ## 2. Match the project's conventions
 
 Find the existing test setup and copy it exactly:
-- framework and runner: Jest, Vitest, RNTL, Playwright, Cypress, pytest, JUnit, `go test`, `cargo test`;
-- file location and naming (`__tests__/`, `*.test.ts`, `tests/`, `_test.go`);
+- framework and runner: Jest, Vitest, RNTL, Playwright, Cypress, pytest, JUnit, `go test`, `cargo test`, busted, plenary.nvim (busted style under `nvim --headless`), mini.test;
+- file location and naming (`__tests__/`, `*.test.ts`, `tests/`, `_test.go`, `*_spec.lua`, `*_test.lua`, `tests/test_*.lua`);
 - fixtures, factories, builders and test DB setup;
-- mocking style, and custom render helpers or providers.
+- mocking style, and custom render helpers or providers;
+- for Neovim code, load the `neovim-plugin` skill for the headless setup (`minimal_init`).
 
 Never introduce a new test framework or assertion library.
 

@@ -13,7 +13,8 @@ SubagentStop (record). Reads the hook payload (JSON) from stdin.
 - Fail-open: any error, a missing config or an unknown category lets the action through.
 
 What it classifies (see agent-workflow.md, sections 13 and 14):
-- Bash commands: tests (narrow/full/load), lint, typecheck, docker (read/build/lifecycle),
+- Bash commands: tests (narrow/full/load; Lua: busted, luarocks test, Neovim headless with plenary or
+  mini.test, and the mise tasks that run them), lint, typecheck, docker (read/build/lifecycle),
   git (commit/push), requests (local/external);
 - file writes: inside or outside the active run's allowed_paths (from .claude/runs/<slug>.json;
   outside the repo only inside the session scratchpad (`scratchpad_dir`) or an approved absolute glob),
@@ -29,9 +30,12 @@ Any error is swallowed: an audit hook must never break a session.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
+import functools
 import shlex
+import signal
 import stat
 import subprocess
 import sys
@@ -41,10 +45,25 @@ from pathlib import Path, PurePosixPath
 METRICS_DIR = Path(os.environ.get("AGENT_AUDIT_DIR", str(Path.home() / ".claude" / "metrics")))
 CONFIG_PATH = Path(__file__).resolve().with_name("agent-audit.json")
 MAX_CMD = 300
+# A Bash command longer than this is never fed to the regex classifier: it is denied (command_too_long). The cap
+# shrinks the input but does not bound the time (a quadratic path still costs seconds at 8-11 KB); the wall-clock
+# guard below is the structural bound, because a hook timeout (settings.json: 10 s) fails open.
+MAX_COMMAND_LEN = 16384
+# Wall-clock limit of the classification (seconds), kept under the 10 s hook timeout. When it expires the
+# analysis is abandoned and the call is denied as analysis_timeout. Tests lower it through the env var
+# AGENT_AUDIT_ANALYSIS_TIMEOUT (a positive number of seconds; read only by `_analysis_limit`).
+ANALYSIS_TIMEOUT_S = 7.0
+ANALYSIS_TIMEOUT_ENV = "AGENT_AUDIT_ANALYSIS_TIMEOUT"
+# Heredoc openers in one command above this: nothing is stripped (the command is classified as it is).
+MAX_HEREDOC_OPENERS = 32
+
+
+class AnalysisTimeout(BaseException):
+    """Raised by the SIGALRM handler. A BaseException so the `except Exception` blocks cannot swallow it."""
 
 IMPLEMENTERS = {
     "backend-node", "backend-spring", "backend-go", "backend-rust", "backend-python",
-    "frontend-react", "mobile-react-native",
+    "frontend-react", "mobile-react-native", "lua",
 }
 
 # Agents that must never write files.
@@ -98,7 +117,7 @@ VISUAL_TOOL = re.compile(r"(?i)(screenshot|browser|playwright|chrome|computer|si
 
 DIRECT_BINARIES = {"vitest", "jest", "mocha", "playwright", "eslint", "prettier", "tsc", "biome", "stylelint"}
 
-SEGMENT_SPLIT = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
+SEGMENT_SPLIT = re.compile(r"&&|\|\||;|\||\n")  # linear; the pieces are stripped after splitting
 ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
 
 TEST_RUNNERS = re.compile(
@@ -106,14 +125,54 @@ TEST_RUNNERS = re.compile(
     r"\./mvnw\b.*\btest\b|mvn\b.*\btest\b|\./gradlew\b.*\btest\b|gradle\b.*\btest\b|"
     r"(npm|pnpm|yarn|bun)( run)? test[\w:-]*|(npm|pnpm|yarn|bun) (-C \S+ |--filter \S+ |-r |--recursive )*(run )?test[\w:-]*|"
     r"make test[\w-]*|just test[\w-]*|playwright test|npx (jest|vitest|playwright test)|"
-    r"(uv|poetry) run (pytest|py\.test)|python -m pytest|dotnet test|rspec|phpunit)\b"
+    r"(uv|poetry) run (pytest|py\.test)|python -m pytest|dotnet test|rspec|phpunit|busted|luarocks test)\b"
 )
 LOAD_RUNNERS = re.compile(r"^(k6|artillery|locust|jmeter|vegeta|ab|wrk)\b")
 # test-narrow: a file or a test name; test-package: one package/service; test-full: the whole repo.
-NARROW_HINT = re.compile(
-    r"(\s-run\s|\s-k\s|\s--tests?\s|-Dtest=|\s-t\s|--testNamePattern|::|"
-    r"\S+\.(test|spec)\.[cm]?[jt]sx?\b|\S+_test\.(go|py)\b|\Stest_\S+\.py\b|\S+Tests?\.(java|kt)\b|\S+_spec\.rb\b)"
+NARROW_HINT = re.compile(r"(\s-run\s|\s-k\s|\s--tests?\s|-Dtest=|\s-t\s|--testNamePattern|::)")  # linear
+# File-name hints, matched per whitespace token (`\S+X` is the same as `\SX`, so there is no backtracking over
+# the token); a token longer than _NARROW_TOKEN_MAX is never a test file name and is skipped.
+NARROW_TOKEN_HINT = re.compile(
+    r"\S\.(?:test|spec)\.[cm]?[jt]sx?\b|\S_test\.(?:go|py)\b|\STests?\.(?:java|kt)\b|\S_spec\.rb\b|"
+    r"\S_(?:spec|test)\.lua\b"
 )
+_NARROW_TOKEN_MAX = 512
+_PY_SUFFIX = re.compile(r"\.py\b")
+
+
+def _narrow_hint(padded: str) -> bool:
+    """True when a test-runner line names a test file or a test name (see NARROW_HINT, NARROW_TOKEN_HINT)."""
+    if NARROW_HINT.search(padded):
+        return True
+    for token in padded.split():
+        if len(token) > _NARROW_TOKEN_MAX:
+            continue
+        if NARROW_TOKEN_HINT.search(token):
+            return True
+        at = token.find("test_", 1)  # `\Stest_\S+\.py\b`: the earliest test_ leaves the most room for `.py`
+        if at >= 0 and _PY_SUFFIX.search(token, at + 6) is not None:
+            return True
+    return False
+# busted only: a name filter or a tag selects a subset of the suite.
+BUSTED_NARROW = re.compile(r"\s(--filter|--tags?)(=|\s)")
+# busted flags whose next token is a value (a `.lua` value there is a helper or pattern, not a file to run).
+_BUSTED_VALUE_FLAGS = {
+    "-o", "--output", "-p", "--pattern", "-m", "--lpath", "--cpath", "-C", "--directory", "--helper",
+    "--lua", "--loaders", "-r", "--run", "-f", "--config-file", "--exclude-pattern", "--exclude-tags",
+}
+
+
+def _busted_lua_file(padded: str) -> bool:
+    """True when a busted command line names a `.lua` file argument (a single file run is narrow)."""
+    skip = False
+    for tok in padded.split():
+        if skip:
+            skip = False
+        elif tok in _BUSTED_VALUE_FLAGS:
+            skip = True
+        elif not tok.startswith("-") and tok.endswith(".lua"):
+            return True
+    return False
 PACKAGE_HINT = re.compile(
     r"(\s-C\s|\s--filter\s|\s-pl\s|\s-p\s|\s--package\s|\s:[\w-]+(:[\w-]+)*:test\b|"
     r"\s(\./)?[\w@.-]+(/[\w@.-]+)+/?(\.\.\.)?(\s|$))"
@@ -121,7 +180,7 @@ PACKAGE_HINT = re.compile(
 FULL_HINT = re.compile(r"(\s\./\.\.\.(\s|$)|\s--all\b|\s--workspace\b|\s-r\s|\s--recursive\b)")
 LINT = re.compile(
     r"^(eslint|ruff check|ruff format|golangci-lint|go vet|gofmt|goimports|cargo clippy|cargo fmt|"
-    r"ktlint|detekt|checkstyle|prettier|biome|stylelint|"
+    r"ktlint|detekt|checkstyle|prettier|biome|stylelint|luacheck|selene|stylua|treefmt|"
     r"(npm|pnpm|yarn|bun) (-C \S+ |--filter \S+ |-r |--recursive )*(run )?(lint|format)[\w:-]*|make lint|just lint)\b"
 )
 TYPECHECK = re.compile(
@@ -215,13 +274,54 @@ def project_docs_root(root: Path) -> str:
 
 
 def strip_prefixes(segment: str) -> str:
-    """Drop env assignments, `rtk`/`rtk proxy`, `sudo`, `time` and normalize docker compose global flags."""
+    """Normalize a command segment so it can be classified by its real program.
+
+    Drops env assignments, `rtk`/`rtk proxy`, `sudo`, `time`, `command`, `exec`; `timeout [options] DURATION`
+    (every GNU form, and fail closed: an option shape not understood still drops the option-looking tokens and
+    the duration, so the real command is classified); `mise [global flags] exec|x [...] --` (cut up to the
+    `--`); path-prefixed Lua tools (`./.luarocks/bin/busted` -> `busted`); `luarocks [global flags] test`
+    -> `luarocks test`; and docker compose global flags (`docker compose -f x.yml up` -> `docker compose up`)."""
+    return strip_prefix_variants(segment)[0]
+
+
+def strip_prefix_variants(segment: str) -> list[str]:
+    """Like `strip_prefixes`, but a `timeout` whose shape is not understood yields every plausible reading
+    (the first is the primary one), so a real command cannot hide behind a duration form the parser misses."""
     try:
         tokens = shlex.split(segment, posix=True)
     except ValueError:
         tokens = segment.split()
-    while tokens and (ENV_ASSIGN.match(tokens[0]) or tokens[0] in {"rtk", "proxy", "sudo", "time", "command", "exec"}):
-        tokens.pop(0)
+    out: list[str] = []
+    for variant in _strip_tokens(tokens, 0):
+        if variant not in out:
+            out.append(variant)
+    return out[:8]
+
+
+def _strip_tokens(tokens: list[str], depth: int) -> list[str]:
+    while tokens:
+        if ENV_ASSIGN.match(tokens[0]) or tokens[0] in {"rtk", "proxy", "sudo", "time", "command", "exec"}:
+            tokens.pop(0)
+        elif tokens[0] == "mise":
+            j = _skip_mise_flags(tokens, 1)
+            if j < len(tokens) and tokens[j] in {"exec", "x"} and "--" in tokens[j:]:
+                del tokens[:tokens.index("--", j) + 1]  # mise -C d exec lua@5.4 -- busted x -> busted x
+            else:
+                break
+        elif tokens[0] == "timeout":
+            lengths = _timeout_prefix_lengths(tokens)
+            if len(lengths) > 1 and depth < 3:
+                results: list[str] = []
+                for length in lengths:
+                    results.extend(_strip_tokens(tokens[length:], depth + 1))
+                return results
+            del tokens[:lengths[0]]
+        else:
+            break
+    return [_finish_strip(tokens)]
+
+
+def _finish_strip(tokens: list[str]) -> str:
     # npx vitest / pnpm exec eslint / pnpm vitest -> vitest / eslint
     if tokens and tokens[0] in {"npx", "bunx"}:
         tokens.pop(0)
@@ -230,6 +330,12 @@ def strip_prefixes(segment: str) -> str:
             del tokens[:2]
         elif tokens[1] in DIRECT_BINARIES:
             tokens.pop(0)
+    if tokens and "/" in tokens[0] and tokens[0].rsplit("/", 1)[-1] in _PATH_TOOLS:
+        tokens[0] = tokens[0].rsplit("/", 1)[-1]  # ./.luarocks/bin/busted -> busted
+    if tokens and tokens[0] == "luarocks":
+        j = _skip_luarocks_flags(tokens, 1)
+        if j < len(tokens) and tokens[j] == "test":
+            tokens = ["luarocks"] + tokens[j:]  # luarocks --lua-version 5.1 test -> luarocks test
     text = " ".join(tokens)
     if text.startswith("docker-compose"):
         text = "docker compose" + text[len("docker-compose"):]
@@ -237,6 +343,106 @@ def strip_prefixes(segment: str) -> str:
     if m:  # docker compose -f x.yml up -> docker compose up
         text = "docker compose" + text[m.end():]
     return text
+
+
+_LUAROCKS_VALUE_FLAGS = {
+    "--lua-version", "--lua-dir", "--tree", "--server", "--only-server", "--timeout", "--deps-mode",
+    "--project-tree", "--lr-bin", "--lr-path", "--lr-cpath", "--variables", "--namespace",
+}
+
+
+def _skip_luarocks_flags(tokens: list[str], i: int) -> int:
+    while i < len(tokens) and tokens[i].startswith("-") and tokens[i] != "--":
+        i += 2 if tokens[i] in _LUAROCKS_VALUE_FLAGS else 1
+    return i
+
+
+_NUM = r"(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"  # unambiguous: linear on any digit run
+_HEX = r"0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?\d+)?"
+_TIMEOUT_DURATION = re.compile(rf"^[+]?(?:{_NUM}|{_HEX}|inf(?:inity)?|nan)[smhd]?$", re.I)
+_STRTOD_SPACE = " \t\n\v\f\r"  # strtod skips these before a number
+_DURATION_MAX_LEN = 64  # a longer token is never a duration (and never reaches a regex)
+
+
+def _is_duration(token: str) -> bool:
+    token = token.lstrip(_STRTOD_SPACE)
+    return len(token) <= _DURATION_MAX_LEN and _TIMEOUT_DURATION.match(token) is not None
+
+
+_TIMEOUT_LONG = {
+    "foreground": False, "kill-after": True, "preserve-status": False, "signal": True,
+    "verbose": False, "help": False, "version": False,
+}  # GNU long options -> takes a value
+_TIMEOUT_SHORT_BOOL = set("fpv")
+_TIMEOUT_SHORT_VALUE = set("ks")
+_PATH_TOOLS = {"busted", "luacheck", "selene", "stylua", "nvim"}
+
+
+def _timeout_duration_index(tokens: list[str]) -> int | None:
+    """Index where the DURATION of `timeout [GNU options] [--] DURATION` sits when every option is understood
+    (value options -s/-k/--signal/--kill-after consume their next token), else None. The token there is not
+    checked: it may be a variable or any other word the shell expands."""
+    i = 1
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok == "--":
+            i += 1
+            break
+        if tok.startswith("--"):
+            name, eq, _ = tok[2:].partition("=")
+            hits = [k for k in _TIMEOUT_LONG if name and k.startswith(name)]  # getopt allows abbreviations
+            if name in _TIMEOUT_LONG:
+                hits = [name]
+            if len(hits) != 1:
+                return None
+            i += 1 if (eq or not _TIMEOUT_LONG[hits[0]]) else 2
+        elif tok.startswith("-") and len(tok) > 1:
+            i += 1
+            for pos, ch in enumerate(tok[1:], start=1):
+                if ch in _TIMEOUT_SHORT_BOOL:
+                    continue
+                if ch in _TIMEOUT_SHORT_VALUE:
+                    if pos == len(tok) - 1:
+                        i += 1  # the value is the next token; otherwise the rest of the cluster is
+                    break
+                return None
+        else:
+            break
+    return i
+
+
+def _timeout_prefix_lengths(tokens: list[str]) -> list[int]:
+    """Token counts to drop for a leading `timeout ...` (each at least 1, so the wrapped command is classified).
+
+    Strict parse first: when every option is understood and a duration follows, that is the only reading. When
+    the shape is not fully understood (fail closed), drop the leading option-looking tokens and the
+    duration-looking tokens after them (at most two: an option value and the duration); if the token after the
+    options is not a duration, a second reading also takes it as the duration. When the options were understood
+    but the token at the duration position is not a duration (`timeout -s KILL "$T" cmd`), readings that drop up
+    to that position and up to the next one are added too."""
+    n = len(tokens)
+    at = _timeout_duration_index(tokens)
+    if at is not None and at < n and _is_duration(tokens[at]):
+        return [at + 1]
+    i = 1
+    while i < n and tokens[i].startswith("-"):
+        i += 1
+    unknown_duration = i < n and not _is_duration(tokens[i])
+    for _ in range(2):
+        if i < n and _is_duration(tokens[i]):
+            i += 1
+    lengths = [i]
+    if unknown_duration and i + 1 <= n:
+        lengths.append(i + 1)
+    if at is not None:
+        lengths.extend([at, at + 1])
+    out: list[int] = []
+    for length in lengths:
+        length = max(1, min(length, n))
+        if length not in out:
+            out.append(length)
+    return out
 
 
 _SEPARATORS = ";&|\n"
@@ -332,6 +538,8 @@ def _scan_heredocs(command: str) -> str:
     stack: list[tuple[str, str | None]] = [("cmd", None)]
     pending: list[tuple[str, bool, bool]] = []  # (delimiter, strip leading tabs, body is data)
     seg_start = 0  # index in `out` where the current simple command starts
+    sink_cache: dict[int, bool] = {}  # seg_start -> data-sink verdict of the simple command that starts there
+    openers = 0
     i = 0
     while i < n:
         c = command[i]
@@ -414,9 +622,15 @@ def _scan_heredocs(command: str) -> str:
             parsed = _read_delimiter(command, j)
             if parsed is not None:
                 delim, end = parsed
-                eol = re.search(r"(?<!\\)\n", command[end:])
-                rest = command[i:end + eol.start()] if eol else command[i:]
-                is_data = _is_data_sink("".join(out[seg_start:]), rest.replace("\\\n", ""), stack[-1][1], len(stack))
+                openers += 1
+                if openers > MAX_HEREDOC_OPENERS:  # fail closed: classify the command as it is
+                    return command
+                if seg_start not in sink_cache:  # decided once per simple command (the first opener's view of it)
+                    eol = re.search(r"(?<!\\)\n", command[end:])
+                    rest = command[i:end + eol.start()] if eol else command[i:]
+                    sink_cache[seg_start] = _is_data_sink(
+                        "".join(out[seg_start:]), rest.replace("\\\n", ""), stack[-1][1], len(stack))
+                is_data = sink_cache[seg_start]
                 pending.append((delim, strip_tabs, is_data))
                 out.extend(command[i:end].replace("\\\n", ""))
                 i = end
@@ -447,61 +661,234 @@ def strip_heredoc_bodies(command: str) -> str:
         return command
 
 
-def classify_command(command: str) -> tuple[list[str], list[str]]:
+@functools.lru_cache(maxsize=64)
+def test_scope(padded: str, busted: bool = False) -> str:
+    """Category of a test-runner segment (space-padded): full, narrow (a file, a name) or package.
+
+    Pure, and cached per distinct padded reading (the prefix readings of one command share most of their text)."""
+    if FULL_HINT.search(padded):
+        return "test-full"
+    if _narrow_hint(padded) or (busted and (BUSTED_NARROW.search(padded) or _busted_lua_file(padded))):
+        return "test-narrow"
+    if PACKAGE_HINT.search(padded):
+        return "test-package"
+    return "test-full"
+
+
+_MISE_VALUE_FLAGS = {
+    "-C", "--cd", "-E", "--env", "-P", "--profile", "--log-level", "-j", "--jobs", "-o", "--output",
+    "-t", "--tool", "-s", "--shell", "--timeout", "--secrets", "--allow-env", "--allow-net", "--allow-read",
+    "--allow-write", "--affected-base", "--affected-head", "--task-cache",
+}
+_MISE_BOOL_SHORT = set("qvyhfnrcS")
+_MISE_VALUE_SHORT = set("CEPjots")
+_MISE_TEST = re.compile(r"^test(?!-tool$)[\w:*-]*$")
+_MISE_LINT = re.compile(r"^(lint|format|fmt)[\w:*-]*$")
+_MISE_SUITE = {"all", "check", "ci"}
+
+
+def _skip_mise_flags(tokens: list[str], i: int) -> int:
+    """Index of the first token after mise flags; value flags consume their value, `--` stops the scan."""
+    while i < len(tokens) and tokens[i].startswith("-") and tokens[i] != "--":
+        tok = tokens[i]
+        takes_value = tok in _MISE_VALUE_FLAGS or (
+            len(tok) > 2 and tok[1] != "-" and tok[-1] in _MISE_VALUE_SHORT
+            and all(c in _MISE_BOOL_SHORT for c in tok[1:-1])
+        )  # -vC dir: boolean short flags ending in a value flag
+        i += 2 if takes_value else 1
+    return i
+
+
+def mise_categories(seg: str) -> list[str]:
+    """Categories of a `mise run <task> [args] [::: <task> ...]` segment (or the `mise <task>` shortcut)."""
+    tokens = seg.split()[1:]
+    i = _skip_mise_flags(tokens, 0)
+    if i < len(tokens) and tokens[i] in {"run", "r"}:
+        i += 1
+    elif i + 1 < len(tokens) and tokens[i] == "tasks" and tokens[i + 1] == "run":
+        i += 2
+    groups: list[list[str]] = [[]]
+    for tok in tokens[i:]:
+        if tok == ":::":
+            groups.append([])
+        else:
+            groups[-1].append(tok)
     categories: list[str] = []
-    flags: list[str] = []
-    for raw in SEGMENT_SPLIT.split(strip_heredoc_bodies(command or "")):
-        seg = strip_prefixes(raw.strip())
-        if not seg or seg.startswith("cd "):
+    for group in groups:
+        j = _skip_mise_flags(group, 0)
+        if j >= len(group):
             continue
-        padded = " " + seg + " "
-        if seg.startswith("docker"):
-            if DOCKER_LIFECYCLE.match(seg):
-                categories.append("docker-lifecycle")
-                flags.append("docker_lifecycle")
-            elif DOCKER_BUILD.match(seg):
-                categories.append("docker-build")
-                flags.append("docker_build")
-            elif DOCKER_READ.match(seg):
-                categories.append("docker-read")
-            else:
-                categories.append("docker-other")
-        elif seg.startswith("git "):
-            if re.match(r"^git (\S+ )*commit\b", seg):
-                categories.append("git-commit")
-                flags.append("git_commit")
-            elif re.match(r"^git (\S+ )*push\b", seg):
-                categories.append("git-push")
-                flags.append("git_push")
-            else:
-                categories.append("git-other")
-        elif LOAD_RUNNERS.match(seg):
-            categories.append("test-load")
-        elif TEST_RUNNERS.match(seg):
-            if FULL_HINT.search(padded):
-                categories.append("test-full")
-            elif NARROW_HINT.search(padded):
-                categories.append("test-narrow")
-            elif PACKAGE_HINT.search(padded):
-                categories.append("test-package")
-            else:
-                categories.append("test-full")
-        elif LINT.match(seg):
+        name, args = group[j], group[j + 1:]
+        if _MISE_TEST.match(name):
+            categories.append(test_scope(" " + " ".join(args) + " "))
+        elif _MISE_LINT.match(name):
             categories.append("lint")
-        elif TYPECHECK.match(seg):
-            categories.append("typecheck")
-        elif seg.startswith(("curl ", "http ", "wget ")):
-            urls = URL.findall(seg)
-            if urls and all(LOCAL_HOST.match(u + " ") for u in urls):
-                categories.append("request-local")
-            elif urls:
-                categories.append("request-external")
-                flags.append("external_request")
-            else:
-                categories.append("request-local")
+        elif name in _MISE_SUITE:
+            categories.append("test-full")
         else:
             categories.append("other")
+    return categories or ["other"]
+
+
+# Unambiguous after `require` (no `\s*` next to another `\s*` or an optional that can match nothing), so a long
+# whitespace run costs linear time: require("mini.test") / require'mini.test'
+_MINI_TEST = r"(?:MiniTest|require\s*(?:\(\s*)?['\"]mini\.test['\"]\s*\)?)"
+_PLENARY_HARNESS = r"require\s*(?:\(\s*)?['\"]plenary\.test_harness['\"]\s*(?:\)\s*)?\."
+_NVIM_FILE = re.compile(rf"(PlenaryBustedFile\b|{_MINI_TEST}\.run_(file|at_location)\b|{_PLENARY_HARNESS}test_file\b)")
+_NVIM_DIRECTORY = re.compile(
+    rf"(?:PlenaryBustedDirectory\b\s*|{_PLENARY_HARNESS}test_directory\s*\(\s*)(?:['\"]?([^\s'\"),]+))?"
+)
+_NVIM_RUN = re.compile(rf"{_MINI_TEST}\.run\(")
+_TEST_DIR_NAMES = {"test", "tests", "spec", "specs"}
+# Shell text in an ex command: `!cmd`, `:!cmd`, `:silent !cmd`, `:w !cmd`, `:r !cmd`.
+_NVIM_SHELL = re.compile(r"(?:^|[:|])\s*(?:sil(?:ent)?!?\s+|w(?:rite)?\s+|r(?:ead)?\s*)?!(.+)$", re.S)
+
+
+@functools.lru_cache(maxsize=64)
+def nvim_category(seg: str) -> str:
+    """Category of an `nvim` segment: only `--headless` runs of a Lua test runner count as tests.
+
+    Pure, and cached per distinct segment text."""
+    if "--headless" not in seg.split():
+        return "other"
+    if _NVIM_FILE.search(seg):
+        return "test-narrow"
+    m = _NVIM_DIRECTORY.search(seg)
+    if m:
+        folder = (m.group(1) or "").strip("\"'")
+        if folder.startswith(("{", "}")):
+            folder = ""
+        folder = folder[2:] if folder.startswith("./") else folder
+        parts = folder.strip("/").split("/")
+        if folder.startswith("/") and parts[-1] in _TEST_DIR_NAMES:
+            return "test-full"  # an absolute path ending in the test folder is the whole suite
+        return "test-package" if "/" in folder.strip("/") else "test-full"
+    if _NVIM_RUN.search(seg):
+        return "test-full"
+    return "other"
+
+
+def nvim_shell_texts(raw: str) -> list[str]:
+    """Shell commands an nvim invocation runs through `-c`/`--cmd`/`+cmd` ex commands (`!cmd`, `:!cmd`)."""
+    try:
+        tokens = shlex.split(raw, posix=True)
+    except ValueError:
+        tokens = raw.split()
+    start = next((k for k, t in enumerate(tokens) if t.rsplit("/", 1)[-1] == "nvim"), None)
+    if start is None:
+        return []
+    texts: list[str] = []
+    k = start + 1
+    while k < len(tokens):
+        tok = tokens[k]
+        cmd = None
+        if tok in {"-c", "--cmd"} and k + 1 < len(tokens):
+            cmd = tokens[k + 1]
+            k += 1
+        elif tok.startswith("--cmd="):
+            cmd = tok[6:]
+        elif tok.startswith("+") and len(tok) > 1:
+            cmd = tok[1:]
+        if cmd is not None:
+            m = _NVIM_SHELL.search(cmd)
+            if m and m.group(1).strip():
+                texts.append(m.group(1).strip())
+        k += 1
+    return texts
+
+
+def classify_command(command: str, _depth: int = 0) -> tuple[list[str], list[str]]:
+    command = command or ""
+    if len(command) > MAX_COMMAND_LEN:  # checked before any regex or parse touches the text
+        return ["other"], ["command_too_long"]
+    categories: list[str] = []
+    flags: list[str] = []
+    for piece in SEGMENT_SPLIT.split(strip_heredoc_bodies(command)):
+        raw = piece.strip()
+        nested: list[tuple[list[str], list[str]]] = []  # nvim shell texts, classified once per raw segment
+        for n, seg in enumerate(strip_prefix_variants(raw)):
+            seg_categories: list[str] = []
+            _classify_segment(raw, seg, seg_categories, flags, _depth, nested)
+            # an alternate reading only adds what it found, never its "other" (the primary reading owns that)
+            categories.extend(seg_categories if n == 0 else [c for c in seg_categories if c != "other"])
     return sorted(set(categories)) or ["other"], sorted(set(flags))
+
+
+def _nvim_nested(raw: str, _depth: int) -> tuple[list[str], list[str]]:
+    """Categories and flags of the shell text an nvim invocation runs through `-c '!cmd'` (fail closed when
+    nested too deep)."""
+    categories: list[str] = []
+    flags: list[str] = []
+    texts = nvim_shell_texts(raw)
+    if _depth < 3:  # shell text run by `-c '!cmd'` is classified as its own command
+        for text in texts:
+            sub_categories, sub_flags = classify_command(text, _depth + 1)
+            categories.extend(sub_categories)
+            flags.extend(sub_flags)
+    elif texts:  # nested too deep to classify: fail closed with the strictest existing deny
+        categories.append("docker-lifecycle")
+        flags.extend(["docker_lifecycle", "nested_shell_unclassified"])
+    return categories, flags
+
+
+def _classify_segment(raw: str, seg: str, categories: list[str], flags: list[str], _depth: int,
+                      nested: list[tuple[list[str], list[str]]] | None = None) -> None:
+    """Classify one segment (already stripped of prefixes), appending to `categories` and `flags`.
+
+    `nested` is a one-slot cache shared by the readings of one raw segment, so the nvim shell texts are
+    classified once per raw segment however many readings start with nvim."""
+    if not seg or seg.startswith("cd "):
+        return
+    padded = " " + seg + " "
+    if seg.startswith("docker"):
+        if DOCKER_LIFECYCLE.match(seg):
+            categories.append("docker-lifecycle")
+            flags.append("docker_lifecycle")
+        elif DOCKER_BUILD.match(seg):
+            categories.append("docker-build")
+            flags.append("docker_build")
+        elif DOCKER_READ.match(seg):
+            categories.append("docker-read")
+        else:
+            categories.append("docker-other")
+    elif seg.startswith("git "):
+        if re.match(r"^git (\S+ )*commit\b", seg):
+            categories.append("git-commit")
+            flags.append("git_commit")
+        elif re.match(r"^git (\S+ )*push\b", seg):
+            categories.append("git-push")
+            flags.append("git_push")
+        else:
+            categories.append("git-other")
+    elif seg == "mise" or seg.startswith("mise "):
+        categories.extend(mise_categories(seg))
+    elif seg == "nvim" or seg.startswith("nvim "):
+        categories.append(nvim_category(seg))
+        if nested is None:
+            nested = []
+        if not nested:
+            nested.append(_nvim_nested(raw, _depth))
+        categories.extend(nested[0][0])
+        flags.extend(nested[0][1])
+    elif LOAD_RUNNERS.match(seg):
+        categories.append("test-load")
+    elif TEST_RUNNERS.match(seg):
+        categories.append(test_scope(padded, busted=seg.startswith("busted")))
+    elif LINT.match(seg):
+        categories.append("lint")
+    elif TYPECHECK.match(seg):
+        categories.append("typecheck")
+    elif seg.startswith(("curl ", "http ", "wget ")):
+        urls = URL.findall(seg)
+        if urls and all(LOCAL_HOST.match(u + " ") for u in urls):
+            categories.append("request-local")
+        elif urls:
+            categories.append("request-external")
+            flags.append("external_request")
+        else:
+            categories.append("request-local")
+    else:
+        categories.append("other")
 
 
 def git_root(start: Path) -> Path | None:
@@ -779,12 +1166,19 @@ WHY = {
     "design_system_write_by_other": "a project's DESIGN_SYSTEM.md (any directory) is created only by design-director and maintained only by the main session following the design-system skill; propose the value (token, light and dark, usage) in scope_requests instead",
     "docker_build": "images are built only when the task changes a Dockerfile or its build context",
     "external_request": "requests go only to local hosts (localhost, 127.0.0.1, compose service names)",
+    "command_too_long": "a Bash command over 16384 characters is not analyzed and is never run; write large content (files, scripts, heredoc bodies) with the Write tool and keep commands short",
+    "analysis_timeout": "this tool call was too complex to analyze in time, so it is blocked and never run; simplify or split the command, and write large content (files, scripts, heredoc bodies) with the Write tool",
 }
 
 
 def what_to_do(actor: str, category: str) -> str:
     if category == "docker_lifecycle":
         return "Put the command in manual_checks for the user instead."
+    if category == "command_too_long":
+        return "Write the content to a file with the Write tool and run a short command that uses the file."
+    if category == "analysis_timeout":
+        return ("Simplify the command or split it into several short commands, and write large content to a file "
+                "with the Write tool instead of putting it in the command.")
     if category == "visual_tool":
         return "List the states to check in manual_checks; the user can ask for a ui-verifier check."
     if actor == "main":
@@ -824,7 +1218,51 @@ def decide(record: dict, config: dict) -> dict | None:
     return {"hookSpecificOutput": out}
 
 
+def _analysis_limit() -> float:
+    """Wall-clock limit of the classification: ANALYSIS_TIMEOUT_S, or the test-only env override."""
+    try:
+        value = float(os.environ.get(ANALYSIS_TIMEOUT_ENV, ""))
+        if math.isfinite(value) and value > 0:
+            return min(value, ANALYSIS_TIMEOUT_S)  # the override can only lower the limit
+    except ValueError:
+        pass
+    return ANALYSIS_TIMEOUT_S
+
+
+def _on_alarm(signum, frame) -> None:
+    raise AnalysisTimeout()
+
+
+def _arm_analysis_timer(seconds: float | None = None):
+    """Start the wall-clock limit (SIGALRM, one shot); returns the previous handler, or None when the platform
+    has no setitimer or the hook does not run in the main thread (then there is no guard).
+    A timer that cannot be armed raises AnalysisTimeout: the caller treats it as a timeout (PreToolUse denies)."""
+    if not hasattr(signal, "setitimer"):
+        return None
+    try:
+        previous = signal.signal(signal.SIGALRM, _on_alarm)
+    except ValueError:  # not the main thread
+        return None
+    try:
+        signal.setitimer(signal.ITIMER_REAL, _analysis_limit() if seconds is None else seconds)
+    except Exception:  # OverflowError, OSError, ...: never continue unguarded
+        try:
+            signal.signal(signal.SIGALRM, previous if previous is not None else signal.SIG_DFL)
+        except Exception:
+            pass
+        raise AnalysisTimeout()
+    return previous if previous is not None else signal.SIG_DFL
+
+
+def _disarm_analysis_timer(previous) -> None:
+    if previous is None:
+        return
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    signal.signal(signal.SIGALRM, previous)
+
+
 def main() -> None:
+    started = time.monotonic()
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -856,25 +1294,40 @@ def main() -> None:
         if event != "PreToolUse":
             record["failed"] = event == "PostToolUseFailure"
         flags: list[str] = []
-        if tool == "Bash":
-            cmd = tinput.get("command", "")
-            record["cmd"] = cmd[:MAX_CMD]
-            record["categories"], flags = classify_command(cmd)
-            suites = {"test-full", "test-package", "test-load"} & set(record["categories"])
-            if suites and actor in IMPLEMENTERS | {"quality-fixer", "test-writer"}:
-                flags.append("suite_by_non_runner")
-        elif tool in {"Write", "Edit", "MultiEdit", "NotebookEdit"}:
-            path = tinput.get("file_path") or tinput.get("notebook_path") or ""
-            record["categories"] = ["write"]
-            record.update(evaluate_write(path, payload.get("cwd", ""), actor, tool, payload.get("tool_response"),
-                                          scratchpad=payload.get("scratchpad_dir"),
-                                          failed=event == "PostToolUseFailure"))
-            flags = record.pop("flags", [])
-        elif VISUAL_TOOL.search(tool):
-            record["categories"] = ["visual"]
-            flags = [] if actor == "ui-verifier" else ["visual_tool"]
-        else:
-            return  # reads, searches and other tools are not audited
+        timed_out = False
+        previous = None
+        try:
+            try:  # the classification runs under a wall-clock limit (a hook timeout fails open)
+                previous = _arm_analysis_timer()
+                if tool == "Bash":
+                    cmd = tinput.get("command", "")
+                    record["cmd"] = cmd[:MAX_CMD]
+                    record["categories"], flags = classify_command(cmd)
+                    suites = {"test-full", "test-package", "test-load"} & set(record["categories"])
+                    if suites and actor in IMPLEMENTERS | {"quality-fixer", "test-writer"}:
+                        flags.append("suite_by_non_runner")
+                elif tool in {"Write", "Edit", "MultiEdit", "NotebookEdit"}:
+                    path = tinput.get("file_path") or tinput.get("notebook_path") or ""
+                    record["categories"] = ["write"]
+                    record.update(evaluate_write(path, payload.get("cwd", ""), actor, tool,
+                                                  payload.get("tool_response"),
+                                                  scratchpad=payload.get("scratchpad_dir"),
+                                                  failed=event == "PostToolUseFailure"))
+                    flags = record.pop("flags", [])
+                elif VISUAL_TOOL.search(tool):
+                    record["categories"] = ["visual"]
+                    flags = [] if actor == "ui-verifier" else ["visual_tool"]
+                else:
+                    return  # reads, searches and other tools are not audited
+            finally:
+                _disarm_analysis_timer(previous)
+        except AnalysisTimeout:  # also when it fires inside the arm or disarm calls (the timer is one shot)
+            timed_out = True
+        if timed_out:  # too complex to analyze in time: PreToolUse denies it, PostToolUse records it
+            if "cmd" not in record and tool == "Bash":
+                record["cmd"] = str(tinput.get("command", ""))[:MAX_CMD]
+            record["categories"] = ["other"]
+            flags = ["analysis_timeout"]
         record["flags"] = sorted(set(flags))
 
     if event == "PreToolUse":
@@ -882,9 +1335,24 @@ def main() -> None:
         if decision is None:
             return  # allowed silently; PostToolUse records the action itself
         print(json.dumps(decision))
+        sys.stdout.flush()  # the decision is out before any slow recording step can delay or lose it
         if record.get("decision") == "warn":
             return  # the action still runs and PostToolUse records it with its flags
 
+    # The recording runs under what is left of the analysis budget, so it can never push the hook past its timeout.
+    remaining = max(0.25, _analysis_limit() - (time.monotonic() - started))
+    previous = None
+    try:
+        try:
+            previous = _arm_analysis_timer(remaining)
+            _write_record(payload, record)
+        finally:
+            _disarm_analysis_timer(previous)
+    except AnalysisTimeout:  # the record is lost, the decision (if any) was already printed
+        pass
+
+
+def _write_record(payload: dict, record: dict) -> None:
     if "in_run" not in record:  # tag commands and lifecycle events with the active /implement run
         root = git_root(Path(payload.get("cwd") or "."))
         run = active_run(root) if root else None
@@ -902,6 +1370,6 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except (Exception, AnalysisTimeout):  # never a stack trace, always exit 0
         pass
     sys.exit(0)

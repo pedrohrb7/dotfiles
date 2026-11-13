@@ -237,5 +237,68 @@ class ProcessContract(ProcessCase):
             self.assert_warn(self.output(self.run_hook(hp, pl)), "out_of_scope_write")
 
 
+class AnalysisTimeoutProcess(ProcessCase):
+    """Wall-clock guard through the real process (lua-agent review round 4). The limit is lowered with the
+    test-only env var AGENT_AUDIT_ANALYSIS_TIMEOUT; the default (7 s) is left alone in the other cases."""
+
+    TINY = {"AGENT_AUDIT_ANALYSIS_TIMEOUT": "0.000001"}
+
+    def run_bash(self, hp, event, command, extra_env=None, actor="backend-node"):
+        pl = payload(event, "Bash", actor=actor, cwd=self.repo, tool_input={"command": command})
+        proc = hp.run(pl, self.repo, extra_env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr, "")  # never a stack trace
+        return self.output(proc)
+
+    def test_pre_deny_with_analysis_timeout_and_the_record(self):
+        hp = self.hook()
+        out = self.run_bash(hp, "PreToolUse", "pytest tests/test_a.py", self.TINY)
+        self.assert_decision(out, "deny", "analysis_timeout")
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("too complex to analyze in time", reason)
+        self.assertIn("Write tool", reason)
+        [record] = hp.records()
+        self.assertEqual(record["flags"], ["analysis_timeout"])
+        self.assertEqual(record["decision"], "block")
+        self.assertEqual(record["decision_category"], "analysis_timeout")
+        self.assertEqual(record["cmd"], "pytest tests/test_a.py")
+
+    def test_deny_holds_for_the_main_session_too(self):
+        out = self.run_bash(self.hook(), "PreToolUse", "echo hi", self.TINY, actor="main")
+        self.assert_decision(out, "deny", "analysis_timeout")
+
+    def test_post_records_the_flag_and_does_not_block(self):
+        hp = self.hook()
+        self.assertIsNone(self.run_bash(hp, "PostToolUse", "pytest tests/test_a.py", self.TINY))
+        self.assertEqual(self.post_flags(hp), [["analysis_timeout"]])
+
+    def test_a_normal_command_is_unaffected_by_the_guard(self):
+        hp = self.hook()
+        self.assertIsNone(self.run_bash(hp, "PreToolUse", "pytest tests/test_a.py"))
+        out = self.run_bash(hp, "PreToolUse", "docker compose restart api")
+        self.assert_decision(out, "deny", "docker_lifecycle")
+        self.assertIsNone(self.run_bash(hp, "PostToolUse", "pytest tests/test_a.py"))
+        self.assertEqual(self.post_flags(hp), [[]])
+
+    def test_an_invalid_override_falls_back_to_the_default_limit(self):
+        for value in ("abc", "0", "-1", ""):
+            with self.subTest(value=value):
+                out = self.run_bash(self.hook(), "PreToolUse", "pytest tests/test_a.py",
+                                    {"AGENT_AUDIT_ANALYSIS_TIMEOUT": value})
+                self.assertIsNone(out)
+
+    def test_huge_or_non_finite_overrides_are_clamped_never_a_silent_allow(self):
+        """Round 5: inf / 1e300 / 1e10 made setitimer raise OverflowError and the hook allowed everything."""
+        for value in ("inf", "-inf", "nan", "1e300", "1e10"):
+            with self.subTest(value=value):
+                env = {"AGENT_AUDIT_ANALYSIS_TIMEOUT": value}
+                hp = self.hook()
+                out = self.run_bash(hp, "PreToolUse", "docker compose restart api", env)
+                self.assert_decision(out, "deny", "docker_lifecycle")
+                self.assertIsNone(self.run_bash(hp, "PreToolUse", "pytest tests/test_a.py", env))
+                self.assertIsNone(self.run_bash(hp, "PostToolUse", "pytest tests/test_a.py", env))
+                self.assertEqual(self.post_flags(hp)[-1], [])  # the hook is shared by the subtests
+
+
 if __name__ == "__main__":
     unittest.main()

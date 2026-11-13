@@ -21,3 +21,4 @@ Confirmed bugs that need fixing, one file per bug.
 | [agent-audit: classify_command ignores python3 -m unittest/pytest as test commands](2026-11-12-audit-python3-test-commands-not-classified.md) | low | Open |
 | [agent-audit tests: 14 fail when TMPDIR is under /tmp/claude-*](2026-11-12-audit-tests-fail-under-tmp-claude.md) | medium | Fixed |
 | [agent-audit: active_run crashes on a run state that is not a JSON object](2026-11-12-audit-active-run-non-object-state.md) | medium | Open |
+| [agent-audit: heredoc data-sink misjudged after a command substitution (sh body stripped)](2026-11-13-audit-heredoc-sink-runs-sh.md) | medium | Open |

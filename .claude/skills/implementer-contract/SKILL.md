@@ -1,6 +1,6 @@
 ---
 name: implementer-contract
-description: Shared working contract of the stack implementation agents (backend-node, backend-spring, backend-go, backend-rust, backend-python, frontend-react, mobile-react-native) - inputs, write scope and scope requests, check policy, runtime validation against the user's local instance, UI policy, out-of-scope reporting and the YAML report. Preloaded by those agents through their `skills:` frontmatter; not meant to be invoked directly.
+description: Shared working contract of the stack implementation agents (backend-node, backend-spring, backend-go, backend-rust, backend-python, frontend-react, mobile-react-native, lua) - inputs, write scope and scope requests, check policy, runtime validation against the user's local instance, UI policy, out-of-scope reporting and the YAML report. Preloaded by those agents through their `skills:` frontmatter; not meant to be invoked directly.
 user-invocable: false
 ---
 
@@ -75,11 +75,11 @@ Docker commands:
 - Build (`docker build`, `docker compose build`): only when the task changes a `Dockerfile`, `.dockerignore` or the declared build context. Otherwise it is a scope request. A build does not replace the running container: a needed restart goes to `manual_checks`.
 - Never: `up`, `down`, `start`, `stop`, `restart`, `rm`, `kill`, `pull`, `create`, `run`, `exec`, compose or plain.
 
-## 5. UI (frontend and mobile)
+## 5. UI (frontend, mobile, Neovim and terminal)
 
-- The user validates UI on their own local run. Never open a browser, dev server, simulator or emulator, and never take or read screenshots. When the user explicitly wants a visual check, the caller delegates it to `ui-verifier`, which keeps the images out of the main conversation; if your prompt asks you for one, say so in `notes` and add the states to `manual_checks` instead.
-- Visual quality comes by construction: tokens from `DESIGN_SYSTEM.md`, the spacing and type scales, every state (loading, error, empty, success), themes and platform specifics. Verify it by reading the code and running component tests, not by looking at the screen.
-- List in `manual_checks` what the user should check: screen or route, viewport or device, theme, state, and the expected result.
+- The user validates UI on their own local run. Never open a browser, dev server, simulator or emulator, and never take or read screenshots. In Lua stacks, `nvim --headless` is only for tests and other non-interactive checks: never open an interactive Neovim, run a terminal TUI app or a LÖVE game, or execute or reload a host application (wezterm, hammerspoon, awesome, conky) or nginx. When the user explicitly wants a visual check, the caller delegates it to `ui-verifier`, which keeps the images out of the main conversation; if your prompt asks you for one, say so in `notes` and add the states to `manual_checks` instead.
+- Visual quality comes by construction: tokens from `DESIGN_SYSTEM.md` (or, where the stack's skill says so, the platform theme: Neovim highlight groups, terminal ANSI colors), the spacing and type scales, every state (loading, error, empty, success), themes and platform specifics. Verify it by reading the code and running component tests, not by looking at the screen.
+- List in `manual_checks` what the user should check: screen or route, viewport or device, theme, state, and the expected result. For Neovim and terminal UI, also the command, keymap or action that opens it and the window or terminal size (including resized and too small).
 
 ## 6. Out-of-scope issues
 

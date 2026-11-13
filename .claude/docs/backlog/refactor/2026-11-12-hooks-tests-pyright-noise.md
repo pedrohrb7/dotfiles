@@ -17,6 +17,8 @@ Pyright reports false problems in the hooks test package, which hides real ones.
 
 - Seen again (2026-11-13, code-reviewer, feature skills-docs-root): Pyright reports "rel possibly None" (10 errors) in `.claude/hooks/agent-audit.py` `_assess_root` around lines 604-636. Predates that change (the code only shifted). `rel` cannot be None at runtime, but the `inside` alias plus reassignment defeats narrowing. Scope extends to `agent-audit.py`; fix by restructuring the narrowing there.
 
+- Seen again (2026-11-13, code-reviewer, feature lua-agent): new warnings in this run's tests: `getvalue` on `TextIO` at `test_hook_main.py:290`, an Optional subscript at `test_hook_process.py:257`, plus unused-parameter notices.
+
 ## Proposed change
 
 Add a pyright config for `.claude/hooks`, or restructure those tests so the assignment is not inside a try. Needs a choice before a spec.

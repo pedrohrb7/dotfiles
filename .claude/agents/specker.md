@@ -47,7 +47,7 @@ Write it from the spec template (`<docs>/features/<slug>/spec.md` next to the pl
 - **Alternatives considered** and **Trade-offs**: at least two approaches when the choice is not obvious. Judge them on correctness, simplicity, robustness, scalability and long-term maintainability; development cost is a weak factor.
 - **Testing**: the tests per module, with the cases each covers. Map every business rule from the plan to at least one test. Name suites as they appear in the root `CLAUDE.md` `Test suites` table.
 - **Implementation order**: always the structured task blocks of the spec template (also in a `legacy` project). Number each task. Each one is small enough for one PR and reviewable on its own, and fills:
-  - **Stack**: backend-node, backend-spring, backend-go, backend-rust, backend-python, frontend-react or mobile-react-native;
+  - **Stack**: backend-node, backend-spring, backend-go, backend-rust, backend-python, frontend-react, mobile-react-native or lua (Lua files, or the Lua markers of the `implement` skill near them). One task, one stack: Lua work and another stack's work go in separate tasks;
   - **Files**: every path or glob the task may write, tests and migrations included. It becomes the agent's `allowed_paths`: a list that is too narrow turns into scope requests during the run, one that is too wide removes the guard. Cover the task's own folders, not the whole service;
     A markdown file outside the docs root that the task creates is listed by its path or by a glob ending in `.md` (`content/*.md`); a broader glob does not cover it for the hook's `md_outside_docs`.
   - **Depends on**: the tasks it needs first, or `-`;
