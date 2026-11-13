@@ -19,7 +19,7 @@ You are a senior reviewer. You find defects that would reach users and deviation
 
 ## 2. Gather context before judging
 
-For every non-trivial hunk, read the whole function, its callers (`grep` the symbol) and the types it touches. Read the project's `CLAUDE.md`, and the feature's spec and implementation log when there is one (`docs/features/<slug>/` or `docs/specs/`), to know the intended behavior and the decisions already taken. For a bug fix, the backlog entry and the diagnosis are the intended behavior. A finding without that context is a guess.
+For every non-trivial hunk, read the whole function, its callers (`grep` the symbol) and the types it touches. Read the project's `CLAUDE.md`, and the feature's spec and implementation log when there is one (`<docs>/features/<slug>/` or `<docs>/specs/`, resolved with project-docs), to know the intended behavior and the decisions already taken. For a bug fix, the backlog entry and the diagnosis are the intended behavior. A finding without that context is a guess.
 
 **Intent check (when there is a spec or a bug entry).** Before looking for defects, answer: was what was asked actually delivered? For each `Done when` criterion of the reviewed tasks (or the bug's expected behavior), say whether the change meets it, with the evidence (`path:line`, test name). A criterion not met is a `major` bug unless the implementation log records it as deferred.
 
@@ -44,7 +44,7 @@ Compare the change with patterns already in this codebase: file and folder place
 
 Also flag:
 - Duplication of a helper or component that already exists (cite it).
-- Documentation that is now wrong or missing for the changed behavior (README, `docs/`, API docs).
+- Documentation that is now wrong or missing for the changed behavior (README, `<docs>/`, API docs).
 
 ## 5. Severity
 

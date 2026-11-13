@@ -10,7 +10,9 @@ Every stack agent follows this contract. The agent file adds only what is specif
 
 ## 1. Inputs and context
 
-The prompt may give you: the phase, the feature folder (`docs/features/<slug>/`) or the spec path, the task number, `allowed_paths`, and whether TDD mode is on. Without a spec (a direct request), your task and scope are exactly what the user asked for.
+The prompt may give you: the phase, the feature folder (`<docs>/features/<slug>/`, resolved: `.claude/docs/features/<slug>/` when the docs root is `.claude/docs/`) or the spec path, the task number, `allowed_paths`, and whether TDD mode is on. Without a spec (a direct request), your task and scope are exactly what the user asked for.
+
+`<docs>` is the project docs root: the `- docs root:` line of the git-root `CLAUDE.md` `## Workflow` (project-docs, **Docs root**), default `docs/`.
 
 Before coding:
 - Read the project's root `CLAUDE.md`, `CONSTRAINTS.md` if it exists, and your task's section of the spec.
@@ -55,7 +57,7 @@ The user runs the project locally and owns that environment. Never start, stop, 
    - Service missing, `exited` or `unhealthy`, or connection refused: `result: skipped`, reason `service not running`, and put the `curl` in `manual_checks`.
    - Health path declared: `curl -s -o /dev/null -w '%{http_code}' --max-time 3 <base><health>`.
    - The service does not declare `reload: auto`: assume the instance runs old code. Skip, and add to `manual_checks`: "restart `<service>` first", with the `curl`.
-3. **Request** each changed endpoint with `-H 'X-Request-Id: agent-<task>-<n>'`. Payloads and auth may come from `docs/requests/` and the seed user in `Local runtime`. Keep only the status and the relevant body fields (`jq`), never the full body.
+3. **Request** each changed endpoint with `-H 'X-Request-Id: agent-<task>-<n>'`. Payloads and auth may come from `<docs>/requests/` and the seed user in `Local runtime`. Keep only the status and the relevant body fields (`jq`), never the full body.
 4. **Read the logs**, filtered by that id, in a short window, at most ~50 lines:
    - `compose`: `docker compose logs <service> --since 2m --no-color | grep '<id>'`
    - `docker`: `docker logs <container> --since 2m 2>&1 | grep '<id>'`
@@ -81,7 +83,7 @@ Docker commands:
 
 ## 6. Out-of-scope issues
 
-Do not fix them and do not write to `docs/backlog/`. Report each one in `out_of_scope_issues`, one per root cause:
+Do not fix them and do not write to `<docs>/backlog/`. Report each one in `out_of_scope_issues`, one per root cause:
 - `bug`: failing or flaky test, typecheck or build error, visual defect visible in the code;
 - `refactor`: lint error or warning, code smell, dead code.
 
@@ -112,7 +114,7 @@ checks_run:
     result: pass | fail
 decisions: [] # choices the next task must know
 assumptions: [] # the user must confirm
-needs_docs: [] # what the documentation pass must update (README, .env.example, API docs, docs/requests)
+needs_docs: [] # what the documentation pass must update (README, .env.example, API docs, <docs>/requests)
 manual_checks: [] # what the user validates locally (UI states, restarts, curls that could not run)
 local_checks:
   - request: <METHOD path (X-Request-Id)>

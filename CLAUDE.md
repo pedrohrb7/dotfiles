@@ -3,8 +3,9 @@
 ## Workflow
 
 - docs layout: features
+- docs root: .claude/docs/
 
-This repo's docs root is `.claude/docs/`, not `docs/` (the folder is not linked into `~/.claude`). Plans, specs, logs and the backlog live under it, and `docs_roots` in `.claude/hooks/agent-audit.json` lists it.
+This repo's docs live under `.claude/docs/`, not `docs/` (the folder is not linked into `~/.claude`). The `docs root` line above is the single source: the `project-docs` skill resolves every plan, spec, log and backlog path under it, and the `agent-audit` hook reads it to define the docs area.
 
 ## Test suites
 

@@ -275,6 +275,8 @@ Regras:
 
 **Dois layouts suportados:** `features` (padrão em projetos novos) e `legacy`.
 
+*Adendo 2026-11-13:* os caminhos desta subseção são relativos à raiz de docs resolvida, `<docs>/` (linha `- docs root:` da `## Workflow`, padrão `docs/`; ver 13.5).
+
 **Detecção, nesta ordem:**
 1. Declaração no `CLAUDE.md` do projeto, seção `Workflow`: `- docs layout: features` ou `- docs layout: legacy`.
 2. Existe `docs/features/` -> `features`.
@@ -781,6 +783,8 @@ Alvos de `approved_scope` que casam com a regra são descartados dos caminhos pe
 - Fallback: chave ausente, valor que não é lista ou nenhuma entrada válida -> `["docs/"]`.
 - Efeito: `.md` dentro de uma raiz não gera `md_outside_docs`, e `<raiz>backlog/` só é escrito pelo `backlog-keeper` (`backlog_write_by_other`), checado por raiz. A comparação é por prefixo: `services/x/docs/` não é raiz.
 - `project-docs` e `/implement` ainda resolvem `docs/` na raiz do repositório; aqui o caminho da feature é passado explicitamente.
+
+*Adendo 2026-11-13 (feature `skills-docs-root`):* a lista `docs_roots` do `agent-audit.json` foi substituída por uma declaração por projeto, `- docs root: <caminho>/` na seção `## Workflow` do `CLAUDE.md` da raiz git (padrão `docs/`; este repositório declara `.claude/docs/`). O hook lê a linha por raiz git (`normalize_docs_root()` e `project_docs_root()`), sem bloquear e só de arquivo regular; valor inválido cai em `docs/` no hook, e as skills param e perguntam. `project-docs` (**Docs root**) resolve a mesma linha, e skills e agents escrevem `<docs>/...`. Por isso a última frase acima ("`project-docs` e `/implement` ainda resolvem `docs/`...") deixou de valer, assim como a lista, a normalização por entrada e o fallback `["docs/"]` descritos nesta seção. Spec em `~/dotfiles/.claude/docs/features/skills-docs-root/spec.md`.
 
 ### 13.6 Heredoc no Bash: corpo é dado só para sinks conhecidos
 

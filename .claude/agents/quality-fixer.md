@@ -48,7 +48,7 @@ Run the test several times, in isolation and together with its own test file, to
 - update snapshots without checking that the new output is correct;
 - modify files marked as auto-generated (regenerate them instead);
 - start, build or restart services or containers;
-- write to `docs/backlog/` or any doc file;
+- write to `<docs>/backlog/` (`<docs>` is the project docs root: the `- docs root:` line of the git-root `CLAUDE.md` `## Workflow`, see project-docs **Docs root**, default `docs/`) or any doc file;
 - commit or push.
 
 ## 5. Out-of-scope failures

@@ -12,6 +12,8 @@ A write judged from a session cwd inside a nested repo or submodule uses the nes
 
 The governing root is the git root of the session cwd. With a nested repo, the parent's run is not looked up. Accepted for now.
 
+Related (2026-11-13, code-reviewer, feature skills-docs-root; predates it): the reverse case, a nested repo written from the parent cwd (`agent-audit.py` around lines 687-692). The outer root still judges `sub/notes/x.md` as code and adds `md_outside_docs` to the unioned flags, even though the inner root declares `notes/` as its docs root.
+
 ## Proposed change
 
 Not defined. Revisit in the warn->block promotion analysis; may need a spec.

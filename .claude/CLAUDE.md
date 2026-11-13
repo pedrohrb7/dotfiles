@@ -25,12 +25,12 @@
 - Apply that same high standard to engineering excellence: lint, test failures, and test flakiness.
   Fix only the ones caused by the current change or named in the task. Pre-existing ones in code you did not touch
   (and visual defects the user reports) are not fixed; they are logged once, by `backlog-keeper`, the single writer
-  of `docs/backlog/` - failing/flaky tests, type/build errors and visual defects as bugs, lint violations and code
+  of `<docs>/backlog/` (`<docs>` = the project's docs root, `docs/` unless declared; see `## Workflow`) - failing/flaky tests, type/build errors and visual defects as bugs, lint violations and code
   smells as refactors (one entry per root cause, deduplicated against the folder's Index). Every other agent reports
   them in `out_of_scope_issues`, and the main session hands them to `backlog-keeper` in one call.
 - Checks: subagents run only narrow checks (the tests and files they touched). Whole suites run only through `test-runner`.
 - Documentation is updated once, at the end of the work, by `docs-writer`, from the `needs_docs` the agents reported.
-  No other agent creates or edits doc files (README, `.env.example`, `docs/`, notes, summaries); they list what needs
+  No other agent creates or edits doc files (README, `.env.example`, `<docs>/`, notes, summaries); they list what needs
   documenting in their report. Doc comments and API annotations inside the code are part of the code.
 - Ask before acting when: (1) the task is ambiguous, (2) there are multiple reasonable approaches,
   (3) changes span 5+ files, or (4) you would be modifying config, CI, or infrastructure files.
@@ -41,8 +41,8 @@
 ## Workflow
 
 Route each request to its phase and owner without waiting for the user to name the agent. Check the precondition
-first; when it fails, say what is missing instead of proceeding. Plans, specs and logs are found through the
-`project-docs` skill (`docs/features/<slug>/`, or `docs/plans` + `docs/specs` in legacy projects).
+first; when it fails, say what is missing instead of proceeding. Plans, specs, logs and the backlog are found through the
+`project-docs` skill, under the project's docs root `<docs>/`: `docs/`, unless the root `CLAUDE.md` `## Workflow` declares `- docs root: <path>/` (`<docs>/features/<slug>/`, or `<docs>/plans` + `<docs>/specs` in legacy projects).
 
 | The user says (examples) | Phase -> owner | Precondition |
 |---|---|---|

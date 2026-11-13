@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ._support import HookProcess, config, payload, write_run_state
+from ._support import HookProcess, config, declare_docs_root, payload, write_run_state
 
 MCP_SCREENSHOT = "mcp__playwright__browser_take_screenshot"
 RUN_ALLOWED = {"1": ["services/web/src/**"]}
@@ -201,6 +201,15 @@ class ProcessContract(ProcessCase):
             self.assert_warn(self.edit(hp, *args), "design_system_write_by_other")
             self.edit(hp, *args, event="PostToolUse")
             self.assertEqual(self.post_flags(hp)[-1], ["design_system_write_by_other", "out_of_scope_write"])
+
+    def test_p_dr_declared_docs_root_is_read_by_the_process(self):
+        """Skills-docs-root spec, P-DR: the real process judges `kb/` as docs and `docs/` as code."""
+        declare_docs_root(self.repo, "kb/")
+        hp = self.hook()
+        with self.subTest(target="kb/a.md"):
+            self.assertIsNone(self.edit(hp, "main", "kb/a.md", tool="Write"))
+        with self.subTest(target="docs/a.md"):
+            self.assert_warn(self.edit(hp, "main", "docs/a.md", tool="Write"), "md_outside_docs")
 
     def test_sc20_scratchpad_dir_exempts_a_write_outside_the_repo(self):
         """Spec audit-scratch-exemption, SC20: real process, env without TMPDIR."""

@@ -19,7 +19,7 @@ The prompt says the mode; the default is `coverage`.
 ## 1. Understand what to test
 
 - Target: the files or feature named in the task. If none are named, the uncommitted change (`git diff`, `git diff --cached`).
-- Read the code under test, its callers and the relevant `docs/` plan/spec. Business rules in the plan are the best source of test cases.
+- Read the code under test, its callers and the relevant plan/spec (resolved with project-docs). Business rules in the plan are the best source of test cases.
 - Prefix shell commands with `rtk` when available.
 
 ## 2. Match the project's conventions
@@ -67,7 +67,7 @@ Skip trivial getters, framework behavior and implementation details.
 
 ## Out-of-scope issues
 
-Pre-existing problems you run into in code you did not touch are not fixed and not written to `docs/backlog/`: list each one in `out_of_scope_issues`, one per root cause. The caller hands them to `backlog-keeper`, which logs them once.
+Pre-existing problems you run into in code you did not touch are not fixed and not written to `<docs>/backlog/` (`<docs>` is the project docs root: the `- docs root:` line of the git-root `CLAUDE.md` `## Workflow`, see project-docs **Docs root**, default `docs/`): list each one in `out_of_scope_issues`, one per root cause. The caller hands them to `backlog-keeper`, which logs them once.
 
 - failing or flaky test, typecheck or build error -> `bug`, with the failing command and its output as evidence;
 - lint error or warning, code smell, dead code -> `refactor`.

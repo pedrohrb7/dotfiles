@@ -1,8 +1,15 @@
-"""Tests of the area flags of agent-audit.py `evaluate_write` and of `docs_roots()`.
+"""Tests of the area flags of agent-audit.py `evaluate_write` and of the declared docs root.
 
-Source: docs/features/audit-hook-test-suite/spec.md, Testing (A1-A9, D1-D11).
+Source: docs/features/audit-hook-test-suite/spec.md, Testing (A1-A9); skills-docs-root spec, Testing
+(DR1-DR17: `project_docs_root()` / `normalize_docs_root()` and their effect on writes).
 """
-from ._support import TempRepoCase, audit, call_main, config, payload
+import os
+import subprocess
+import threading
+import unittest
+from pathlib import Path
+
+from ._support import TempRepoCase, audit, call_main, config, declare_docs_root, payload
 
 ROOTS = ["docs/", ".claude/docs/"]
 
@@ -33,7 +40,7 @@ class AreaFlags(TempRepoCase):
             with self.subTest(case="A3", rel=rel):
                 self.assertNotIn("md_outside_docs", self.ev(rel)["flags"])
 
-    def test_a4_docs_roots_are_area_docs_without_md_flag(self):
+    def test_a4_docs_root_paths_are_area_docs_without_md_flag(self):
         for rel in ("docs/x.md", ".claude/docs/x.md"):
             with self.subTest(case="A4", rel=rel):
                 out = self.ev(rel)
@@ -74,65 +81,217 @@ class AreaFlags(TempRepoCase):
         self.assertNotIn("task", out)
 
 
-class DocsRoots(TempRepoCase):
-    """Spec Testing D1-D11: `docs_roots()` normalization (D1-D7) and its effect on writes (D8-D11).
-    Source of the rules: log of the design-director feature, "Added scope r3"."""
+class DocsRootDeclaration(TempRepoCase):
+    """Spec skills-docs-root, Testing DR1-DR9 and DR17: `project_docs_root()` and `normalize_docs_root()`."""
 
-    def ev(self, rel, actor="main", roots=ROOTS):
-        return audit.evaluate_write(str(self.repo / rel), str(self.repo), actor, "Write", None, roots)
+    def write_md(self, text, rel="CLAUDE.md"):
+        path = self.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(text, bytes):
+            path.write_bytes(text)
+        else:
+            path.write_text(text, encoding="utf-8")
 
-    def test_d1_missing_key_defaults(self):
-        self.assertEqual(audit.docs_roots({}), ["docs/"])
+    def root(self):
+        return audit.project_docs_root(self.repo)
 
-    def test_d2_non_list_defaults(self):
-        self.assertEqual(audit.docs_roots({"docs_roots": "docs"}), ["docs/"])
+    def test_dr1_no_claude_md_defaults(self):
+        self.assertEqual(self.root(), "docs/")
 
-    def test_d3_empty_list_defaults(self):
-        self.assertEqual(audit.docs_roots({"docs_roots": []}), ["docs/"])
+    def test_dr2_without_section_or_line_defaults(self):
+        for text in ("# p\n\n## Test suites\n\nx\n", "# p\n\n## Workflow\n\n- docs layout: features\n"):
+            with self.subTest(text=text):
+                self.write_md(text)
+                self.assertEqual(self.root(), "docs/")
 
-    def test_d4_only_invalid_entries_default(self):
-        self.assertEqual(audit.docs_roots({"docs_roots": [3, "", ".", "..", "a/../b", None]}), ["docs/"])
+    def test_dr3_valid_forms_are_normalized(self):
+        cases = (
+            ("- docs root: .claude/docs/", ".claude/docs/"),
+            ("- docs root: .claude/docs", ".claude/docs/"),
+            ("- docs root: `kb`", "kb/"),
+            ("- docs root:   ./kb/  ", "kb/"),
+            ("* Docs Root: kb", "kb/"),
+            ("- docs root: a//b/./c", "a/b/c/"),
+            ("- docs root: x\\y", "x/y/"),
+        )
+        for line, expected in cases:
+            with self.subTest(line=line):
+                self.write_md(f"# p\n\n## Workflow\n\n{line}\n")
+                self.assertEqual(self.root(), expected)
 
-    def test_d5_entries_are_normalized(self):
-        self.assertEqual(
-            audit.docs_roots({"docs_roots": [" ./x\\y/ ", "/z", "kb"]}), ["x/y/", "z/", "kb/"])
+    def test_dr4_invalid_values_default(self):
+        for value in ("", ".", "..", "a/../b", "/abs", "~/x", "C:/x", "kb\tx"):
+            with self.subTest(value=value):
+                self.assertIsNone(audit.normalize_docs_root(value))
+                self.declare(value)
+                self.assertEqual(self.root(), "docs/")
 
-    def test_d6_duplicates_are_dropped(self):
-        self.assertEqual(audit.docs_roots({"docs_roots": ["docs", "docs/", "./docs/"]}), ["docs/"])
+    def test_dr5_line_outside_the_workflow_section_is_ignored(self):
+        line = "- docs root: kb/\n"
+        cases = {
+            "other section": f"# p\n\n## Test suites\n\n{line}",
+            "### Workflow only": f"# p\n\n### Workflow\n\n{line}",
+            "after a ## that closes it": f"# p\n\n## Workflow\n\n- docs layout: features\n\n## Outra\n\n{line}",
+            "level 1 heading": f"# Workflow\n\n{line}",
+        }
+        for name, text in cases.items():
+            with self.subTest(case=name):
+                self.write_md(text)
+                self.assertEqual(self.root(), "docs/")
 
-    def test_d7_order_is_preserved(self):
-        self.assertEqual(audit.docs_roots({"docs_roots": ["b/", "a/"]}), ["b/", "a/"])
+    def test_dr6_subheading_and_loose_heading_keep_the_section(self):
+        with self.subTest(case="### Sub"):
+            self.write_md("# p\n\n## Workflow\n\n### Sub\n\n- docs root: kb/\n")
+            self.assertEqual(self.root(), "kb/")
+        with self.subTest(case="spaces and case"):
+            self.write_md("# p\n\n##   workflow  \n\n- docs root: kb/\n")
+            self.assertEqual(self.root(), "kb/")
 
-    def test_d8_second_root_is_docs_area(self):
-        out = self.ev(".claude/docs/features/x.md")
-        self.assertEqual(out["area"], "docs")
-        self.assertNotIn("md_outside_docs", out["flags"])
+    def test_dr7_first_docs_root_line_decides(self):
+        with self.subTest(case="two valid"):
+            self.write_md("# p\n\n## Workflow\n\n- docs root: kb/\n- docs root: other/\n")
+            self.assertEqual(self.root(), "kb/")
+        with self.subTest(case="first invalid"):
+            self.write_md("# p\n\n## Workflow\n\n- docs root: /abs\n- docs root: other/\n")
+            self.assertEqual(self.root(), "docs/")
 
-    def test_d9_backlog_under_second_root(self):
-        for actor, expected in (("specker", True), ("backlog-keeper", False)):
-            with self.subTest(case="D9", actor=actor):
-                flags = self.ev(".claude/docs/backlog/refactor/x.md", actor=actor)["flags"]
-                self.assertEqual("backlog_write_by_other" in flags, expected)
+    def test_dr8_unreadable_claude_md_never_raises(self):
+        with self.subTest(case="directory"):
+            (self.repo / "CLAUDE.md").mkdir()
+            self.assertEqual(self.root(), "docs/")
+            (self.repo / "CLAUDE.md").rmdir()
+        with self.subTest(case="invalid utf-8 before the section"):
+            self.write_md(b"\xff\xfe\x00 junk\n## Workflow\n- docs root: kb/\n")
+            self.assertEqual(self.root(), "kb/")
+        with self.subTest(case="line after 256 KiB"):
+            filler = "x" * 99 + "\n"
+            self.write_md("## Workflow\n" + filler * 3000 + "- docs root: kb/\n")
+            self.assertGreater((self.repo / "CLAUDE.md").stat().st_size, 262144 - 1)
+            self.assertEqual(self.root(), "docs/")
+        with self.subTest(case="no read permission"):
+            if hasattr(os, "geteuid") and os.geteuid() == 0:
+                self.skipTest("root reads any file")
+            self.write_md("## Workflow\n- docs root: kb/\n")
+            (self.repo / "CLAUDE.md").chmod(0)
+            self.addCleanup((self.repo / "CLAUDE.md").chmod, 0o600)
+            self.assertEqual(self.root(), "docs/")
 
-    def test_d10_nested_docs_and_default_roots_are_code(self):
-        cases = (("services/x/docs/a.md", ROOTS), (".claude/docs/a.md", None))
-        for rel, roots in cases:
-            with self.subTest(case="D10", rel=rel):
-                out = self.ev(rel, roots=roots)
+    def root_within(self, seconds=2.0):
+        """Run `project_docs_root` in a daemon thread so a hang fails the test instead of the suite."""
+        result = []
+        thread = threading.Thread(target=lambda: result.append(self.root()), daemon=True)
+        thread.start()
+        thread.join(seconds)
+        self.assertFalse(thread.is_alive(), "project_docs_root hung")
+        return result[0]
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs os.mkfifo")
+    def test_dr18_fifo_claude_md_defaults_without_hanging(self):
+        os.mkfifo(self.repo / "CLAUDE.md")
+        self.assertEqual(self.root_within(), "docs/")
+
+    def test_dr19_symlink_to_char_device_defaults_without_hanging(self):
+        if not os.path.exists("/dev/null"):
+            self.skipTest("no /dev/null")
+        (self.repo / "CLAUDE.md").symlink_to("/dev/null")
+        self.assertEqual(self.root_within(), "docs/")
+
+    def test_dr9_only_the_dot_claude_claude_md_declares(self):
+        self.write_md("# p\n\n## Workflow\n\n- docs root: kb/\n", rel=".claude/CLAUDE.md")
+        self.assertEqual(self.root(), "docs/")
+
+    def test_dr17_non_str_is_invalid(self):
+        for value in (None, 3, ["kb"], Path("kb")):
+            with self.subTest(value=value):
+                self.assertIsNone(audit.normalize_docs_root(value))
+
+
+class DocsRootEffect(TempRepoCase):
+    """Spec skills-docs-root, Testing DR10-DR16: the declared docs root decides the docs area of a write."""
+
+    def ev(self, rel, actor="main", roots=None, cwd=None, target=None):
+        path = target or (self.repo / rel)
+        return audit.evaluate_write(str(path), str(cwd or self.repo), actor, "Write", None, roots)
+
+    def test_dr10_declared_root_is_the_docs_area(self):
+        self.declare("kb/")
+        with self.subTest(target="kb/x.md"):
+            out = self.ev("kb/x.md")
+            self.assertEqual(out["area"], "docs")
+            self.assertEqual(out["flags"], [])
+        with self.subTest(target="docs/x.md"):
+            out = self.ev("docs/x.md")
+            self.assertEqual(out["area"], "code")
+            self.assertIn("md_outside_docs", out["flags"])
+
+    def test_dr11_backlog_of_the_declared_root(self):
+        self.declare("kb/")
+        for actor, rel, expected in (
+            ("specker", "kb/backlog/bugs/x.md", True),
+            ("backlog-keeper", "kb/backlog/bugs/x.md", False),
+            ("specker", "docs/backlog/x.md", False),
+        ):
+            with self.subTest(actor=actor, rel=rel):
+                out = self.ev(rel, actor=actor)
+                self.assertEqual("backlog_write_by_other" in out["flags"], expected)
+                if rel.startswith("docs/"):
+                    self.assertIn("md_outside_docs", out["flags"])
+
+    def test_dr12_implementer_write_in_the_declared_root(self):
+        self.declare("kb/")
+        self.assertIn("docs_write_by_implementer", self.ev("kb/x.md", actor="backend-node")["flags"])
+
+    def test_dr13_undeclared_repo_has_only_docs(self):
+        for rel in (".claude/docs/x.md", "services/x/docs/a.md"):
+            with self.subTest(rel=rel):
+                out = self.ev(rel)
                 self.assertEqual(out["area"], "code")
                 self.assertIn("md_outside_docs", out["flags"])
 
-    def test_d11_main_uses_configured_docs_roots(self):
-        def flags_for(cfg):
-            pl = payload(
-                "PostToolUse", "Write", cwd=self.repo,
-                tool_input={"file_path": str(self.repo / "kb" / "a.md")},
-            )
+    def test_dr14_nested_repo_uses_its_own_declaration(self):
+        self.declare("kb/")
+        inner = self.repo / "sub"
+        inner.mkdir()
+        subprocess.run(["git", "init", "-q", str(inner)], check=True)
+        declare_docs_root(inner, "notes/")
+        out = self.ev(None, target=inner / "notes" / "x.md")
+        self.assertEqual(out["rel"], "notes/x.md")
+        self.assertEqual(out["area"], "docs")
+
+    def test_dr15_explicit_roots_override_the_declaration(self):
+        self.declare("kb/")
+        self.assertEqual(self.ev("kb/x.md", roots=["docs/"])["area"], "code")
+
+    def test_dr16_main_reads_the_declaration_and_ignores_the_old_key(self):
+        def post_flags(cfg):
+            pl = payload("PostToolUse", "Write", cwd=self.repo,
+                         tool_input={"file_path": str(self.repo / "kb" / "a.md")})
             result = call_main(pl, cfg)
             self.assertEqual(len(result.records), 1)
             return result.records[0]["flags"]
 
-        with self.subTest(case="D11", docs_roots=["kb/"]):
-            self.assertNotIn("md_outside_docs", flags_for(config(docs_roots=["kb/"])))
-        with self.subTest(case="D11", docs_roots=7):
-            self.assertIn("md_outside_docs", flags_for(config(docs_roots=7)))
+        def pre_output(actor="specker"):
+            pl = payload("PreToolUse", "Write", actor=actor, cwd=self.repo,
+                         tool_input={"file_path": str(self.repo / ".claude/docs/features/x/spec.md")})
+            return call_main(pl).output
+
+        with self.subTest(case="declared kb/"):
+            self.declare("kb/")
+            self.assertNotIn("md_outside_docs", post_flags(config()))
+        (self.repo / "CLAUDE.md").unlink()
+        with self.subTest(case="old docs_roots key ignored"):
+            self.assertIn("md_outside_docs", post_flags(config(docs_roots=["kb/"])))
+        with self.subTest(case="PreToolUse with .claude/docs/ declared"):
+            self.declare(".claude/docs/")
+            self.assertIsNone(pre_output())
+        with self.subTest(case="PreToolUse without declaration"):
+            (self.repo / "CLAUDE.md").unlink()
+            out = pre_output()
+            assert out is not None
+            self.assertIn("md_outside_docs", out["hookSpecificOutput"]["additionalContext"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+

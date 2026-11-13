@@ -2,7 +2,7 @@
 
 - **Date:** <YYYY-MM-DD>
 - **Status:** Draft
-- **Plan:** [plan.md](plan.md) <!-- for a refactor without a plan, replace with: **Source:** docs/backlog/refactor/<entry>.md -->
+- **Plan:** [plan.md](plan.md) <!-- for a refactor without a plan, replace with: **Source:** [<entry>](../../backlog/refactor/<entry>.md) -->
 - **Implementation log:** [log.md](log.md)
 
 ## Summary

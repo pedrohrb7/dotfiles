@@ -66,4 +66,4 @@ Generated clients and compiled protos: regenerate, never edit.
 
 - `migrations`: say whether each is safe to run on production data.
 - `env_vars`: new env vars; `notes`: new dependencies.
-- `needs_docs`: README, `.env.example`, `docs/requests/`. Docstrings and the FastAPI route metadata that feeds OpenAPI are written with the code.
+- `needs_docs`: README, `.env.example`, `<docs>/requests/` (`<docs>` is the project docs root, defined in the implementer contract). Docstrings and the FastAPI route metadata that feeds OpenAPI are written with the code.

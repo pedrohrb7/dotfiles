@@ -49,6 +49,7 @@ One GitHub Actions workflow per service in `.github/workflows/<service>.yml`, tr
 ## Workflow
 
 - docs layout: features
+<!-- Add "- docs root: <path>/" only when the docs tree is not at docs/ (project-docs, Layouts and path resolution). -->
 
 `docs/` follows the project-docs structure. Each feature has a folder `docs/features/<slug>/` with `plan.md` (product side, business rules), `spec.md` (technical side, structured tasks) and `log.md` (implementation log, written by `/implement`). Plans are written by `planner`, specs by `specker`, and both are executed with `/implement`. Bugs and refactors go to `docs/backlog/`, written only by `backlog-keeper`.
 

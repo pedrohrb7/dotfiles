@@ -37,7 +37,6 @@ _AUDIT = "audit"
 # change there (for instance promoting a category from warn to block) must not break the suite.
 TEST_CONFIG: dict = {
     "mode": "enforce",
-    "docs_roots": ["docs/", ".claude/docs/"],
     "categories": {
         "docker_lifecycle": _BLOCK,
         "write_by_readonly_agent": _BLOCK,
@@ -71,6 +70,14 @@ def assert_no_git_root(path) -> None:
         raise AssertionError(f"premissa do ambiente: {path} esta dentro de um repo git ({root})")
 
 
+def declare_docs_root(root, value, *, section="Workflow", extra="") -> None:
+    """Write `<root>/CLAUDE.md` declaring `- docs root: <value>` under `## <section>`.
+
+    `extra` is appended verbatim after the declaration."""
+    text = f"# p\n\n## {section}\n\n- docs layout: features\n- docs root: {value}\n{extra}"
+    (Path(root) / "CLAUDE.md").write_text(text, encoding="utf-8")
+
+
 def write_run_state(root, allowed: dict, **extra) -> None:
     """Write an active /implement run state (`.claude/runs/feat-x.json`) under `root`."""
     runs = Path(root) / ".claude" / "runs"
@@ -97,6 +104,9 @@ class TempRepoCase(unittest.TestCase):
 
     def write_run(self, **extra):
         write_run_state(self.repo, self.ALLOWED, **extra)
+
+    def declare(self, value, **kw):
+        declare_docs_root(self.repo, value, **kw)
 
     def remove_run(self):
         (self.repo / ".claude" / "runs" / "feat-x.json").unlink(missing_ok=True)

@@ -1,9 +1,10 @@
 # Align project-docs and implement skills with configurable docs root
 
-- **Status:** Proposed
+- **Status:** Done (implemented by the spec, 2026-11-13; uncommitted, no PR yet)
 - **Opened:** 2026-11-11
-- **Scope:** .claude/skills/project-docs, .claude/skills/implement
+- **Scope:** the hook (`agent-audit.py`, `agent-audit.json`, `agent-metrics.py`), the root `CLAUDE.md`, the skills (`project-docs`, `implement`, `fix-bug`, `onboard`, `implementer-contract`, `docs`), the global `.claude/CLAUDE.md`, 12 agents and 2 templates
 - **Source:** feature design-director (stage H), /implement run 2026-11-11, main session
+- **Spec:** [spec.md](../../features/skills-docs-root/spec.md)
 
 ## Motivation
 
@@ -15,12 +16,17 @@ Skills hardcode `docs/`.
 
 ## Proposed change
 
-Align the skills with a configurable docs root.
+Summary of rules R1-R4 from the spec:
+
+- Each project declares its docs root once, as `- docs root: <path>/` in the git-root `CLAUDE.md` `## Workflow`. It defaults to `docs/`.
+- The hook reads the declaration per git root.
+- `docs_roots` leaves the global `agent-audit.json`.
+- The skills use the `<docs>/` placeholder, resolved by `project-docs`.
 
 ## Risks
 
-Not recorded.
+Projects with docs under `.claude/docs/` and no declaration start getting `md_outside_docs` warnings.
 
 ## Out of scope
 
-Not recorded.
+Several docs roots per project.

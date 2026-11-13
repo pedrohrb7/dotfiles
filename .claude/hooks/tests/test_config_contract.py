@@ -3,7 +3,7 @@
 Source: audit-hook-test-suite spec, section Testing, `test_config_contract.py` (F1-F6), rule R16.
 This is the only module that reads the live `agent-audit.json` and `settings.json`. It checks
 floors (the explicit rules of the global CLAUDE.md), not exact values, so promoting a category from
-warn to block does not break the suite.
+warn to block does not break the suite. It also reads the root `CLAUDE.md` of the repo (F4a).
 """
 import json
 import re
@@ -12,6 +12,7 @@ import unittest
 from ._support import CLAUDE_DIR, HOOKS_DIR, TEST_CONFIG, audit, metrics
 
 HOOK_COMMAND = 'python3 "$HOME/.claude/hooks/agent-audit.py"'
+REPO_ROOT = audit.git_root(CLAUDE_DIR)
 EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart", "SubagentStop")
 
 
@@ -57,10 +58,15 @@ class ConfigContract(unittest.TestCase):
         self.assertEqual(categories, set(audit.WHY), "categories vs WHY")
         self.assertEqual(categories, set(metrics.FLAG_LABELS), "categories vs FLAG_LABELS")
 
-    def test_f4_live_docs_roots_include_the_repo_docs(self):
-        roots = audit.docs_roots(self.live)
-        self.assertIn("docs/", roots)
-        self.assertIn(".claude/docs/", roots)
+    def test_f4a_repo_declares_its_docs_root_and_the_tree_exists(self):
+        """Skills-docs-root spec, F4a (R9): the root CLAUDE.md declares `.claude/docs/` and it exists."""
+        self.assertEqual(audit.project_docs_root(REPO_ROOT), ".claude/docs/")
+        self.assertTrue((REPO_ROOT / ".claude/docs/features/README.md").is_file())
+        self.assertTrue((REPO_ROOT / ".claude/docs/backlog").is_dir())
+
+    def test_f4b_live_config_has_no_docs_roots_key(self):
+        """Skills-docs-root spec, F4b (R2): the docs root has a single source, the root CLAUDE.md."""
+        self.assertNotIn("docs_roots", self.live)
 
     def test_f5_settings_register_the_hook(self):
         for event in EVENTS:

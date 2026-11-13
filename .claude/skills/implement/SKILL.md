@@ -1,7 +1,7 @@
 ---
 name: implement
 description: Implement an approved spec task by task by orchestrating the stack agents, test-runner, quality-fixer, the reviewers, docs-writer and backlog-keeper, with a resumable run state and an optional --tdd mode (tests written first against stubs). Use when the user says "/implement <feature>", "podemos seguir com a implementação", "pode implementar", "vamos implementar", "segue com a implementação", "implement this spec", "start development of the plan", or "go" right after approving a spec. Verifies first that the plan and spec are approved, and never guesses which spec when several qualify.
-argument-hint: <docs/features/<slug>/ or docs/specs/file.md> [tasks 2-4] [--step] [--tdd]
+argument-hint: <<docs>/features/<slug>/ or <docs>/specs/file.md> [tasks 2-4] [--step] [--tdd]
 ---
 
 # Implement a spec
@@ -16,11 +16,11 @@ Arguments: `$ARGUMENTS`
 
 ## 1. Resolve the target
 
-1. **Layout and paths.** Resolve them with the `project-docs` skill (**Layouts and path resolution**): the docs layout, and the feature's plan, spec and implementation log paths. Never hard-code `docs/plans`, `docs/specs` or `docs/features`. In a `legacy` project with no layout declared, make the one-time migration offer that section describes before anything else.
+1. **Layout and paths.** Resolve them with the `project-docs` skill (**Layouts and path resolution**): the docs layout, and the feature's plan, spec and implementation log paths. This includes the docs root: a feature passed by slug or title is looked up under the resolved `<docs>/` (`<docs>` is the project docs root: the `- docs root:` line of the git-root `CLAUDE.md` `## Workflow`, default `docs/`). A path the user passes outside it triggers the project-docs **Docs root offer** only when no docs root is declared and `docs/` is missing (asked by you, the main session, which writes the line on yes); when a root is declared, say so and ask the user. Never hard-code a docs path; every path starts at the resolved docs root. In a `legacy` project with no layout declared, make the one-time migration offer that section describes before anything else.
 2. **Which spec**, in this order, and look only inside the current project (the git root, or the working directory):
    1. the feature folder or spec path in the arguments;
    2. the feature or spec named in the conversation;
-   3. the only spec with status `Approved` (from `docs/features/README.md`, or the specs Index in `legacy`).
+   3. the only spec with status `Approved` (from `<docs>/features/README.md`, or the specs Index in `legacy`).
 
    If none of these resolves to exactly one spec, list the candidates (`Draft` or `Approved`) with their status and ask which one. Never pick between several. If the project has no spec, say so in one line and suggest `@specker` (or `@planner` when there is no plan either).
 3. **Tasks**: an optional range or list (`tasks 2-4`, `task 3`). The default is every task in **Implementation order** not already done (`Status: done` in a structured task block, or a ` (done)` suffix in an older free-form list).
@@ -47,7 +47,7 @@ The run state lives in `.claude/runs/<slug>.json` at the project root (`<slug>` 
 
 ```json
 {
-  "feature": "docs/features/<slug>/",
+  "feature": "<docs>/features/<slug>/",
   "spec": "<spec path>",
   "log": "<log path>",
   "phase": "implement | review | verify | document | done",
@@ -64,6 +64,8 @@ The run state lives in `.claude/runs/<slug>.json` at the project root (`<slug>` 
   "agent_calls": [{ "agent": "backend-node", "task": 1, "result": "done", "at": "<ISO timestamp>" }]
 }
 ```
+
+`feature`, `spec` and `log` hold resolved paths relative to the git root (`.claude/docs/features/<slug>/` when the docs root is `.claude/docs/`).
 
 - **Start**: if the file exists with `phase` other than `done`, this is a resume: show where the run stopped (phase, done tasks, pending scope decisions) and continue from there, without repeating done tasks. Otherwise create it.
 - **Budgets**: at most 2 fix rounds per task, 1 full gate per run (plus one re-run after review fixes), 1 review round (plus 1 only when blockers were fixed). When a budget runs out, stop and ask the user.

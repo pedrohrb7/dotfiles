@@ -25,8 +25,8 @@ METRICS_DIR = Path(os.environ.get("AGENT_AUDIT_DIR", str(Path.home() / ".claude"
 
 FLAG_LABELS = {
     "out_of_scope_write": "writes outside allowed_paths (target 0 without approval)",
-    "md_outside_docs": "new .md files outside docs/ (target 0)",
-    "docs_write_by_implementer": "docs (docs/, README, CHANGELOG, .env.example, DEPLOY.md) edited by implementers - docs-writer owns them (target 0)",
+    "md_outside_docs": "new .md files outside the docs root (target 0)",
+    "docs_write_by_implementer": "docs (docs root, README, CHANGELOG, .env.example, DEPLOY.md) edited by implementers - docs-writer owns them (target 0)",
     "write_by_readonly_agent": "files written by a read-only agent: ui-verifier, test-runner, reviewers (target 0)",
     "backlog_write_by_other": "backlog written by someone other than backlog-keeper (target 0)",
     "design_system_write_by_other": "a DESIGN_SYSTEM.md written by someone other than design-director or the main session - propose values in scope_requests (target 0)",

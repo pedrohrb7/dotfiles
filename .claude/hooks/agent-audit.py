@@ -17,7 +17,7 @@ What it classifies (see agent-workflow.md, sections 13 and 14):
   git (commit/push), requests (local/external);
 - file writes: inside or outside the active run's allowed_paths (from .claude/runs/<slug>.json;
   outside the repo only inside the session scratchpad (`scratchpad_dir`) or an approved absolute glob),
-  docs and backlog files, and the project's DESIGN_SYSTEM.md (written only by design-director
+  docs and backlog files (under the project's docs root: `- docs root:` in the root CLAUDE.md `## Workflow`, default `docs/`), and the project's DESIGN_SYSTEM.md (written only by design-director
   and the main session);
 - browser and screenshot tools.
 
@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import time
@@ -48,7 +49,7 @@ IMPLEMENTERS = {
 # Agents that must never write files.
 READ_ONLY_AGENTS = {"ui-verifier", "test-runner", "code-reviewer", "security-reviewer", "Explore", "Plan"}
 
-# Documentation files outside the docs roots (agent-audit.json `docs_roots`) that only docs-writer edits.
+# Documentation files outside the project's docs root that only docs-writer edits.
 DOC_FILES = {"README.md", "CHANGELOG.md", ".env.example", "DEPLOY.md"}
 
 # A project's DESIGN_SYSTEM.md: created by design-director, maintained by the main session following
@@ -122,31 +123,71 @@ def load_config() -> dict:
         return {"mode": "audit"}
 
 
-DEFAULT_DOCS_ROOTS = ["docs/"]
+DEFAULT_DOCS_ROOT = "docs/"
+WORKFLOW_HEADING = re.compile(r"^##[ \t]+workflow[ \t]*$", re.I)
+SECTION_END = re.compile(r"^#{1,2}[ \t]")
+DOCS_ROOT_LINE = re.compile(r"^[ \t]*[-*][ \t]+docs root:[ \t]*(.*?)[ \t]*$", re.I)
+DRIVE_LETTER = re.compile(r"^[A-Za-z]:")
+CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
-def docs_roots(config: dict) -> list[str]:
-    """Docs roots from the config (`docs_roots`), normalized to `a/b/`; invalid or missing -> ["docs/"]."""
+def normalize_docs_root(raw: object) -> str | None:
+    """Normalize a declared docs root to `a/b/`, or None when invalid. Never raises.
+
+    Spec skills-docs-root, section 2: strip spaces and one pair of backticks, `\\` -> `/`, drop empty and
+    `.` segments, end with one `/`. Invalid: empty after that, starts with `/` or `~`, a drive letter,
+    a `..` segment, a control character, or not a string."""
     try:
-        raw = config.get("docs_roots")
-        if not isinstance(raw, list):
-            return list(DEFAULT_DOCS_ROOTS)
-        roots: list[str] = []
-        for item in raw:
-            if not isinstance(item, str):
-                continue
-            r = item.strip().replace("\\", "/")
-            while r.startswith("./"):
-                r = r[2:]
-            r = r.lstrip("/").rstrip("/")
-            if not r or r == "." or ".." in r.split("/"):
-                continue
-            r += "/"
-            if r not in roots:
-                roots.append(r)
-        return roots or list(DEFAULT_DOCS_ROOTS)
+        if not isinstance(raw, str):
+            return None
+        value = raw.strip()
+        if len(value) >= 2 and value.startswith("`") and value.endswith("`"):
+            value = value[1:-1].strip()
+        value = value.replace("\\", "/")
+        if value.startswith(("/", "~")) or DRIVE_LETTER.match(value) or CONTROL_CHARS.search(value):
+            return None
+        segments = [s for s in value.split("/") if s not in ("", ".")]
+        if not segments or ".." in segments:
+            return None
+        return "/".join(segments) + "/"
     except Exception:
-        return list(DEFAULT_DOCS_ROOTS)
+        return None
+
+
+def project_docs_root(root: Path) -> str:
+    """The docs root declared by a git root, as `a/b/`; `docs/` when none or invalid.
+
+    Reads at most 256 KiB of `<root>/CLAUDE.md`: the first `- docs root: <path>/` line inside its
+    `## Workflow` section decides (the section ends at the next `#` or `##` heading). Same rules as the
+    project-docs skill (Layouts and path resolution, Docs root): R1 one declaration, default `docs/`;
+    R3 an invalid value falls back to `docs/` (a hook never stops a session; skills ask instead);
+    R5 only that section of that file counts; R10 a missing, unreadable, directory, binary or huge file
+    is the same as no declaration, and nothing is raised."""
+    try:
+        # O_NONBLOCK: opening a FIFO must not wait for a writer. fstat on the fd (after following any
+        # symlink) must say regular file, so a FIFO or a char device such as /dev/tty is never read.
+        fd = os.open(Path(root) / "CLAUDE.md", os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return DEFAULT_DOCS_ROOT
+            with os.fdopen(fd, "rb", closefd=False) as fh:
+                text = fh.read(262144).decode("utf-8", errors="replace")
+        finally:
+            os.close(fd)
+        in_section = False
+        for line in text.splitlines():
+            if in_section:
+                if SECTION_END.match(line):
+                    in_section = False
+                    continue
+                m = DOCS_ROOT_LINE.match(line)
+                if m:
+                    return normalize_docs_root(m.group(1)) or DEFAULT_DOCS_ROOT
+            elif WORKFLOW_HEADING.match(line.strip()):
+                in_section = True
+        return DEFAULT_DOCS_ROOT
+    except Exception:
+        return DEFAULT_DOCS_ROOT
 
 
 def strip_prefixes(segment: str) -> str:
@@ -608,6 +649,7 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roo
                    scratchpad: object = None) -> dict:
     """Classify a write.
 
+    Docs area = `roots` when given, else the governing root's declared docs root (`project_docs_root`).
     Actor-only flags (read-only agent, design-director, DESIGN_SYSTEM.md by file name) are computed first,
     before any filesystem call, so any error below degrades to area "outside" with just those flags.
     The target is `~`-expanded and resolved (symlinks, `..`); with a `..` component the lexical
@@ -617,7 +659,6 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roo
     the record carries the nested (target) root's rel, area and run, unless only the other root flagged out_of_scope_write. A target outside every root has
     rel = its absolute path and area "outside": area flags do not apply, and fixed-scope actors with a
     run need an approved absolute glob (matched literally after ~ expansion, never realpath'd) or a path inside the session scratchpad (`scratchpad_dir` of the payload)."""
-    roots = roots or DEFAULT_DOCS_ROOTS
     out: dict = {"path": path_str}
     scoped = actor in IMPLEMENTERS or actor in {"quality-fixer", "test-writer"}
 
@@ -654,7 +695,7 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roo
         rec = {"rel": str(resolved), "area": "outside", "in_run": False}
         rec_oos = False
         for root in judged:
-            found, cur = _assess_root(root, forms, actor, tool, created, roots, scratch=sp)
+            found, cur = _assess_root(root, forms, actor, tool, created, roots or [project_docs_root(root)], scratch=sp)
             flags += found
             oos = "out_of_scope_write" in found
             if not (rec_oos and not oos):  # the nested root wins, unless an earlier root is the one that flagged
@@ -685,9 +726,9 @@ WHY = {
     "git_push": "pushes need the user's explicit authorization in the current conversation",
     "out_of_scope_write": "this path is outside the task's allowed_paths and its approved scope",
     "suite_by_non_runner": "whole suites run only through test-runner; run only the tests of the files you touched",
-    "md_outside_docs": "notes, summaries and other .md files outside the docs roots (docs/ by default) are not created; documentation needs go to needs_docs",
+    "md_outside_docs": "notes, summaries and other .md files outside the project's docs root (docs/, or the \"- docs root:\" line of the root CLAUDE.md ## Workflow) are not created; documentation needs go to needs_docs",
     "docs_write_by_implementer": "documentation files are written only by docs-writer; list the need in needs_docs",
-    "backlog_write_by_other": "<docs root>/backlog/ (docs/backlog/ by default) is written only by backlog-keeper; report it in out_of_scope_issues",
+    "backlog_write_by_other": "<docs root>/backlog/ (docs/backlog/ unless the root CLAUDE.md declares a docs root) is written only by backlog-keeper; report it in out_of_scope_issues",
     "design_director_write_outside": "design-director writes only the project's DESIGN_SYSTEM.md; for anything else finish with result: blocked and a scope_requests entry saying what and why, the caller will ask the user",
     "design_system_write_by_other": "a project's DESIGN_SYSTEM.md (any directory) is created only by design-director and maintained only by the main session following the design-system skill; propose the value (token, light and dark, usage) in scope_requests instead",
     "docker_build": "images are built only when the task changes a Dockerfile or its build context",
@@ -779,7 +820,7 @@ def main() -> None:
         elif tool in {"Write", "Edit", "MultiEdit", "NotebookEdit"}:
             path = tinput.get("file_path") or tinput.get("notebook_path") or ""
             record["categories"] = ["write"]
-            record.update(evaluate_write(path, payload.get("cwd", ""), actor, tool, payload.get("tool_response"), docs_roots(config),
+            record.update(evaluate_write(path, payload.get("cwd", ""), actor, tool, payload.get("tool_response"),
                                           scratchpad=payload.get("scratchpad_dir")))
             flags = record.pop("flags", [])
         elif VISUAL_TOOL.search(tool):
