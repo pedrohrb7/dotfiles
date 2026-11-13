@@ -57,8 +57,7 @@ CASES = [
 class DesignSystemRules(TempRepoCase):
     """Cases H1-H28 of the design-director spec (Testing, cases H), run through `main()`.
 
-    H14 is documented in `test_h14_main_creates_design_system_md`: it pins accepted behavior with an
-    open backlog entry (md-outside-docs-false-positive).
+    H14 (`test_h14_main_creates_design_system_md`): the main session is free of md_outside_docs.
     """
 
     def _run_state(self, kind):
@@ -116,15 +115,13 @@ class DesignSystemRules(TempRepoCase):
             self._check("H8", "frontend-react", "Edit", DS, False, None, SILENT, [DSBO], cfg=config(mode="audit"))
 
     def test_h14_main_creates_design_system_md(self):
-        """H14: main Write-creating DESIGN_SYSTEM.md at the root -> warn md_outside_docs.
+        """H14: main Write-creating DESIGN_SYSTEM.md at the root -> silent, no flags.
 
-        Pins accepted behavior with an open backlog entry: the root DESIGN_SYSTEM.md is a legitimate
-        file but md_outside_docs still flags it. See
-        docs/backlog/refactor/2026-11-11-audit-md-outside-docs-false-positive.md
-        (md-outside-docs-false-positive). When that entry is resolved, this case changes with it.
+        The root DESIGN_SYSTEM.md is a legitimate file of the main session, which never gets
+        md_outside_docs (spec audit-md-outside-docs, M1).
         """
         with self.subTest(case="H14"):
-            self._check("H14", "main", "Write", DS, True, None, warn(MOD), [MOD])
+            self._check("H14", "main", "Write", DS, True, None, SILENT, [])
 
     def test_no_git_root_cases(self):
         """H23-H25: target and cwd in a directory without a git root (premise asserted)."""

@@ -24,3 +24,4 @@ Neste repo (dotfiles), o plan de uma etapa da config vive no `.claude/agent-work
 | [audit-hook-test-suite](audit-hook-test-suite/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-11-audit-hook-test-suite.md)) | Implemented ([spec.md](audit-hook-test-suite/spec.md)) | 2026-11-12 |
 | [audit-scratch-exemption](audit-scratch-exemption/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-11-audit-scratch-exemption-too-broad.md)) | Implemented ([spec.md](audit-scratch-exemption/spec.md)) | 2026-11-12 |
 | [skills-docs-root](skills-docs-root/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-11-skills-configurable-docs-root.md)) | Implemented ([spec.md](skills-docs-root/spec.md)) | 2026-11-13 |
+| [audit-md-outside-docs](audit-md-outside-docs/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-11-audit-md-outside-docs-false-positive.md)) | Implemented ([spec.md](audit-md-outside-docs/spec.md)) | 2026-11-13 |

@@ -13,14 +13,16 @@ Planned refactors that aren't urgent bugs but are worth doing deliberately, one 
 | Entry | Status |
 | --- | --- |
 | [Versioned unittest suite for agent-audit hook](2026-11-11-audit-hook-test-suite.md) | Done | |
-| [md_outside_docs false positive on main-session root .md files](2026-11-11-audit-md-outside-docs-false-positive.md) | Proposed |
+| [md_outside_docs false positive on main-session root .md files](2026-11-11-audit-md-outside-docs-false-positive.md) | Done |
 | [Align project-docs and implement skills with configurable docs root](2026-11-11-skills-configurable-docs-root.md) | Done |
 | [agent-audit: nested repo cwd does not consult the parent repo's run](2026-11-11-audit-nested-repo-run-lookup.md) | Proposed |
 | [agent-audit: scratch exemption accepts any /tmp/claude-* dir](2026-11-11-audit-scratch-exemption-too-broad.md) | Done |
 | [agent-audit: out_of_scope_write fallback sets no scratch key](2026-11-12-audit-scratch-missing-on-resolution-failure.md) | Proposed |
 | [agent-audit: docs_write_by_implementer covers only stack implementers](2026-11-12-audit-docs-write-flag-implementers-only.md) | Proposed |
-| [agent-audit: md_outside_docs README exemption matches by suffix](2026-11-12-audit-md-exemption-basename.md) | Proposed |
+| [agent-audit: md_outside_docs README exemption matches by suffix](2026-11-12-audit-md-exemption-basename.md) | Done |
 | [hooks tests: Pyright noise (unresolved _support, possibly unbound out)](2026-11-12-hooks-tests-pyright-noise.md) | Proposed |
 | [hooks tests: docstrings cite docs/ paths that live under .claude/docs/](2026-11-12-hooks-tests-stale-docs-paths.md) | Proposed |
 | [agent-audit: edits to the root CLAUDE.md docs root declaration are not flagged](2026-11-13-audit-docs-root-declaration-unprotected.md) | Proposed |
 | [agent-audit: Bash-based file writes are not audited as writes](2026-11-13-audit-bash-writes-unaudited.md) | Proposed |
+| [planner agent contradicts itself on where it may write (OPEN_QUESTIONS.md)](2026-11-13-planner-write-scope-contradiction.md) | Proposed |
+| [agent-workflow.md 13.1 says the hook is a no-op without an active run](2026-11-13-agent-workflow-13-1-outdated.md) | Proposed |

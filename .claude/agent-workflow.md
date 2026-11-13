@@ -739,6 +739,8 @@ Sem a flag, nada muda: o stack agent escreve código e testes da task, como na s
 3. **Etapa G**: `block` **por categoria**, onde os dados mostrarem falso positivo zero. Candidatos: comandos Docker proibidos, `git commit`/`git push` sem autorização, `.md` criado fora de `docs/`, escrita fora de `allowed_paths`.
 4. **Etapa H** (implementada, 15.1, 13.5): categoria nova `design_system_write_by_other` em `warn` (escrita em um `DESIGN_SYSTEM.md` por quem não é `design-director` nem a sessão principal) e categoria nova `design_director_write_outside` em `block` (qualquer escrita do `design-director` que não seja um `DESIGN_SYSTEM.md`); o `design-director` fica isento de `md_outside_docs` só para esse arquivo. A promoção da `design_system_write_by_other` a `block` segue a mesma regra dos dados.
 
+*Adendo 2026-11-13 (feature `audit-md-outside-docs`):* o falso positivo S5 do `md_outside_docs` está resolvido (ver 13.5, 13.7 e a spec da feature) e a flag está pronta para a análise de promoção a `block` do item 3. A promoção segue como decisão posterior, que exige dados de uso real.
+
 ### 13.4 Protocolo de pedido de escopo
 
 Pedido da rodada 2: _"o agent pare e pergunte se pode alterar/criar arquivo fora do escopo, explicando por que precisa daquela ação; após autorização, segue."_
@@ -774,6 +776,8 @@ implement
 | `design-director` em qualquer outro arquivo | `design_director_write_outside` (`block`), também sem raiz git |
 | sessão principal | silencioso |
 | qualquer outro ator | `design_system_write_by_other` (`warn`) |
+
+*Adendo 2026-11-13 (feature `audit-md-outside-docs`):* a sessão principal e o `docs-writer` não geram `md_outside_docs` (a linha da sessão principal acima vale também para essa flag; as demais flags deles continuam). A flag só vale para agents, só ao **criar** um `.md` novo dentro do repositório e fora da raiz de docs. Novo vem de `tool_response.type` no Post, ou do alvo ainda não existir no Pre; sem informação, conta como novo; `PostToolUseFailure` nunca conta. A extensão é checada sem diferenciar maiúsculas. `README.md`, `CHANGELOG.md`, `DEPLOY.md` e `CLAUDE.md` são isentos por nome exato, em qualquer caixa; durante um run, caminhos `.md` ou globs terminados em `.md` em `allowed_paths` ou `approved_scope` da task também isentam (um glob amplo como `services/api/**` não). `docs_write_by_implementer` casa os nomes de `DOC_FILES` sem diferenciar maiúsculas. A flag segue em `warn`.
 
 Alvos de `approved_scope` que casam com a regra são descartados dos caminhos permitidos derivados do run: aprovar o pedido não libera a escrita do agent, então o `out_of_scope_write` continua valendo (regra 29).
 
@@ -817,6 +821,7 @@ A raiz que governa uma escrita é a raiz git do `cwd` da sessão (onde mora o ru
 - **Registro:** um alvo fora de toda raiz grava `area: "outside"` e `rel` igual ao caminho absoluto.
 - **Flags de ator** (`write_by_readonly_agent`, `design_director_write_outside`, `design_system_write_by_other`, esta pelo nome bruto ou resolvido) valem para qualquer caminho. **Flags de área** (`md_outside_docs`, `docs_write_by_implementer`, `backlog_write_by_other`) só valem dentro de um repositório.
 - **`out_of_scope_write` fora do repositório:** um ator de escopo fixo (implementers, `quality-fixer`, `test-writer`) em um run só escreve fora se o alvo casar com um glob **absoluto** aprovado em `approved_scope`, do diretório canônico (casado literalmente após expandir `~`, sem resolver symlinks: escrever por um alias symlink é sinalizado), ou for scratch (`<tempdir>/claude-*` ou `/tmp/claude-*`). Globs relativos e a lista sempre permitida (`ALWAYS_ALLOWED`, convenções do repositório) nunca cobrem caminhos fora dele. *Adendo 2026-11-12 (feature `audit-scratch-exemption`):* o scratch passou a ser só o scratchpad da sessão, campo `scratchpad_dir` do payload (estritamente dentro dele, comparado como veio, sem resolver); sem o campo, sem isenção. O registro ganha `scratch` (`match`, `no-match`, `unavailable`) e o relatório de métricas separa os quatro casos.
+- **`md_outside_docs` (adendo 2026-11-13, feature `audit-md-outside-docs`):** não vale para a sessão principal nem para o `docs-writer`; para agents segue a regra acima (só `.md` novo, dentro do repositório e fora da raiz de docs, com as isenções de 13.5).
 - **Falha fechada:** caminho que não resolve mantém as flags de ator e, para ator de escopo fixo com run ativo (ou run que não dá para determinar), soma `out_of_scope_write`.
 
 ---
@@ -1500,7 +1505,7 @@ Spec: `~/dotfiles/.claude/docs/features/design-director/spec.md`; log: `log.md` 
 **Mudança de pasta de docs:** a pasta `docs/` desta config foi movida para `.claude/docs/` a pedido do usuário depois da r1, e não é ligada a `~/.claude`. Por isso a `docs_roots` e a nota em 13.5 sobre `project-docs` e `/implement`.
 
 **Decisões tomadas durante a execução:**
-- O `md_outside_docs` (`warn`) ao criar `agents/design-director.md` e o `out_of_scope_write` nas edições do template em paralelo são falsos positivos esperados (corrigido depois: o hook aceita a escrita que casa com qualquer task de `running_tasks`, além da `current_task`).
+- O `md_outside_docs` (`warn`) ao criar `agents/design-director.md` e o `out_of_scope_write` nas edições do template em paralelo são falsos positivos esperados (corrigido depois: o hook aceita a escrita que casa com qualquer task de `running_tasks`, além da `current_task`). *Adendo 2026-11-13:* o falso positivo do `md_outside_docs` em `agents/design-director.md` agora é coberto pela isenção de `.md` listado nos Files da task (M6; feature `audit-md-outside-docs`).
 - Na época, todo heredoc no Bash tinha o corpo classificado como comandos (um corpo com `docker compose up` virava `docker_lifecycle`), e por isso os harnesses foram escritos com `Write` e rodados com `python3 -I`. Corrigido depois (bug `2026-11-11-audit-heredoc-docker-lifecycle`): o corpo é dado para `cat`/`tee`, `git commit -F -` e `gh ... --body-file -`, e continua classificado nos demais (13.6). O `Write` deixou de ser necessário para esses casos; um script gravado e executado depois continua fora do alcance do hook.
 
 **Pendências:**

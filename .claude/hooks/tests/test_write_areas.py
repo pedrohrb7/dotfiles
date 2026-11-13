@@ -8,8 +8,9 @@ import subprocess
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from ._support import TempRepoCase, audit, call_main, config, declare_docs_root, payload
+from ._support import TempRepoCase, audit, call_main, config, declare_docs_root, payload, write_run_state
 
 ROOTS = ["docs/", ".claude/docs/"]
 
@@ -21,24 +22,25 @@ class AreaFlags(TempRepoCase):
     def ev(self, rel, actor="main", tool="Write", response=None, roots=ROOTS):
         return audit.evaluate_write(str(self.repo / rel), str(self.repo), actor, tool, response, roots)
 
-    def test_a1_main_write_of_md_at_root_is_md_outside_docs(self):
-        """Refactor: docs/backlog/refactor/2026-11-11-audit-md-outside-docs-false-positive.md
-
-        Pins the behavior accepted today: any new .md outside the docs roots is flagged, even a
-        legitimate one. When that entry is resolved, this test changes with it.
-        """
+    def test_a1_main_write_of_md_at_root_has_no_md_flag(self):
+        """Spec audit-md-outside-docs, M1: the main session never gets md_outside_docs."""
         out = self.ev("notes.md")
-        self.assertIn("md_outside_docs", out["flags"])
+        self.assertNotIn("md_outside_docs", out["flags"])
         self.assertEqual(out["area"], "code")
 
     def test_a2_edit_of_existing_md_has_no_flag(self):
-        out = self.ev("notes.md", tool="Edit")
+        """Spec audit-md-outside-docs, M3: an Edit never creates (judged for an actor that gets the flag)."""
+        out = self.ev("notes.md", actor="backend-node", tool="Edit")
         self.assertEqual(out["flags"], [])
 
     def test_a3_exempt_md_names_are_not_md_outside_docs(self):
-        for rel in ("README.md", "services/api/README.md", "CLAUDE.md", "CHANGELOG.md"):
-            with self.subTest(case="A3", rel=rel):
-                self.assertNotIn("md_outside_docs", self.ev(rel)["flags"])
+        """Spec audit-md-outside-docs, M4: known doc names, exact name, any case."""
+        rels = ("README.md", "services/api/README.md", "CLAUDE.md", "CHANGELOG.md", "DEPLOY.md",
+                "readme.md", "Changelog.MD", "services/api/claude.md")
+        for actor in ("test-writer", "docs-writer"):
+            for rel in rels:
+                with self.subTest(case="A3", actor=actor, rel=rel):
+                    self.assertNotIn("md_outside_docs", self.ev(rel, actor=actor)["flags"])
 
     def test_a4_docs_root_paths_are_area_docs_without_md_flag(self):
         for rel in ("docs/x.md", ".claude/docs/x.md"):
@@ -79,6 +81,178 @@ class AreaFlags(TempRepoCase):
         self.assertIs(out["in_run"], False)
         self.assertNotIn("run", out)
         self.assertNotIn("task", out)
+
+
+MOD = "md_outside_docs"
+DWBI = "docs_write_by_implementer"
+OOS = "out_of_scope_write"
+DSBO = "design_system_write_by_other"
+BWBO = "backlog_write_by_other"
+
+
+class MdOutsideDocs(TempRepoCase):
+    """Spec audit-md-outside-docs, Testing MD1-MD15, MD17: `md_outside_docs` is for agents creating a new
+    .md outside the docs root (not the main session or docs-writer, not the known doc names, not a markdown
+    path in the task's Files), and `docs_write_by_implementer` compares names without case."""
+
+    MD10_ALLOWED = {"1": [".claude/agents/x.md", "services/web/content/*.md", "`kb2/GUIDE.MD`", "services/api/**"]}
+
+    def ev(self, rel, actor="planner", tool="Write", response=None):
+        return audit.evaluate_write(str(self.repo / rel), str(self.repo), actor, tool, response, ROOTS)
+
+    def flags(self, rel, **kw):
+        return self.ev(rel, **kw)["flags"]
+
+    def test_md1_agents_get_the_flag(self):
+        for actor in ("subagent", "backend-node", "planner", "specker", "quality-fixer"):
+            for rel in ("notes.md", "PRD.md", "services/api/NOTES.md"):
+                with self.subTest(case="MD1", actor=actor, rel=rel):
+                    self.assertIn(MOD, self.flags(rel, actor=actor))
+
+    def test_md2_main_session_never_gets_the_flag(self):
+        rels = ("PRD.md", "CONSTRAINTS.md", "OPEN_QUESTIONS.md", "DESIGN_SYSTEM.md", "BACKEND.md", "NOTES.md",
+                ".claude/agents/x.md", "apps/web/PRD.md")
+        for rel in rels:
+            with self.subTest(case="MD2", rel=rel):
+                self.assertNotIn(MOD, self.flags(rel, actor="main"))
+        with self.subTest(case="MD2", rel="docs/backlog/x.md"):
+            flags = self.flags("docs/backlog/x.md", actor="main")
+            self.assertNotIn(MOD, flags)
+            self.assertIn(BWBO, flags)
+
+    def test_md3_names_are_exact(self):
+        rels = ("MY_README.md", "NOTCLAUDE.md", "xCHANGELOG.md", "README.md.md", "PREDEPLOY.md",
+                "services/api/MY_CLAUDE.md")
+        for rel in rels:
+            with self.subTest(case="MD3", rel=rel):
+                flags = self.flags(rel, actor="backend-node")
+                self.assertIn(MOD, flags)
+                self.assertNotIn(DWBI, flags)
+
+    def test_md4_extension_is_case_insensitive_and_only_md(self):
+        for rel, expected in (("NOTES.MD", True), ("notes.Md", True), ("x.mdx", False), ("x.markdown", False)):
+            with self.subTest(case="MD4", rel=rel):
+                self.assertEqual(MOD in self.flags(rel, actor="backend-node"), expected)
+
+    def test_md5_tool_response_type_decides(self):
+        for response, expected in (({"type": "create"}, True), ({"type": "update"}, False),
+                                   ({"filePath": "x"}, True)):
+            with self.subTest(case="MD5", response=response):
+                self.assertEqual(MOD in self.flags("notes.md", response=response), expected)
+
+    def test_md6_without_response_the_target_existence_decides(self):
+        with self.subTest(case="MD6", exists=True):
+            (self.repo / "notes.md").write_text("x", encoding="utf-8")
+            self.assertNotIn(MOD, self.flags("notes.md"))
+        with self.subTest(case="MD6", exists=False):
+            self.assertIn(MOD, self.flags("other.md"))
+
+    def test_md7_edit_tools_do_not_create(self):
+        cases = (("Edit", None, False), ("Edit", {"type": "create"}, True), ("MultiEdit", None, False))
+        for tool, response, expected in cases:
+            with self.subTest(case="MD7", tool=tool, response=response):
+                self.assertEqual(MOD in self.flags("notes.md", tool=tool, response=response), expected)
+
+    def test_md8_error_checking_existence_counts_as_creation(self):
+        real = Path.exists
+
+        def fake(path, *args, **kwargs):
+            if path.name == "notes.md":
+                raise PermissionError("denied")
+            return real(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "exists", fake):
+            self.assertIn(MOD, self.flags("notes.md"))
+
+    def test_md9_symlinks_are_judged_by_the_resolved_target(self):
+        (self.repo / "real.md").write_text("x", encoding="utf-8")
+        try:
+            (self.repo / "link.md").symlink_to("real.md")
+            (self.repo / "dangling.md").symlink_to("missing.md")
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        with self.subTest(case="MD9", target="link.md"):
+            self.assertNotIn(MOD, self.flags("link.md"))
+        with self.subTest(case="MD9", target="dangling.md"):
+            out = self.ev("dangling.md")
+            self.assertIn(MOD, out["flags"])
+            self.assertEqual(out["rel"], "missing.md")
+
+    def test_md10_markdown_paths_of_the_task_files_are_exempt(self):
+        write_run_state(self.repo, self.MD10_ALLOWED)
+        for rel, expected in ((".claude/agents/x.md", False), ("services/web/content/post.md", False),
+                              ("kb2/GUIDE.MD", False), ("services/api/NOTES.md", True)):
+            with self.subTest(case="MD10", rel=rel):
+                flags = self.flags(rel, actor="frontend-react")
+                self.assertEqual(MOD in flags, expected)
+                self.assertNotIn(OOS, flags)
+
+    def test_md11_approved_scope_exempts_only_approved_markdown_of_running_tasks(self):
+        scope = [
+            {"task": 1, "target": "services/api/NOTES.md", "decision": "approved"},
+            {"task": 1, "target": "services/api/OTHER.md", "decision": "denied"},
+            {"task": 2, "target": "services/api/T2.md", "decision": "approved"},
+        ]
+        write_run_state(self.repo, {"1": ["services/api/**"]}, approved_scope=scope)
+        for rel, expected in (("services/api/NOTES.md", False), ("services/api/OTHER.md", True),
+                              ("services/api/T2.md", True)):
+            with self.subTest(case="MD11", rel=rel):
+                self.assertEqual(MOD in self.flags(rel, actor="frontend-react"), expected)
+
+    def test_md12_exemption_is_only_for_fixed_scope_actors_with_a_run(self):
+        write_run_state(self.repo, self.MD10_ALLOWED)
+        with self.subTest(case="MD12", actor="planner"):
+            self.assertIn(MOD, self.flags(".claude/agents/x.md", actor="planner"))
+        with self.subTest(case="MD12", actor="frontend-react", run=False):
+            self.remove_run()
+            self.assertIn(MOD, self.flags(".claude/agents/x.md", actor="frontend-react"))
+
+    def test_md13_design_system_never_enters_the_exemption(self):
+        scope = [{"task": 1, "target": "DESIGN_SYSTEM.md", "decision": "approved"}]
+        write_run_state(self.repo, {"1": ["services/web/**"]}, approved_scope=scope)
+        flags = self.flags("DESIGN_SYSTEM.md", actor="frontend-react", response={"type": "create"})
+        self.assertEqual(flags, [DSBO, MOD, OOS])
+
+    def test_md14_doc_file_names_are_compared_without_case(self):
+        rels = ("Readme.md", "services/api/readme.md", "changelog.md", "Deploy.md", ".ENV.EXAMPLE")
+        for actor, expected in (("backend-node", True), ("docs-writer", False), ("main", False)):
+            for rel in rels:
+                with self.subTest(case="MD14", actor=actor, rel=rel):
+                    self.assertEqual(DWBI in self.flags(rel, actor=actor), expected)
+
+    def test_md15_helpers(self):
+        for value, expected in (("a\\B.MD", "b.md"), ("content/*.md", "*.md"), ("", "")):
+            with self.subTest(helper="file_name", value=value):
+                self.assertEqual(audit.file_name(value), expected)
+        cases = (
+            ("Write", {"type": "create"}, True), ("Write", {"type": "update"}, False),
+            ("Write", {"filePath": "x"}, True), ("Write", None, None),
+            ("Edit", None, False), ("Edit", {"type": "create"}, True), ("MultiEdit", None, False),
+            ("NotebookEdit", {"type": "update"}, False),
+            ("Write", [], True), ("Write", "x", True), ("Write", {"type": 3}, True),
+            ("Edit", [], False), ("Edit", "x", False), ("Edit", {"type": 3}, False),
+        )
+        for tool, response, expected in cases:
+            with self.subTest(helper="write_creates", tool=tool, response=response):
+                self.assertIs(audit.write_creates(tool, response), expected)
+
+    def test_md17_docs_writer_never_gets_the_flag(self):
+        rels = ("NOTES.md", "SUMMARY.MD", "services/api/API.md", "PRD.md")
+        for run in (False, True):
+            if run:
+                write_run_state(self.repo, self.MD10_ALLOWED)
+            for rel in rels:
+                with self.subTest(case="MD17", rel=rel, run=run):
+                    self.assertNotIn(MOD, self.flags(rel, actor="docs-writer"))
+        self.remove_run()
+        for actor in ("planner", "backend-node"):
+            for rel in rels:
+                with self.subTest(case="MD17", actor=actor, rel=rel):
+                    self.assertIn(MOD, self.flags(rel, actor=actor))
+        with self.subTest(case="MD17", rel="DESIGN_SYSTEM.md"):
+            self.assertEqual(self.flags("DESIGN_SYSTEM.md", actor="docs-writer", response={"type": "create"}), [DSBO])
+        with self.subTest(case="MD17", rel="docs/backlog/x.md"):
+            self.assertIn(BWBO, self.flags("docs/backlog/x.md", actor="docs-writer"))
 
 
 class DocsRootDeclaration(TempRepoCase):
@@ -207,7 +381,10 @@ class DocsRootDeclaration(TempRepoCase):
 
 
 class DocsRootEffect(TempRepoCase):
-    """Spec skills-docs-root, Testing DR10-DR16: the declared docs root decides the docs area of a write."""
+    """Spec skills-docs-root, Testing DR10-DR16: the declared docs root decides the docs area of a write.
+
+    The writes that expect `md_outside_docs` use `specker`: the test is about the declared root, and
+    the main session never gets that flag (spec audit-md-outside-docs, M1)."""
 
     def ev(self, rel, actor="main", roots=None, cwd=None, target=None):
         path = target or (self.repo / rel)
@@ -220,7 +397,7 @@ class DocsRootEffect(TempRepoCase):
             self.assertEqual(out["area"], "docs")
             self.assertEqual(out["flags"], [])
         with self.subTest(target="docs/x.md"):
-            out = self.ev("docs/x.md")
+            out = self.ev("docs/x.md", actor="specker")
             self.assertEqual(out["area"], "code")
             self.assertIn("md_outside_docs", out["flags"])
 
@@ -244,7 +421,7 @@ class DocsRootEffect(TempRepoCase):
     def test_dr13_undeclared_repo_has_only_docs(self):
         for rel in (".claude/docs/x.md", "services/x/docs/a.md"):
             with self.subTest(rel=rel):
-                out = self.ev(rel)
+                out = self.ev(rel, actor="specker")
                 self.assertEqual(out["area"], "code")
                 self.assertIn("md_outside_docs", out["flags"])
 
@@ -264,7 +441,7 @@ class DocsRootEffect(TempRepoCase):
 
     def test_dr16_main_reads_the_declaration_and_ignores_the_old_key(self):
         def post_flags(cfg):
-            pl = payload("PostToolUse", "Write", cwd=self.repo,
+            pl = payload("PostToolUse", "Write", actor="specker", cwd=self.repo,
                          tool_input={"file_path": str(self.repo / "kb" / "a.md")})
             result = call_main(pl, cfg)
             self.assertEqual(len(result.records), 1)

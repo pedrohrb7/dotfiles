@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ._support import TempRepoCase, TEST_CONFIG, audit, call_main, config, payload, read_jsonl
+from ._support import TempRepoCase, TEST_CONFIG, audit, call_main, config, payload, read_jsonl, write_run_state
 
 DOCKER_UP = "docker compose up"
 SCREENSHOT = "mcp__playwright__browser_take_screenshot"
@@ -278,6 +278,68 @@ class ScratchpadPayload(TempRepoCase):
         self.assertEqual(rec["scratch"], "match")
         self.assertNotIn("out_of_scope_write", rec["flags"])
         self.assertNotIn("scratchpad_dir", rec)
+
+
+class MdOutsideDocsPayload(TempRepoCase):
+    """Spec audit-md-outside-docs, Testing MD16a-MD16c, MD18 and MD19: `md_outside_docs` through `main()`."""
+
+    def pl(self, event, actor, rel, tool_response=None):
+        return payload(event, "Write", actor=actor, cwd=self.repo, tool_input={"file_path": str(self.repo / rel)},
+                       tool_response=tool_response)
+
+    def post_flags(self, actor, rel, tool_response):
+        result = call_main(self.pl("PostToolUse", actor, rel, tool_response))
+        self.assertEqual(len(result.records), 1)
+        return result.records[0]["flags"]
+
+    def assert_md_warning(self, out):
+        self.assertIsNotNone(out)
+        hso = out["hookSpecificOutput"]
+        self.assertNotIn("permissionDecision", hso)
+        self.assertIn("Reminder from the agent workflow (md_outside_docs)", hso["additionalContext"])
+        self.assertIn("Files", hso["additionalContext"])
+
+    def test_md16a_pretooluse_write(self):
+        with self.subTest(case="main in PRD.md"):
+            self.assertIsNone(call_main(self.pl("PreToolUse", "main", "PRD.md")).output)
+        with self.subTest(case="planner in a missing NOTES.md"):
+            self.assert_md_warning(call_main(self.pl("PreToolUse", "planner", "NOTES.md")).output)
+        with self.subTest(case="planner in an existing NOTES.md"):
+            (self.repo / "NOTES.md").write_text("x", encoding="utf-8")
+            self.assertIsNone(call_main(self.pl("PreToolUse", "planner", "NOTES.md")).output)
+
+    def test_md16b_posttooluse_write_type_decides(self):
+        with self.subTest(type="update"):
+            self.assertEqual(self.post_flags("planner", "NOTES.md", {"type": "update"}), [])
+        with self.subTest(type="create"):
+            self.assertEqual(self.post_flags("planner", "NOTES.md", {"type": "create"}), ["md_outside_docs"])
+
+    def test_md16c_markdown_path_of_the_task_files(self):
+        write_run_state(self.repo, {"1": [".claude/agents/x.md"]})
+        rel = ".claude/agents/x.md"
+        with self.subTest(event="PreToolUse"):
+            self.assertIsNone(call_main(self.pl("PreToolUse", "frontend-react", rel, {"type": "create"})).output)
+        with self.subTest(event="PostToolUse"):
+            self.assertEqual(self.post_flags("frontend-react", rel, {"type": "create"}), [])
+
+    def test_md18_docs_writer_is_free_and_planner_is_not(self):
+        with self.subTest(actor="docs-writer", event="PreToolUse"):
+            self.assertIsNone(call_main(self.pl("PreToolUse", "docs-writer", "NOTES.md")).output)
+        with self.subTest(actor="docs-writer", event="PostToolUse"):
+            self.assertEqual(self.post_flags("docs-writer", "NOTES.md", {"type": "create"}), [])
+        with self.subTest(actor="planner", event="PreToolUse"):
+            self.assert_md_warning(call_main(self.pl("PreToolUse", "planner", "NOTES.md")).output)
+        with self.subTest(actor="planner", event="PostToolUse"):
+            self.assertEqual(self.post_flags("planner", "NOTES.md", {"type": "create"}), ["md_outside_docs"])
+
+    def test_md19_failed_write_creates_nothing(self):
+        with self.subTest(event="PostToolUseFailure"):
+            result = call_main(self.pl("PostToolUseFailure", "backend-node", "NOTES.md"))
+            self.assertEqual(len(result.records), 1)
+            self.assertTrue(result.records[0]["failed"])
+            self.assertNotIn("md_outside_docs", result.records[0]["flags"])
+        with self.subTest(event="PostToolUse"):
+            self.assertIn("md_outside_docs", self.post_flags("backend-node", "NOTES.md", {"type": "create"}))
 
 
 class MetricsFile(TempRepoCase):

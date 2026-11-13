@@ -17,6 +17,15 @@ All these flags are warn, so audit coverage weakens but no capability is granted
 
 Either read the declaration from both HEAD and the working tree and protect their union (the working tree can then only add flags), or add a flag for Write/Edit of the root `CLAUDE.md` by actors other than main, onboard, planner and specker. Needs a choice before a spec.
 
+## Seen again (2026-11-13)
+
+- Metrics on 2026-11-12 show `backend-python` editing a project's root `CLAUDE.md` with no flag. Source: specker, feature audit-md-outside-docs, 2026-11-13.
+- Severity re-rated MEDIUM by an automated review of commit cc05e36 (previously low).
+
+## Decision (2026-11-13)
+
+The user decided this will be the next spec: read the declaration from HEAD, plus backlog protection in every candidate tree (HEAD, working tree and `docs/`). See open question 2 of [audit-md-outside-docs](../../features/audit-md-outside-docs/spec.md).
+
 ## Risks
 
 The HEAD read adds a git call per assessment; the actor-based flag may be noisy for legitimate docs-root offers.

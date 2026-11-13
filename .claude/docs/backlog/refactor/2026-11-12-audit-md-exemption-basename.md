@@ -1,9 +1,11 @@
 # agent-audit: md_outside_docs README exemption matches by suffix
 
-- **Status:** Proposed
+- **Status:** Done
+- **Implementation:** implemented by the spec [audit-md-outside-docs](../../features/audit-md-outside-docs/spec.md); change is uncommitted, no PR yet.
 - **Opened:** 2026-11-12
 - **Scope:** .claude/hooks/agent-audit.py
 - **Source:** agent run: audit-hook-test-suite, spec writing, specker
+- **Spec:** [audit-md-outside-docs](../../features/audit-md-outside-docs/spec.md) (folded in, rule M4)
 
 ## Motivation
 

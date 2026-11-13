@@ -17,8 +17,9 @@ What it classifies (see agent-workflow.md, sections 13 and 14):
   git (commit/push), requests (local/external);
 - file writes: inside or outside the active run's allowed_paths (from .claude/runs/<slug>.json;
   outside the repo only inside the session scratchpad (`scratchpad_dir`) or an approved absolute glob),
-  docs and backlog files (under the project's docs root: `- docs root:` in the root CLAUDE.md `## Workflow`, default `docs/`), and the project's DESIGN_SYSTEM.md (written only by design-director
-  and the main session);
+  docs and backlog files (under the project's docs root: `- docs root:` in the root CLAUDE.md `## Workflow`, default `docs/`), new .md files
+  created by agents outside the docs root (not by the main session or docs-writer, not the known doc names, not a markdown path in the
+  task's Files), and the project's DESIGN_SYSTEM.md (written only by design-director and the main session);
 - browser and screenshot tools.
 
 Commands, file contents and tool outputs are not stored, only a truncated command line and paths.
@@ -59,8 +60,31 @@ DESIGN_SYSTEM_NAME = "design_system.md"
 DESIGN_SYSTEM_WRITERS = {"design-director", "main"}
 
 
+DOC_FILE_NAMES = frozenset(n.casefold() for n in DOC_FILES)
+# md_outside_docs: known documentation names, exempt by exact file name (any case); their ownership
+# is judged by other flags (docs_write_by_implementer; CLAUDE.md has none yet).
+MD_DOC_NAMES = frozenset(n for n in DOC_FILE_NAMES if n.endswith(".md")) | {"claude.md"}
+# Never md_outside_docs: the main session creates root project files with the user; docs-writer is where needs_docs go.
+MD_FREE_ACTORS = frozenset({"main", "docs-writer"})
+
+
+def file_name(path: str) -> str:
+    """Case-folded last component of a path or glob (`\\` read as `/`)."""
+    return PurePosixPath(str(path).replace("\\", "/")).name.casefold()
+
+
+def write_creates(tool: str, response) -> bool | None:
+    """Whether the write creates the file: True/False when the payload says so, None when only the
+    target's existence can tell (a Write without tool_response, that is PreToolUse)."""
+    if isinstance(response, dict) and response.get("type") in ("create", "update"):
+        return response["type"] == "create"
+    if tool != "Write":
+        return False
+    return None if response is None else True
+
+
 def is_design_system(path: str) -> bool:
-    return PurePosixPath(str(path).replace("\\", "/")).name.casefold() == DESIGN_SYSTEM_NAME
+    return file_name(path) == DESIGN_SYSTEM_NAME
 
 # Paths an implementer may always write, whatever its task's Files say.
 ALWAYS_ALLOWED = [
@@ -587,13 +611,38 @@ def _under(target: Path, root: Path) -> str | None:
     return None
 
 
-def _assess_root(root: Path, forms: list[Path], actor: str, tool: str, created: bool, roots: list[str],
+def _creates(form: Path, created: bool | None) -> bool:
+    """Whether the write creates `form`: the payload's verdict, else (None, PreToolUse) whether it is missing."""
+    if created is not None:
+        return created
+    try:
+        return not form.exists()
+    except Exception:
+        return True  # cannot tell: judge as a new file
+
+
+def _assess_root(root: Path, forms: list[Path], actor: str, created: bool | None, roots: list[str],
                  scratch: Path | None = None) -> tuple[list[str], dict]:
     """Judge the target (each path form: resolved, and lexical when it has `..`) against one git root and its run.
     Returns the union of the flags (stricter wins) and the record fields of the first flagged form, else the first."""
     run = active_run(root)
     flags: list[str] = []
     rec: dict | None = None
+    scoped_run = bool(run) and (actor in IMPLEMENTERS or actor in {"quality-fixer", "test-writer"})
+    allowed: list[str] = []
+    keys: list[str] = []
+    if run:
+        keys = run_task_keys(run)
+    if run and scoped_run:
+        by_task = run.get("allowed_paths") or {}
+        allowed = [p for k in keys for p in by_task.get(k, [])]
+        allowed += [
+            s.get("target", "") for s in run.get("approved_scope", [])
+            if str(s.get("task")) in keys and s.get("decision", "approved") == "approved"
+            and not is_design_system(s.get("target", ""))  # never enters allowed paths
+        ]
+    # a markdown path the task declares (Files or approved scope); a broad glob (services/api/**) does not count
+    declared_md = [p for p in allowed if file_name(str(p).strip().strip("`")).endswith(".md")]
     for form in forms:
         rel = _under(form, root)
         inside = rel is not None
@@ -604,27 +653,22 @@ def _assess_root(root: Path, forms: list[Path], actor: str, tool: str, created: 
             area = "docs" if rel.startswith(tuple(roots)) else "run-state" if rel.startswith(".claude/runs/") else "code"
         found: list[str] = []
         is_ds = is_design_system(rel)
-        if (inside and rel.endswith(".md") and area != "docs" and (created or tool == "Write")
-                and not rel.endswith(("README.md", "CLAUDE.md", "CHANGELOG.md"))
-                and not (is_ds and actor == "design-director")):
+        name = file_name(rel)
+        if (inside and actor not in MD_FREE_ACTORS and area != "docs" and name.endswith(".md")
+                and name not in MD_DOC_NAMES
+                and not (is_ds and actor == "design-director")
+                and not (declared_md and matches(rel, declared_md))
+                and _creates(form, created)):
             found.append("md_outside_docs")
-        if inside and actor in IMPLEMENTERS and (area == "docs" or Path(rel).name in DOC_FILES):
+        if inside and actor in IMPLEMENTERS and (area == "docs" or name in DOC_FILE_NAMES):
             found.append("docs_write_by_implementer")
         if inside and rel.startswith(tuple(r + "backlog/" for r in roots)) and actor not in {"backlog-keeper", "unknown"}:
             found.append("backlog_write_by_other")
         cur: dict = {"rel": rel, "area": area, "in_run": bool(run)}
         if run:
-            keys = run_task_keys(run)
             cur["run"] = run.get("_slug")
             cur["task"] = ",".join(keys)
-            if actor in IMPLEMENTERS or actor in {"quality-fixer", "test-writer"}:
-                by_task = run.get("allowed_paths") or {}
-                allowed = [p for k in keys for p in by_task.get(k, [])]
-                allowed += [
-                    s.get("target", "") for s in run.get("approved_scope", [])
-                    if str(s.get("task")) in keys and s.get("decision", "approved") == "approved"
-                    and not is_design_system(s.get("target", ""))  # never enters allowed paths
-                ]
+            if scoped_run:
                 if inside:
                     in_scope = matches(rel, allowed + ALWAYS_ALLOWED)
                 else:  # ALWAYS_ALLOWED are repo conventions; outside, only approved ABSOLUTE globs
@@ -646,10 +690,12 @@ def _assess_root(root: Path, forms: list[Path], actor: str, tool: str, created: 
 
 
 def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roots: list[str] | None = None,
-                   scratchpad: object = None) -> dict:
-    """Classify a write.
+                   scratchpad: object = None, failed: bool = False) -> dict:
+    """Classify a write. `failed` (a PostToolUseFailure event): the write created nothing, so
+    `md_outside_docs` never fires; the other flags are unchanged.
 
     Docs area = `roots` when given, else the governing root's declared docs root (`project_docs_root`).
+    `md_outside_docs` is for agents creating a stray .md (see `_assess_root`).
     Actor-only flags (read-only agent, design-director, DESIGN_SYSTEM.md by file name) are computed first,
     before any filesystem call, so any error below degrades to area "outside" with just those flags.
     The target is `~`-expanded and resolved (symlinks, `..`); with a `..` component the lexical
@@ -691,11 +737,11 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roo
         judged = [cwd_root] if cwd_root else [target_root] if target_root else []
         if cwd_root and target_root and target_root != cwd_root and _under(target_root, cwd_root) is not None:
             judged.append(target_root)  # nested repo / submodule: judged by its own root and run too
-        created = isinstance(response, dict) and response.get("type") == "create"
+        created = False if failed else write_creates(tool, response)  # a failed write creates nothing
         rec = {"rel": str(resolved), "area": "outside", "in_run": False}
         rec_oos = False
         for root in judged:
-            found, cur = _assess_root(root, forms, actor, tool, created, roots or [project_docs_root(root)], scratch=sp)
+            found, cur = _assess_root(root, forms, actor, created, roots or [project_docs_root(root)], scratch=sp)
             flags += found
             oos = "out_of_scope_write" in found
             if not (rec_oos and not oos):  # the nested root wins, unless an earlier root is the one that flagged
@@ -726,7 +772,7 @@ WHY = {
     "git_push": "pushes need the user's explicit authorization in the current conversation",
     "out_of_scope_write": "this path is outside the task's allowed_paths and its approved scope",
     "suite_by_non_runner": "whole suites run only through test-runner; run only the tests of the files you touched",
-    "md_outside_docs": "notes, summaries and other .md files outside the project's docs root (docs/, or the \"- docs root:\" line of the root CLAUDE.md ## Workflow) are not created; documentation needs go to needs_docs",
+    "md_outside_docs": "agents do not create new .md files (notes, summaries, reports) outside the project's docs root (docs/, or the \"- docs root:\" line of the root CLAUDE.md ## Workflow); documentation needs go to needs_docs, and a markdown file the task really needs must be in its Files or come through a scope_requests entry",
     "docs_write_by_implementer": "documentation files are written only by docs-writer; list the need in needs_docs",
     "backlog_write_by_other": "<docs root>/backlog/ (docs/backlog/ unless the root CLAUDE.md declares a docs root) is written only by backlog-keeper; report it in out_of_scope_issues",
     "design_director_write_outside": "design-director writes only the project's DESIGN_SYSTEM.md; for anything else finish with result: blocked and a scope_requests entry saying what and why, the caller will ask the user",
@@ -821,7 +867,8 @@ def main() -> None:
             path = tinput.get("file_path") or tinput.get("notebook_path") or ""
             record["categories"] = ["write"]
             record.update(evaluate_write(path, payload.get("cwd", ""), actor, tool, payload.get("tool_response"),
-                                          scratchpad=payload.get("scratchpad_dir")))
+                                          scratchpad=payload.get("scratchpad_dir"),
+                                          failed=event == "PostToolUseFailure"))
             flags = record.pop("flags", [])
         elif VISUAL_TOOL.search(tool):
             record["categories"] = ["visual"]

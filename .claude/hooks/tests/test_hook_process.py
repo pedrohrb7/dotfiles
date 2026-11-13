@@ -203,13 +203,23 @@ class ProcessContract(ProcessCase):
             self.assertEqual(self.post_flags(hp)[-1], ["design_system_write_by_other", "out_of_scope_write"])
 
     def test_p_dr_declared_docs_root_is_read_by_the_process(self):
-        """Skills-docs-root spec, P-DR: the real process judges `kb/` as docs and `docs/` as code."""
+        """Skills-docs-root spec, P-DR: the real process judges `kb/` as docs and `docs/` as code.
+
+        Uses `specker`: per spec audit-md-outside-docs (M1) the main session never gets `md_outside_docs`."""
         declare_docs_root(self.repo, "kb/")
         hp = self.hook()
         with self.subTest(target="kb/a.md"):
-            self.assertIsNone(self.edit(hp, "main", "kb/a.md", tool="Write"))
+            self.assertIsNone(self.edit(hp, "specker", "kb/a.md", tool="Write"))
         with self.subTest(target="docs/a.md"):
-            self.assert_warn(self.edit(hp, "main", "docs/a.md", tool="Write"), "md_outside_docs")
+            self.assert_warn(self.edit(hp, "specker", "docs/a.md", tool="Write"), "md_outside_docs")
+
+    def test_p_md_md_outside_docs_is_for_agents_only(self):
+        """Spec audit-md-outside-docs, P-MD: real process, main session silent, agent warned."""
+        hp = self.hook()
+        with self.subTest(actor="main", target="PRD.md"):
+            self.assertIsNone(self.edit(hp, "main", "PRD.md", tool="Write"))
+        with self.subTest(actor="backend-node", target="NOTES.md"):
+            self.assert_warn(self.edit(hp, "backend-node", "NOTES.md", tool="Write"), "md_outside_docs")
 
     def test_sc20_scratchpad_dir_exempts_a_write_outside_the_repo(self):
         """Spec audit-scratch-exemption, SC20: real process, env without TMPDIR."""

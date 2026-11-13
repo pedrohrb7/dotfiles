@@ -49,6 +49,7 @@ Write it from the spec template (`<docs>/features/<slug>/spec.md` next to the pl
 - **Implementation order**: always the structured task blocks of the spec template (also in a `legacy` project). Number each task. Each one is small enough for one PR and reviewable on its own, and fills:
   - **Stack**: backend-node, backend-spring, backend-go, backend-rust, backend-python, frontend-react or mobile-react-native;
   - **Files**: every path or glob the task may write, tests and migrations included. It becomes the agent's `allowed_paths`: a list that is too narrow turns into scope requests during the run, one that is too wide removes the guard. Cover the task's own folders, not the whole service;
+    A markdown file outside the docs root that the task creates is listed by its path or by a glob ending in `.md` (`content/*.md`); a broader glob does not cover it for the hook's `md_outside_docs`.
   - **Depends on**: the tasks it needs first, or `-`;
   - **Done when**: observable criteria (tests that pass, a response the endpoint returns, a state the screen shows);
   - **Status**: `pending`.
