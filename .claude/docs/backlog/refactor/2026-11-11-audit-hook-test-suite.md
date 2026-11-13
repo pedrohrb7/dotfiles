@@ -1,9 +1,10 @@
-# Versioned pytest suite for agent-audit hook
+# Versioned unittest suite for agent-audit hook
 
-- **Status:** Proposed
+- **Status:** Done (implemented by the spec, uncommitted, no PR yet)
 - **Opened:** 2026-11-11
 - **Scope:** .claude/hooks/
 - **Source:** feature design-director (stage H), /implement run 2026-11-11, specker
+- **Related:** spec [audit-hook-test-suite](../../features/audit-hook-test-suite/spec.md) (implemented)
 
 ## Motivation
 
@@ -11,13 +12,11 @@ Hook behavior is unprotected by versioned tests.
 
 ## Current state
 
-The H1-H28, G1-G11, C (37), D1-D10 and M1-M5 cases live in an ad-hoc stdin harness in a session scratchpad.
-
-A stdlib unittest suite now exists at `.claude/hooks/tests/` (`test_agent_audit.py` covers `classify_command` heredoc handling; `_loader.py` loads hyphenated hook modules). It covers only the heredoc handling; the other cases are still ad hoc. pytest is not installed on the machine.
+`.claude/hooks/tests/test_agent_audit.py` already has 82 passing stdlib unittest tests covering heredoc handling, parallel-task scope and writes outside the git root. The ad-hoc scratchpad harness (H/M/G/C/D cases) is lost; the spec rebuilds those cases from the design-director spec and log.
 
 ## Proposed change
 
-Add a pytest suite under `.claude/hooks/` and a Test suites table for the repo.
+Stay on stdlib unittest, not pytest: pytest is not installed and the project does not add frameworks it does not have. Add a Test suites table in a new root `CLAUDE.md`, written by docs-writer at the end.
 
 ## Risks
 

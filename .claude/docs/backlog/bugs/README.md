@@ -18,3 +18,5 @@ Confirmed bugs that need fixing, one file per bug.
 | [Write-capable agents can disable or rewrite the audit hook and agent definitions](2026-11-11-audit-hook-self-protection.md) | medium | Open |
 | [agent-audit: path checks skip targets outside the git root](2026-11-11-audit-path-checks-outside-git-root.md) | low | Fixed |
 | [agent-audit: external_request misses bash /dev/tcp egress](2026-11-11-audit-dev-tcp-egress.md) | low | Open |
+| [agent-audit: classify_command ignores python3 -m unittest/pytest as test commands](2026-11-12-audit-python3-test-commands-not-classified.md) | low | Open |
+| [agent-audit tests: 14 fail when TMPDIR is under /tmp/claude-*](2026-11-12-audit-tests-fail-under-tmp-claude.md) | medium | Fixed |

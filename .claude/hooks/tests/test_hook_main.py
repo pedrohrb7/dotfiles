@@ -1,0 +1,258 @@
+"""Tests for audit.main() in process: modes, events, actor, records and the metrics file.
+
+Source: spec audit-hook-test-suite, section Testing, `test_hook_main.py` (E1-E16). Every call goes
+through `call_main` with TEST_CONFIG (or a copy); the live agent-audit.json is never read.
+"""
+import copy
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from ._support import TempRepoCase, TEST_CONFIG, audit, call_main, config, payload, read_jsonl
+
+DOCKER_UP = "docker compose up"
+SCREENSHOT = "mcp__playwright__browser_take_screenshot"
+
+# Literal copies of the hook's sets (asserted equal in BashRecords).
+IMPLEMENTERS = (
+    "backend-node", "backend-spring", "backend-go", "backend-rust", "backend-python",
+    "frontend-react", "mobile-react-native",
+)
+READ_ONLY_AGENTS = ("ui-verifier", "test-runner", "code-reviewer", "security-reviewer", "Explore", "Plan")
+
+
+class Modes(TempRepoCase):
+    """E1, E2, E15: `mode` off / audit / missing."""
+
+    def pre_post(self, command, cfg):
+        pre = call_main(payload("PreToolUse", "Bash", cwd=self.repo, tool_input={"command": command}), cfg)
+        post = call_main(payload("PostToolUse", "Bash", cwd=self.repo, tool_input={"command": command}), cfg)
+        return pre, post
+
+    def test_e1_mode_off_is_silent_and_records_nothing(self):
+        pre, post = self.pre_post(DOCKER_UP, config(mode="off"))
+        for res in (pre, post):
+            self.assertIsNone(res.output)
+            self.assertEqual(res.records, [])
+
+    def test_e2_mode_audit_never_decides_but_records_flags(self):
+        pre, post = self.pre_post(DOCKER_UP, config(mode="audit"))
+        self.assertIsNone(pre.output)
+        self.assertEqual(pre.records, [])
+        self.assertIsNone(post.output)
+        self.assertEqual(len(post.records), 1)
+        self.assertEqual(post.records[0]["flags"], ["docker_lifecycle"])
+
+    def test_e15_missing_mode_is_treated_as_audit(self):
+        cfg = copy.deepcopy(TEST_CONFIG)
+        del cfg["mode"]
+        pre, post = self.pre_post(DOCKER_UP, cfg)
+        self.assertIsNone(pre.output)
+        self.assertEqual(pre.records, [])
+        self.assertEqual(post.records[0]["flags"], ["docker_lifecycle"])
+
+
+class Events(TempRepoCase):
+    """E3-E7, E12, E13: what each event emits and records."""
+
+    def pre(self, command, actor="main"):
+        return call_main(payload("PreToolUse", "Bash", actor=actor, cwd=self.repo, tool_input={"command": command}))
+
+    def test_e3_pre_without_flag_is_silent_and_unrecorded(self):
+        res = self.pre("ls")
+        self.assertIsNone(res.output)
+        self.assertEqual(res.records, [])
+
+    def test_e4_pre_warn_adds_context_and_records_nothing(self):
+        res = self.pre("curl https://example.com/x")
+        spec = res.output["hookSpecificOutput"]
+        self.assertIn("Reminder from the agent workflow (external_request)", spec["additionalContext"])
+        self.assertNotIn("permissionDecision", spec)
+        self.assertEqual(res.records, [])  # PostToolUse records the action with its flags
+
+    def test_e5_pre_block_and_ask_output_and_record_the_decision(self):
+        for case, command, decision, category, perm in (
+            ("block", DOCKER_UP, "block", "docker_lifecycle", "deny"),
+            ("ask", "git commit -m x", "ask", "git_commit", "ask"),
+        ):
+            with self.subTest(case="E5", kind=case):
+                res = self.pre(command)
+                self.assertEqual(res.output["hookSpecificOutput"]["permissionDecision"], perm)
+                self.assertEqual(len(res.records), 1)
+                rec = res.records[0]
+                self.assertEqual(rec["event"], "PreToolUse")
+                self.assertEqual(rec["decision"], decision)
+                self.assertEqual(rec["decision_category"], category)
+
+    def test_e6_failed_follows_the_event(self):
+        for event, failed in (("PostToolUse", False), ("PostToolUseFailure", True)):
+            with self.subTest(case="E6", event=event):
+                res = call_main(payload(event, "Bash", cwd=self.repo, tool_input={"command": "ls"}))
+                self.assertEqual(len(res.records), 1)
+                self.assertIs(res.records[0]["failed"], failed)
+                self.assertEqual(res.records[0]["event"], event)
+
+    def test_e7_read_only_tools_are_not_audited(self):
+        for tool in ("Read", "Grep", "Glob", "WebFetch"):
+            for event in ("PreToolUse", "PostToolUse"):
+                with self.subTest(case="E7", tool=tool, event=event):
+                    res = call_main(payload(event, tool, cwd=self.repo, tool_input={"file_path": "x"}))
+                    self.assertIsNone(res.output)
+                    self.assertEqual(res.records, [])
+
+    def test_e12_subagent_stop_is_tagged_with_the_active_run(self):
+        self.write_run()
+        res = call_main(payload("SubagentStop", actor="test-runner", cwd=self.repo))
+        self.assertEqual(len(res.records), 1)
+        rec = res.records[0]
+        self.assertEqual(rec["agent_type"], "test-runner")
+        self.assertIs(rec["in_run"], True)
+        self.assertEqual(rec["run"], "feat-x")
+        self.assertEqual(rec["task"], "1")
+
+    def test_e13_edit_tools_record_path_from_either_key(self):
+        target = str(self.repo / "services" / "api" / "a.py")
+        for tool, key in (("MultiEdit", "file_path"), ("NotebookEdit", "notebook_path")):
+            with self.subTest(case="E13", tool=tool):
+                res = call_main(payload("PostToolUse", tool, actor="main", cwd=self.repo, tool_input={key: target}))
+                self.assertEqual(len(res.records), 1)
+                self.assertEqual(res.records[0]["categories"], ["write"])
+                self.assertEqual(res.records[0]["path"], target)
+
+    def test_e16_bash_post_is_tagged_with_the_active_run(self):
+        self.write_run()
+        res = call_main(payload("PostToolUse", "Bash", cwd=self.repo, tool_input={"command": "ls"}))
+        rec = res.records[0]
+        self.assertIs(rec["in_run"], True)
+        self.assertEqual(rec["run"], "feat-x")
+        self.assertEqual(rec["task"], "1")
+
+    def test_bash_without_run_is_not_in_run(self):
+        res = call_main(payload("PostToolUse", "Bash", cwd=self.repo, tool_input={"command": "ls"}))
+        self.assertIs(res.records[0]["in_run"], False)
+        self.assertNotIn("run", res.records[0])
+
+
+class Actor(TempRepoCase):
+    """E8: how the actor is derived from the payload."""
+
+    def test_e8_actor_from_agent_type_agent_id_or_neither(self):
+        for case, actor, expected in (
+            ("agent_type", "backend-node", "backend-node"),
+            ("agent_id only", "subagent", "subagent"),
+            ("neither", "main", "main"),
+        ):
+            with self.subTest(case="E8", kind=case):
+                res = call_main(payload("PostToolUse", "Bash", actor=actor, cwd=self.repo, tool_input={"command": "ls"}))
+                self.assertEqual(res.records[0]["actor"], expected)
+
+
+class BashRecords(TempRepoCase):
+    """E9, E11 (cmd): suite_by_non_runner and the stored command."""
+
+    def flags(self, actor, command):
+        res = call_main(payload("PostToolUse", "Bash", actor=actor, cwd=self.repo, tool_input={"command": command}))
+        return res.records[0]["flags"]
+
+    def test_e9_actor_sets_match_the_literals_below(self):
+        """Pins the hook's actor sets, so E9 and the write rules cannot silently follow a change."""
+        self.assertEqual(audit.IMPLEMENTERS, set(IMPLEMENTERS))
+        self.assertEqual(audit.READ_ONLY_AGENTS, set(READ_ONLY_AGENTS))
+
+    def test_e9_suites_by_non_runners_are_flagged(self):
+        actors = [*IMPLEMENTERS, "quality-fixer", "test-writer"]
+        for actor in actors:
+            for command in ("pytest", "pnpm --filter api test", "k6 run x.js"):
+                with self.subTest(case="E9", actor=actor, command=command):
+                    self.assertIn("suite_by_non_runner", self.flags(actor, command))
+            with self.subTest(case="E9", actor=actor, command="pytest tests/test_a.py"):
+                self.assertNotIn("suite_by_non_runner", self.flags(actor, "pytest tests/test_a.py"))
+
+    def test_e9_runner_and_main_may_run_suites(self):
+        for actor in ("test-runner", "main"):
+            with self.subTest(case="E9", actor=actor):
+                self.assertNotIn("suite_by_non_runner", self.flags(actor, "pytest"))
+
+    def test_e11_command_is_truncated_to_max_cmd(self):
+        command = "echo " + "a" * 995
+        self.assertEqual(len(command), 1000)
+        res = call_main(payload("PostToolUse", "Bash", cwd=self.repo, tool_input={"command": command}))
+        self.assertEqual(len(res.records[0]["cmd"]), 300)
+        self.assertEqual(res.records[0]["cmd"], command[:300])
+
+
+class Visual(TempRepoCase):
+    """E10: visual tools are flagged for everyone but ui-verifier."""
+
+    def test_e10_visual_tool_flag_only_for_non_ui_verifier(self):
+        for actor, flags in (("frontend-react", ["visual_tool"]), ("ui-verifier", [])):
+            with self.subTest(case="E10", actor=actor):
+                res = call_main(payload("PostToolUse", SCREENSHOT, actor=actor, cwd=self.repo))
+                rec = res.records[0]
+                self.assertEqual(rec["categories"], ["visual"])
+                self.assertEqual(rec["flags"], flags)
+
+
+class WriteRecords(TempRepoCase):
+    """E11 (privacy): the record never carries file content or tool output."""
+
+    def test_e11_write_record_has_no_content_or_response(self):
+        secret = "TOP-SECRET-CONTENT"
+        target = str(self.repo / "services" / "api" / "a.py")
+        res = call_main(
+            payload(
+                "PostToolUse", "Write", cwd=self.repo,
+                tool_input={"file_path": target, "content": secret, "new_string": secret},
+                tool_response={"type": "create", "content": secret, "filePath": target},
+            )
+        )
+        rec = res.records[0]
+        for key in ("content", "new_string", "tool_input", "tool_response"):
+            self.assertNotIn(key, rec)
+        self.assertNotIn(secret, json.dumps(rec))
+        self.assertEqual(rec["path"], target)
+
+
+class WriteFlagOrder(TempRepoCase):
+    """The record's flags are sorted and unique (`sorted(set(flags))` in main())."""
+
+    def test_flags_are_recorded_sorted(self):
+        pl = {"actor": "frontend-react", "tool_input": {"file_path": str(self.repo / "docs/backlog/x.md")}}
+        pre = call_main(payload("PreToolUse", "Write", actor=pl["actor"], cwd=self.repo, tool_input=pl["tool_input"]))
+        self.assertIn("backlog_write_by_other", pre.output["hookSpecificOutput"]["additionalContext"])
+        post = call_main(payload("PostToolUse", "Write", actor=pl["actor"], cwd=self.repo, tool_input=pl["tool_input"]))
+        self.assertEqual(post.records[0]["flags"], ["backlog_write_by_other", "docs_write_by_implementer"])
+
+
+class MetricsFile(TempRepoCase):
+    """E14: the metrics directory and the per-session file."""
+
+    def run_main(self, metrics_dir, pl):
+        call_main(pl, metrics_dir=metrics_dir)
+
+    def test_e14_directory_created_and_events_share_one_file(self):
+        with tempfile.TemporaryDirectory(prefix="agent-audit-tests-e14-") as tmp:
+            metrics_dir = Path(tmp) / "not" / "yet" / "there"
+            self.assertFalse(metrics_dir.exists())
+            for command in ("ls", "pwd"):
+                self.run_main(
+                    metrics_dir,
+                    payload("PostToolUse", "Bash", cwd=self.repo, session="s1", tool_input={"command": command}),
+                )
+            self.assertTrue(metrics_dir.is_dir())
+            self.assertEqual([p.name for p in metrics_dir.iterdir()], ["s1.jsonl"])
+            self.assertEqual([r["cmd"] for r in read_jsonl(metrics_dir / "s1.jsonl")], ["ls", "pwd"])
+
+    def test_e14_payload_without_session_goes_to_unknown(self):
+        with tempfile.TemporaryDirectory(prefix="agent-audit-tests-e14-") as tmp:
+            metrics_dir = Path(tmp) / "m"
+            pl = payload("PostToolUse", "Bash", cwd=self.repo, tool_input={"command": "ls"})
+            del pl["session_id"]
+            self.run_main(metrics_dir, pl)
+            self.assertEqual([p.name for p in metrics_dir.iterdir()], ["unknown.jsonl"])
+            self.assertEqual(len(read_jsonl(metrics_dir / "unknown.jsonl")), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

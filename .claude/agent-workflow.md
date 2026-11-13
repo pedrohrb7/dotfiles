@@ -802,7 +802,7 @@ Todo o resto (`bash`, `sh`, `python3`, `... | bash`, `eval`, `xargs`, `cat <<EOF
 
 **Limite declarado:** um script gravado em arquivo por heredoc e executado depois (`cat > x.sh <<EOF ...; bash x.sh`) está fora do alcance do classificador: o corpo é dado no `cat`, e o `bash x.sh` não mostra o conteúdo. É o mesmo limite de `Write` seguido de execução.
 
-**Testes:** `hooks/tests/` (`unittest` da biblioteca padrão), rodado com `cd ~/dotfiles/.claude/hooks && python3 -m unittest discover -s tests -t .`.
+**Testes:** `hooks/tests/` (`unittest` da biblioteca padrão), suite `claude-hooks` da tabela `Test suites` do `CLAUDE.md` da raiz do repo: `python3 -I -B -m unittest discover -s .claude/hooks/tests -t .claude/hooks`, a partir de `~/dotfiles` (`-I -B` isola do ambiente e não cria `__pycache__`).
 
 > 💬
 
@@ -1485,7 +1485,7 @@ Spec: `~/dotfiles/.claude/docs/features/design-director/spec.md`; log: `log.md` 
 | `.gitignore` | `.claude/runs/` |
 | `README.md` | agents, skills, parágrafo criação x manutenção, hooks, `.claude/docs/` |
 
-**Verificação:** bateria pelo stdin com 119 checagens (H1-H28, G1-G11, 37 comandos C, D1-D10) e métricas M1-M5, todas passando; harnesses no scratchpad da sessão, que copiam os arquivos do hook sem tocar o hook vivo. `grep frontend-design` fora de `.claude/docs/` e deste documento sem ocorrências.
+**Verificação:** bateria pelo stdin com 119 checagens (H1-H28, G1-G11, 37 comandos C, D1-D10) e métricas M1-M5, todas passando; harnesses no scratchpad da sessão, que copiam os arquivos do hook sem tocar o hook vivo. *Adendo 2026-11-12:* esse harness avulso foi substituído pela suite versionada `claude-hooks` (`hooks/tests/`, feature `audit-hook-test-suite`), que reconstrói esses casos. `grep frontend-design` fora de `.claude/docs/` e deste documento sem ocorrências.
 
 **Achados do review corrigidos:**
 - r1: o `design-director` podia escrever fora do `DESIGN_SYSTEM.md` com só um aviso -> categoria `design_director_write_outside` em `block`; a regra da raiz virou regra por nome (monorepo e sistemas de arquivos que ignoram caixa); alvos de `approved_scope` no arquivo saem dos caminhos permitidos.

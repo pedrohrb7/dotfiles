@@ -21,3 +21,4 @@ Neste repo (dotfiles), o plan de uma etapa da config vive no `.claude/agent-work
 | Feature | Plan | Spec | Updated |
 | --- | --- | --- | --- |
 | [design-director](design-director/) | Implemented ([agent-workflow.md, 15.1](../../agent-workflow.md#151-etapa-h---design-director-adendo-2026-11-11)) | Implemented ([spec.md](design-director/spec.md)) | 2026-11-11 |
+| [audit-hook-test-suite](audit-hook-test-suite/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-11-audit-hook-test-suite.md)) | Implemented ([spec.md](audit-hook-test-suite/spec.md)) | 2026-11-12 |
