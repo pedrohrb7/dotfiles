@@ -225,6 +225,61 @@ class WriteFlagOrder(TempRepoCase):
         self.assertEqual(post.records[0]["flags"], ["backlog_write_by_other", "docs_write_by_implementer"])
 
 
+class ScratchpadPayload(TempRepoCase):
+    """Spec audit-scratch-exemption, SC18-SC19: `scratchpad_dir` of the payload, through audit.main().
+
+    Write by `backend-node` with an active run (ALLOWED services/api/**); three targets: inside the scratchpad,
+    in another `claude-*` directory, and inside the scratchpad again but with the field absent.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.write_run()
+        self.sp = self.make_scratchpad()
+        self.inside = self.sp / "n.txt"
+        self.other = self.sp.parents[3] / "claude-xyz" / "x"
+
+    def cases(self):
+        """(label, target, scratchpad) of the three payloads."""
+        return (("inside", self.inside, self.sp), ("other", self.other, self.sp), ("absent", self.inside, None))
+
+    def write(self, event, target, scratchpad, actor="backend-node"):
+        return call_main(payload(event, "Write", actor=actor, cwd=self.repo, session="s1",
+                                 tool_input={"file_path": str(target)}, scratchpad=scratchpad))
+
+    def test_sc18_pre_tool_use_warns_only_outside_the_session_scratchpad(self):
+        expected = {"inside": False, "other": True, "absent": True}
+        for label, target, scratchpad in self.cases():
+            with self.subTest(case=label):
+                res = self.write("PreToolUse", target, scratchpad)
+                if expected[label]:
+                    spec = res.output["hookSpecificOutput"]
+                    self.assertIn("Reminder from the agent workflow (out_of_scope_write)", spec["additionalContext"])
+                    self.assertNotIn("permissionDecision", spec)
+                else:
+                    self.assertIsNone(res.output)
+
+    def test_sc19_post_tool_use_records_the_scratch_state_and_never_the_path(self):
+        expected = {"inside": "match", "other": "no-match", "absent": "unavailable"}
+        for label, target, scratchpad in self.cases():
+            with self.subTest(case=label):
+                rec = self.write("PostToolUse", target, scratchpad).records[0]
+                self.assertEqual(rec["scratch"], expected[label])
+                self.assertEqual("out_of_scope_write" in rec["flags"], label != "inside")
+                if scratchpad is not None:
+                    self.assertNotIn(str(scratchpad), rec.values())  # the target's `rel`/`path` may contain it
+                    self.assertNotIn("scratchpad_dir", rec)
+
+    def test_sc19_subagent_uses_the_scratchpad_of_the_parent_session(self):
+        rec = self.write("PostToolUse", self.inside, self.sp, actor="test-writer").records[0]
+        self.assertEqual(rec["actor"], "test-writer")
+        self.assertEqual(rec["agent_id"], "agent-1")
+        self.assertEqual(rec["session"], "s1")
+        self.assertEqual(rec["scratch"], "match")
+        self.assertNotIn("out_of_scope_write", rec["flags"])
+        self.assertNotIn("scratchpad_dir", rec)
+
+
 class MetricsFile(TempRepoCase):
     """E14: the metrics directory and the per-session file."""
 

@@ -64,12 +64,6 @@ def config(**overrides) -> dict:
     return out
 
 
-def assert_not_scratch(path) -> None:
-    """Fail unless `path` is not an agent scratchpad according to the hook (under the current patches)."""
-    if audit.is_scratch(Path(path).resolve()):
-        raise AssertionError(f"premissa do ambiente: {path} e tratado como scratchpad (TMPDIR sob claude-*?)")
-
-
 def assert_no_git_root(path) -> None:
     """Fail unless `path` is outside any git repository."""
     root = audit.git_root(Path(path))
@@ -89,31 +83,17 @@ def write_run_state(root, allowed: dict, **extra) -> None:
 class TempRepoCase(unittest.TestCase):
     """Temp git repo with an active /implement run state, and evaluate_write helpers.
 
-    SCRATCH_BASES is patched to () so a directory under /tmp/claude-* (the TMPDIR of an agent run)
-    is not treated as a scratchpad by accident. Tests of the scratch exemption itself call
-    `use_real_scratch_bases()` or set `REAL_SCRATCH_BASES = True`.
+    Nothing is scratch unless a test passes `scratchpad=` (see `make_scratchpad()`), so the suite does
+    not depend on the TMPDIR it runs under.
     """
 
     ALLOWED = {"1": ["services/api/**"], "2": ["services/web/**"]}
-    REAL_SCRATCH_BASES = False
 
     def setUp(self):
-        self._scratch_patch = None
-        if not self.REAL_SCRATCH_BASES:
-            self._scratch_patch = mock.patch.object(audit, "SCRATCH_BASES", ())
-            self._scratch_patch.start()
-            self.addCleanup(self.use_real_scratch_bases)
         self.repo = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.repo, ignore_errors=True)
-        assert_not_scratch(self.repo)
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
         (self.repo / ".claude" / "runs").mkdir(parents=True)
-
-    def use_real_scratch_bases(self):
-        """Undo the SCRATCH_BASES patch (idempotent)."""
-        if self._scratch_patch is not None:
-            self._scratch_patch.stop()
-            self._scratch_patch = None
 
     def write_run(self, **extra):
         write_run_state(self.repo, self.ALLOWED, **extra)
@@ -124,21 +104,30 @@ class TempRepoCase(unittest.TestCase):
     def make_dir(self, prefix="audit-", git=False):
         d = Path(tempfile.mkdtemp(prefix=prefix))
         self.addCleanup(shutil.rmtree, d, ignore_errors=True)
-        assert_not_scratch(d)
         if git:
             subprocess.run(["git", "init", "-q", str(d)], check=True)
         else:
             assert_no_git_root(d)
         return d
 
-    def eval_at(self, target, actor, cwd=None):
-        return audit.evaluate_write(str(target), str(cwd or self.repo), actor, "Write", None)
+    def make_scratchpad(self, session="s1", slug="-proj") -> Path:
+        """`<temp dir>/claude-<uid>/<slug>/<session>/scratchpad` (mode 0700), outside any repo.
+
+        Same shape as the Claude Code session scratchpad; the base is removed on cleanup."""
+        uid = os.getuid() if hasattr(os, "getuid") else 0
+        sp = self.make_dir().resolve() / f"claude-{uid}" / slug / session / "scratchpad"
+        sp.mkdir(parents=True, mode=0o700)
+        return sp
+
+    def eval_at(self, target, actor, cwd=None, scratchpad=None):
+        return audit.evaluate_write(str(target), str(cwd or self.repo), actor, "Write", None, scratchpad=scratchpad)
 
     def evaluate(self, rel, actor="frontend-react"):
         return audit.evaluate_write(str(self.repo / rel), str(self.repo), actor, "Write", None)
 
 
-def payload(event, tool=None, *, actor="main", cwd, session="t", tool_input=None, tool_response=None) -> dict:
+def payload(event, tool=None, *, actor="main", cwd, session="t", tool_input=None, tool_response=None,
+            scratchpad=None) -> dict:
     """Build a hook stdin payload. actor: "main" (no agent keys), "subagent" (agent_id only) or an agent name."""
     out: dict = {"hook_event_name": event, "session_id": session, "cwd": str(cwd)}
     if actor == "subagent":
@@ -151,6 +140,8 @@ def payload(event, tool=None, *, actor="main", cwd, session="t", tool_input=None
         out["tool_input"] = tool_input if tool_input is not None else {}
     if tool_response is not None:
         out["tool_response"] = tool_response
+    if scratchpad is not None:
+        out["scratchpad_dir"] = str(scratchpad)
     return out
 
 

@@ -8,7 +8,6 @@ import json
 import os
 import shutil
 import subprocess
-import tempfile
 import unittest
 import uuid
 from pathlib import Path
@@ -268,16 +267,6 @@ class OutsideRepoWrites(TempRepoCase):
         self.write_run(approved_scope=[{"task": 1, "target": "**", "decision": "approved"}])
         self.assertOutOfScope(self.eval_at(d / "x.py", "backend-node"))
 
-    def test_scratchpad_under_tmp_claude_dir_is_allowed(self):
-        """Pins the behavior accepted today. Refactor: docs/backlog/refactor/2026-11-11-audit-scratch-exemption-too-broad.md
-
-        When that entry is resolved, this test changes with it.
-        """
-        self.use_real_scratch_bases()
-        d = Path(tempfile.mkdtemp(prefix="claude-", dir=tempfile.gettempdir()))
-        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
-        self.assertNotOutOfScope(self.eval_at(d / "scratch" / "n.txt", "backend-node"))
-
     def test_always_allowed_patterns_do_not_apply_outside(self):
         d = self.make_dir()
         out = self.eval_at(d / "db" / "migrations" / "001.sql", "backend-node")
@@ -482,21 +471,147 @@ class OutsideRepoHardening(TempRepoCase):
         self.assertEqual(out.get("run"), "feat-x")
         self.assertEqual(out.get("task"), "1")
 
-    def test_literal_tmp_claude_dir_is_scratch_even_if_tempdir_differs(self):
-        """Pins the behavior accepted today. Refactor: docs/backlog/refactor/2026-11-11-audit-scratch-exemption-too-broad.md
 
-        When that entry is resolved, this test changes with it.
-        """
-        if not (Path("/tmp").is_dir() and os.access("/tmp", os.W_OK)):
-            self.skipTest("/tmp is not writable")
+class SessionScratchpad(TempRepoCase):
+    """Spec audit-scratch-exemption, Testing SC1-SC17 (refactor docs/backlog/refactor/2026-11-11-audit-scratch-exemption-too-broad.md).
+
+    Outside the repo, a fixed-scope actor with an active run is in scope only inside the session scratchpad
+    (`scratchpad_dir` of the payload) or an approved absolute glob. Actor `backend-node`, run ALLOWED, unless stated.
+    """
+
+    def setUp(self):
+        super().setUp()
         self.write_run()
-        scratch = Path("/tmp") / f"claude-audit-test-{uuid.uuid4().hex}"
-        scratch.mkdir()
-        self.addCleanup(shutil.rmtree, scratch, ignore_errors=True)
-        other = self.make_dir()
-        self.use_real_scratch_bases()
-        with mock.patch.object(tempfile, "tempdir", str(other)):
-            self.assertNotIn("out_of_scope_write", self.flags(scratch / "n.txt", "backend-node"))
+        self.sp = self.make_scratchpad()
+        self.base = self.sp.parents[3]  # the temp dir holding claude-<uid>/
+
+    def at(self, target, actor="backend-node", scratchpad="sp"):
+        return self.eval_at(target, actor, scratchpad=str(self.sp) if scratchpad == "sp" else scratchpad)
+
+    def assertFlagged(self, out, scratch="no-match"):
+        self.assertIn("out_of_scope_write", out["flags"])
+        self.assertEqual(out.get("scratch"), scratch)
+
+    def test_sc1_inside_the_session_scratchpad_is_in_scope(self):
+        for rel in ("n.txt", "a/b/c.py"):  # intermediate directories do not exist
+            with self.subTest(rel=rel):
+                out = self.at(self.sp / rel)
+                self.assertNotIn("out_of_scope_write", out["flags"])
+                self.assertEqual(out["area"], "outside")
+                self.assertIs(out["in_scope"], True)
+                self.assertEqual(out["scratch"], "match")
+
+    def test_sc2_string_prefix_siblings_and_the_scratchpad_itself_are_flagged(self):
+        for target in (Path(f"{self.sp}x") / "n.txt", Path(f"{self.sp}-other") / "n.txt", self.sp):
+            with self.subTest(target=str(target)):
+                self.assertFlagged(self.at(target))
+
+    def test_sc3_scratchpad_of_another_session_is_flagged(self):
+        other = self.make_scratchpad(session="s2")
+        self.assertFlagged(self.at(other / "n.txt"))
+
+    def test_sc4_other_claude_directories_are_flagged(self):
+        uid = self.sp.parents[2].name
+        targets = {
+            "bash-edit-diff": self.base / uid / "bash-edit-diff" / "x",
+            "claude-xyz": self.base / "claude-xyz" / "x",
+        }
+        for name, target in targets.items():
+            with self.subTest(case=name):
+                self.assertFlagged(self.at(target))
+        with self.subTest(case="literal /tmp/claude-*"):
+            if not (Path("/tmp").is_dir() and os.access("/tmp", os.W_OK)):
+                self.skipTest("/tmp is not writable")
+            literal = Path("/tmp") / f"claude-audit-test-{uuid.uuid4().hex}"
+            literal.mkdir()
+            self.addCleanup(shutil.rmtree, literal, ignore_errors=True)
+            self.assertFlagged(self.at(literal / "n.txt"))
+
+    def test_sc5_same_session_id_on_a_wrong_path_is_flagged(self):
+        uid = self.sp.parents[2].name
+        for rel in (f"{uid}/-wrong/s1/scratchpad/x", f"{uid}/s1/scratchpad/x"):
+            with self.subTest(rel=rel):
+                self.assertFlagged(self.at(self.base / rel))
+
+    def test_sc6_without_scratchpad_there_is_no_exemption(self):
+        self.assertFlagged(self.at(self.sp / "n.txt", scratchpad=None), scratch="unavailable")
+
+    def test_sc7_invalid_scratchpad_counts_as_absent(self):
+        for value in ("", "rel/scratchpad", "/", 42, ["/x"], {"a": 1}, str(self.sp) + "\0"):
+            with self.subTest(value=value):
+                self.assertFlagged(self.at(self.sp / "n.txt", scratchpad=value), scratch="unavailable")
+
+    def test_sc8_symlink_inside_the_scratchpad_to_the_outside_is_flagged(self):
+        (self.sp / "link").symlink_to(self.make_dir())
+        self.assertFlagged(self.at(self.sp / "link" / "x.py"))
+
+    def test_sc9_scratchpad_replaced_by_a_symlink_does_not_widen_the_exemption(self):
+        d = self.make_dir()
+        self.sp.rmdir()
+        self.sp.symlink_to(d)
+        for target in (d / "x", self.sp / "x"):
+            with self.subTest(target=str(target)):
+                self.assertIn("out_of_scope_write", self.at(target)["flags"])
+
+    def test_sc10_dotdot_is_judged_resolved_and_lexical(self):
+        self.assertIn("out_of_scope_write", self.at(self.sp / ".." / "fora" / "x")["flags"])
+        self.assertNotIn("out_of_scope_write", self.at(self.sp / "a" / ".." / "b.txt")["flags"])
+
+    def test_sc11_not_normalized_scratchpad_values_are_accepted(self):
+        values = (str(self.sp) + "/", str(self.sp) + "/./", f"{self.sp.parent}/x/../scratchpad")
+        for value in values:
+            with self.subTest(value=value):
+                out = self.at(self.sp / "n.txt", scratchpad=value)
+                self.assertNotIn("out_of_scope_write", out["flags"])
+                self.assertEqual(out["scratch"], "match")
+
+    def test_sc12_actors_without_fixed_scope_are_not_judged(self):
+        for actor in ("main", "docs-writer", "planner"):
+            for scratchpad in ("sp", None):
+                with self.subTest(actor=actor, scratchpad=scratchpad):
+                    out = self.at(self.base / "claude-xyz" / "x", actor=actor, scratchpad=scratchpad)
+                    self.assertNotIn("out_of_scope_write", out["flags"])
+                    self.assertNotIn("scratch", out)
+
+    def test_sc13_actor_flags_do_not_change_in_the_scratchpad(self):
+        self.assertIn("write_by_readonly_agent", self.at(self.sp / "n.txt", actor="code-reviewer")["flags"])
+        self.assertIn("design_director_write_outside", self.at(self.sp / "x.md", actor="design-director")["flags"])
+
+    def test_sc14_without_an_active_run_there_is_no_scope_flag_or_scratch(self):
+        self.remove_run()
+        out = self.at(self.base / "claude-xyz" / "x")
+        self.assertNotIn("out_of_scope_write", out["flags"])
+        self.assertNotIn("scratch", out)
+        self.assertIs(out["in_run"], False)
+
+    def test_sc15_scratchpad_inside_the_repo_exempts_nothing(self):
+        inner = self.repo / "tmp" / "claude-1" / "p" / "s1" / "scratchpad"
+        inner.mkdir(parents=True)
+        out = self.at(inner / "n.txt", scratchpad=str(inner))
+        self.assertIn("out_of_scope_write", out["flags"])
+        self.assertEqual(out["area"], "code")
+        self.assertNotIn("scratch", out)
+
+    def test_sc16_approved_absolute_glob_still_applies_with_a_scratchpad(self):
+        d = self.make_dir()
+        self.write_run(approved_scope=[{"task": 1, "target": f"{d}/**", "decision": "approved"}])
+        for target, scratch in ((d / "sub" / "x.py", "no-match"), (self.sp / "n.txt", "match")):
+            with self.subTest(target=str(target)):
+                out = self.at(target)
+                self.assertNotIn("out_of_scope_write", out["flags"])
+                self.assertEqual(out["scratch"], scratch)
+
+    def test_sc17_session_scratchpad_validation(self):
+        sp = str(self.sp)
+        cases = [
+            (None, None), (Path(sp), None), ("", None), ("rel/x", None), ("/", None), ("//", None),
+            ("/a/..", None), (42, None), (["/x"], None), (sp + "\0", None),
+            (sp, Path(sp)), (sp + "/", Path(sp)), (sp + "/./", Path(sp)),
+            (f"{self.sp.parent}/x/../scratchpad", Path(sp)),
+        ]
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                self.assertEqual(audit.session_scratchpad(raw), expected)
 
 
 class InRepoScope(TempRepoCase):

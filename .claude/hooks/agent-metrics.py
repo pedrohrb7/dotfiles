@@ -41,6 +41,9 @@ FLAG_LABELS = {
 }
 
 
+SCRATCH_LABELS = ("match", "no-match", "unavailable")
+
+
 def load(paths: list[Path]) -> list[dict]:
     events = []
     for p in paths:
@@ -107,8 +110,21 @@ def report(title: str, events: list[dict]) -> str:
             "",
             f"- total: {len(writes)}; during a run: {len(in_run)}; checked against allowed_paths: {len(checked)}; "
             f"outside: {sum(1 for e in checked if not e['in_scope'])}",
-            "",
         ]
+        scratched = [e for e in writes if e.get("event") != "PreToolUse" and e.get("scratch") in SCRATCH_LABELS]
+        if scratched:
+            kinds = Counter(
+                e["scratch"] if e["scratch"] != "no-match"
+                else "out-of-scope" if "out_of_scope_write" in (e.get("flags") or ())
+                else "glob"
+                for e in scratched
+            )
+            out.append(
+                f"- outside the repo during a run: {len(scratched)} "
+                f"(session scratchpad: {kinds['match']}; approved glob: {kinds['glob']}; "
+                f"out of scope: {kinds['out-of-scope']}; no scratchpad known: {kinds['unavailable']})"
+            )
+        out.append("")
 
     director_calls = sum(1 for e in events if e.get("event") == "SubagentStart" and e.get("agent_type") == "design-director")
     if director_calls or any(e.get("actor") == "design-director" for e in events):

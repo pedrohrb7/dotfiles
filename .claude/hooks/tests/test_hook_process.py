@@ -6,6 +6,7 @@ HOME: the live hook and the live config are never executed or read here. Every c
 exit code 0 and an empty stderr.
 """
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -200,6 +201,21 @@ class ProcessContract(ProcessCase):
             self.assert_warn(self.edit(hp, *args), "design_system_write_by_other")
             self.edit(hp, *args, event="PostToolUse")
             self.assertEqual(self.post_flags(hp)[-1], ["design_system_write_by_other", "out_of_scope_write"])
+
+    def test_sc20_scratchpad_dir_exempts_a_write_outside_the_repo(self):
+        """Spec audit-scratch-exemption, SC20: real process, env without TMPDIR."""
+        self.write_run()
+        sp = self.tmp.resolve() / f"claude-{os.getuid() if hasattr(os, 'getuid') else 0}" / "-proj" / "s1" / "scratchpad"
+        sp.mkdir(parents=True, mode=0o700)
+        hp = self.hook()
+        target = {"file_path": str(sp / "n.txt")}
+        with self.subTest(case="with scratchpad_dir"):
+            pl = payload("PreToolUse", "Write", actor="frontend-react", cwd=self.repo, tool_input=target,
+                         scratchpad=sp)
+            self.assertIsNone(self.output(self.run_hook(hp, pl)))
+        with self.subTest(case="without scratchpad_dir"):
+            pl = payload("PreToolUse", "Write", actor="frontend-react", cwd=self.repo, tool_input=target)
+            self.assert_warn(self.output(self.run_hook(hp, pl)), "out_of_scope_write")
 
 
 if __name__ == "__main__":

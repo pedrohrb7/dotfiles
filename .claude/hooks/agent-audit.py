@@ -15,7 +15,8 @@ SubagentStop (record). Reads the hook payload (JSON) from stdin.
 What it classifies (see agent-workflow.md, sections 13 and 14):
 - Bash commands: tests (narrow/full/load), lint, typecheck, docker (read/build/lifecycle),
   git (commit/push), requests (local/external);
-- file writes: inside or outside the active run's allowed_paths (from .claude/runs/<slug>.json),
+- file writes: inside or outside the active run's allowed_paths (from .claude/runs/<slug>.json;
+  outside the repo only inside the session scratchpad (`scratchpad_dir`) or an approved absolute glob),
   docs and backlog files, and the project's DESIGN_SYSTEM.md (written only by design-director
   and the main session);
 - browser and screenshot tools.
@@ -26,14 +27,12 @@ Any error is swallowed: an audit hook must never break a session.
 
 from __future__ import annotations
 
-import fnmatch
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path, PurePosixPath
 
@@ -502,19 +501,33 @@ def matches(rel: str, patterns: list[str]) -> bool:
     return False
 
 
-SCRATCH_BASES = ("/tmp",)  # literal scratch parents, besides tempfile.gettempdir()
+def session_scratchpad(raw: object) -> Path | None:
+    """The session scratchpad from the payload's `scratchpad_dir`, normalized, or None when unusable.
+
+    Not a non-empty absolute `str` without NUL, or the filesystem root: None. Never raises. No realpath and no
+    existence check: the value comes from Claude Code (an agent cannot change the payload) and the directory
+    may not exist yet."""
+    try:
+        if not isinstance(raw, str) or not raw or "\0" in raw or not os.path.isabs(raw):
+            return None
+        p = Path(os.path.normpath(raw))
+        return None if p == Path(p.anchor) else p
+    except Exception:
+        return None
 
 
-def is_scratch(target: Path) -> bool:
-    """True for an agent scratchpad: <tempdir>/claude-*/... or /tmp/claude-*/... (both resolved)."""
-    for base in {tempfile.gettempdir(), *SCRATCH_BASES}:
-        try:
-            parts = target.relative_to(Path(base).resolve()).parts
-        except (ValueError, OSError):
-            continue
-        if parts and fnmatch.fnmatchcase(parts[0], "claude-*"):
-            return True
-    return False
+def is_scratch(target: Path, scratchpad: Path | None) -> bool:
+    """True when `target` is strictly inside the session scratchpad (B1).
+
+    Compared by path component, so `<sp>x/` and `<sp>-other/` do not match, and other sessions' scratchpads and
+    other `claude-*` directories are not scratch (B2). The scratchpad is never resolved (B5): if it is swapped
+    for a symlink, the resolved target lands elsewhere, does not match, and is flagged."""
+    if scratchpad is None:
+        return False
+    try:
+        return bool(target.relative_to(scratchpad).parts)
+    except ValueError:
+        return False
 
 
 def nearest_existing(path: Path) -> Path:
@@ -533,7 +546,8 @@ def _under(target: Path, root: Path) -> str | None:
     return None
 
 
-def _assess_root(root: Path, forms: list[Path], actor: str, tool: str, created: bool, roots: list[str]) -> tuple[list[str], dict]:
+def _assess_root(root: Path, forms: list[Path], actor: str, tool: str, created: bool, roots: list[str],
+                 scratch: Path | None = None) -> tuple[list[str], dict]:
     """Judge the target (each path form: resolved, and lexical when it has `..`) against one git root and its run.
     Returns the union of the flags (stricter wins) and the record fields of the first flagged form, else the first."""
     run = active_run(root)
@@ -574,9 +588,11 @@ def _assess_root(root: Path, forms: list[Path], actor: str, tool: str, created: 
                     in_scope = matches(rel, allowed + ALWAYS_ALLOWED)
                 else:  # ALWAYS_ALLOWED are repo conventions; outside, only approved ABSOLUTE globs
                     # (matched literally after ~ expansion, never realpath'd: a planted symlink must not widen a
-                    # glob; relative ones never match) or scratch
+                    # glob; relative ones never match) or the session scratchpad of the payload
                     absolute = [os.path.expanduser(a.strip().strip("`")) for a in allowed]
-                    in_scope = is_scratch(form) or matches(rel, [a for a in absolute if a.startswith("/")])
+                    in_scratch = is_scratch(form, scratch)
+                    cur["scratch"] = "unavailable" if scratch is None else "match" if in_scratch else "no-match"
+                    in_scope = in_scratch or matches(rel, [a for a in absolute if a.startswith("/")])
                 cur["in_scope"] = in_scope
                 if not in_scope:
                     found.append("out_of_scope_write")
@@ -588,7 +604,8 @@ def _assess_root(root: Path, forms: list[Path], actor: str, tool: str, created: 
     return flags, rec
 
 
-def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roots: list[str] | None = None) -> dict:
+def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roots: list[str] | None = None,
+                   scratchpad: object = None) -> dict:
     """Classify a write.
 
     Actor-only flags (read-only agent, design-director, DESIGN_SYSTEM.md by file name) are computed first,
@@ -599,7 +616,7 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roo
     root is a different repo nested in the cwd root (submodule), both are judged, flags are unioned and
     the record carries the nested (target) root's rel, area and run, unless only the other root flagged out_of_scope_write. A target outside every root has
     rel = its absolute path and area "outside": area flags do not apply, and fixed-scope actors with a
-    run need an approved absolute glob (matched literally after ~ expansion, never realpath'd) or a <tempdir>|/tmp claude-* scratch path."""
+    run need an approved absolute glob (matched literally after ~ expansion, never realpath'd) or a path inside the session scratchpad (`scratchpad_dir` of the payload)."""
     roots = roots or DEFAULT_DOCS_ROOTS
     out: dict = {"path": path_str}
     scoped = actor in IMPLEMENTERS or actor in {"quality-fixer", "test-writer"}
@@ -617,6 +634,7 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roo
 
     flags = actor_flags([is_design_system(path_str)])
     try:
+        sp = session_scratchpad(scratchpad)
         path = Path(os.path.expanduser(path_str))
         if not path.is_absolute():
             path = Path(cwd or ".") / path
@@ -636,7 +654,7 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roo
         rec = {"rel": str(resolved), "area": "outside", "in_run": False}
         rec_oos = False
         for root in judged:
-            found, cur = _assess_root(root, forms, actor, tool, created, roots)
+            found, cur = _assess_root(root, forms, actor, tool, created, roots, scratch=sp)
             flags += found
             oos = "out_of_scope_write" in found
             if not (rec_oos and not oos):  # the nested root wins, unless an earlier root is the one that flagged
@@ -761,7 +779,8 @@ def main() -> None:
         elif tool in {"Write", "Edit", "MultiEdit", "NotebookEdit"}:
             path = tinput.get("file_path") or tinput.get("notebook_path") or ""
             record["categories"] = ["write"]
-            record.update(evaluate_write(path, payload.get("cwd", ""), actor, tool, payload.get("tool_response"), docs_roots(config)))
+            record.update(evaluate_write(path, payload.get("cwd", ""), actor, tool, payload.get("tool_response"), docs_roots(config),
+                                          scratchpad=payload.get("scratchpad_dir")))
             flags = record.pop("flags", [])
         elif VISUAL_TOOL.search(tool):
             record["categories"] = ["visual"]

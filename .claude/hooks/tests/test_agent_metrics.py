@@ -192,6 +192,38 @@ class ReportSections(MetricsCase):
                 section(self.report(events), "Writes"),
             )
 
+    def test_r10_scratch_line(self):
+        with self.subTest(case="R10"):
+            def w(rel, event="PostToolUse", scratch=None, flags=None) -> dict:
+                kw: dict = {}
+                if scratch is not None:
+                    kw["scratch"] = scratch
+                if flags is not None:
+                    kw["flags"] = flags
+                return write_event(rel, actor="backend-node", event=event, in_run=True, **kw)
+
+            oos = ["out_of_scope_write"]
+            events = [
+                w("a", scratch="match"),
+                w("b", scratch="match"),
+                w("c", scratch="no-match", flags=[]),
+                w("c2", scratch="no-match"),
+                w("c3", scratch="no-match", flags=oos),
+                w("d", scratch="unavailable", flags=oos),
+                w("e", event="PreToolUse", scratch="no-match", flags=oos),
+            ]
+            self.assertIn(
+                "- outside the repo during a run: 6 (session scratchpad: 2; approved glob: 2; out of scope: 1; "
+                "no scratchpad known: 1)",
+                section(self.report(events), "Writes"),
+            )
+            plain = [w("a"), w("b")]
+            without = section(self.report(plain), "Writes")
+            self.assertNotIn("outside the repo during a run", without)
+            with_pre_only = [w("e", event="PreToolUse", scratch="no-match", flags=oos)]
+            self.assertNotIn("outside the repo during a run", section(self.report(with_pre_only), "Writes"))
+            self.assertEqual(without.strip(), "- total: 2; during a run: 2; checked against allowed_paths: 0; outside: 0")
+
     def test_writes_section_absent_without_writes(self):
         self.assertNotIn("## Writes", self.report([ev(actor="main", categories=["lint"])]))
 
