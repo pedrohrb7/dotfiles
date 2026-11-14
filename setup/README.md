@@ -127,6 +127,43 @@ isso o serviço, antes de começar, exige 5 quadros em 8 s; se não vierem, ele
 desconecta e reconecta a USB da webcam (`authorized` 0/1 no sysfs, o mesmo que
 tirar e pôr o cabo) e o runit tenta de novo.
 
+## ThinkPad T440p (ABNT2): tecla "/ ?"
+
+No T440p com teclado ABNT2, a tecla "/ ?" fica ao lado do PrtSc, na posição do
+Ctrl direito, e manda o scancode dele (`0x9d`, lido como `KEY_RIGHTCTRL`, keycode
+97). Por isso ela não digitava nada. O XKB já estava certo: o grupo `br` mapeia
+a `<AB11>` para `/`, `?`, `°` e `¿`. Falta só o kernel entregar a tecla certa.
+
+`setup/thinkpad-t440p-br.sh` instala a regra udev hwdb
+`/etc/udev/hwdb.d/61-keyboard-thinkpad-t440p-br.hwdb`, que casa com
+`evdev:atkbd:dmi:...:pvrThinkPadT440p:*` e remapeia `KEYBOARD_KEY_9d=ro`
+(`KEY_RO`, a "/ ?" do ABNT2, que o X vê como keycode 97 `<AB11>`). Depois roda
+`udevadm hwdb --update` e `udevadm trigger --subsystem-match=input
+--action=change`, então não precisa reiniciar. Vale no TTY e no X.
+
+O script é separado do `hardware.sh` de propósito: o problema só existe nesse
+ThinkPad e o `hardware.sh` roda em outras máquinas. Em qualquer máquina cujo
+`/sys/class/dmi/id/product_version` não seja `ThinkPad T440p`, ele sai com erro
+sem alterar nada.
+
+```sh
+~/dotfiles/setup/thinkpad-t440p-br.sh -n   # mostra o que faria
+~/dotfiles/setup/thinkpad-t440p-br.sh      # instala (pede sudo); pode repetir
+~/dotfiles/setup/thinkpad-t440p-br.sh -r   # remove a regra
+```
+
+Só uma opção é lida por vez. Conferir:
+
+```sh
+udevadm info /dev/input/event0 | grep KEYBOARD_KEY   # KEYBOARD_KEY_9d=ro
+```
+
+A tecla deve dar `/` e `?`, e com AltGr, `°`.
+
+Efeitos: o Ctrl direito deixa de existir (é o mesmo scancode); o esquerdo não
+muda. No grupo de layout `us` a tecla não digita nada, porque o `us` não tem
+`<AB11>`.
+
 ## Conferir a aceleração
 
 ```sh
