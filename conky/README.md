@@ -7,7 +7,7 @@ paleta Tokyo Night de `awesome/config/styles/color.lua`.
 | Arquivo      | O quê                                                                 |
 | ------------ | --------------------------------------------------------------------- |
 | `right.conf` | coluna da direita: CPU (gráfico, frequência, temperatura, uso por núcleo), GPU (NVIDIA ou Intel: modelo, clock, uso com gráfico, temperatura e, na NVIDIA, VRAM), memória, disco (cada ponto de montagem, I/O e temperatura de cada disco) e bateria (só em máquina com bateria) |
-| `left.conf`  | coluna da esquerda: sistema, rede (Wi-Fi, Ethernet e VPN, cada uma só aparece quando tem IP), Bluetooth (um bloco por adaptador, dongle USB e interno, com os dispositivos conectados e a bateria de cada um quando o dispositivo informa), top 3 processos por CPU e top 3 por memória |
+| `left.conf`  | coluna da esquerda: sistema, rede (Wi-Fi, Ethernet e VPN, cada uma só aparece quando tem IP), Bluetooth (um bloco por adaptador, dongle USB e interno, com os dispositivos conectados e a bateria de cada um quando o dispositivo informa), top 3 processos por CPU e top 3 por memória, e a seção CLAUDE (limites do plano e tokens por modelo do Claude Code) |
 | `common.lua` | o que as duas compartilham: janela, tamanho, fonte, intervalo, paleta e templates |
 
 Cada coluna é uma instância do conky (`conky -c <arquivo>`).
@@ -151,3 +151,43 @@ valores em si atualizam a cada `update_interval`.
 Fixos no `right.conf`: sensor da CPU `hwmon coretemp` e os quatro núcleos
 `cpu1`..`cpu4`. Limites de alerta (vermelho): ponto de montagem >= 90%,
 bateria <= 20%.
+
+## Seção CLAUDE
+
+Última seção da coluna da esquerda (abaixo de PROCESSOS): uso do Claude Code.
+Só barras, sem gráficos (mesma restrição de altura da seção Bluetooth, ver
+[Cliques](#cliques)).
+
+| Arquivo      | O quê                                                                 |
+| ------------ | --------------------------------------------------------------------- |
+| `claude.sh`  | gera o texto da seção (`jq`, `find` do GNU)                           |
+| `claude.lua` | `${lua_parse claude}`: roda o script em segundo plano a cada 60 s (`INTERVAL`) e mostra a última saída completa; `claude_percent` alimenta `${lua_bar claude_percent <n>}` |
+
+O script leva ~0,4 s com 78 MB de transcripts, por isso o `claude.lua` o
+dispara fora do ciclo do conky: a saída vai para
+`$XDG_RUNTIME_DIR/conky-claude.txt` (troca atômica com `mv`) e o conky nunca
+espera por ele. Antes da primeira saída aparece "Carregando...".
+
+### Fontes
+
+| O quê          | De onde                                                                |
+| -------------- | ---------------------------------------------------------------------- |
+| Limites do plano | `${XDG_CACHE_HOME:-~/.cache}/claude/rate-limits.json`, gravado pela statusline do Claude Code (`.claude/statusline.sh`, ver [`.claude/README.md`](../.claude/README.md#statuslinesh)). Sem a statusline configurada não há dado: a seção mostra "sem dados da statusline" |
+| Tokens         | transcripts `~/.claude/projects/**/*.jsonl` (ou `$CLAUDE_CONFIG_DIR/projects`) |
+
+### O que mostra
+
+- **Sessão 5h** e **Semana**: % usado, horário em que zera e uma barra. Amarelo
+  a partir de 75%, vermelho a partir de 90%. Janela cujo reset já passou mostra
+  0%; sem dado do limite, "sem limite".
+- **Tokens por modelo**, abaixo de cada limite: entrada + saída + escrita de
+  cache + leitura de cache, com a parte de cada modelo no total da janela. A
+  janela é do início da sessão/semana atual até agora; quando o início não é
+  conhecido, as últimas 5 h / 7 dias. Uma resposta aparece em várias linhas do
+  transcript, então conta uma vez por `message.id` + `requestId`.
+- **Atualizado**: de quando são os limites. Eles só mudam quando o Claude Code
+  recebe uma resposta, então uso feito no claude.ai (web) só aparece depois da
+  próxima resposta no CLI.
+
+Dependências: `jq`, `find` do GNU, e a statusline do Claude Code
+(`statusLine` em `.claude/settings.json`).

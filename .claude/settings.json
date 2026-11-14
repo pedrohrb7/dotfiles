@@ -170,6 +170,10 @@
       "effortLevel": "high"
     }
   },
+  "statusLine": {
+    "type": "command",
+    "command": "sh \"$HOME/dotfiles/.claude/statusline.sh\""
+  },
   "timeFormat": "24-hour",
   "theme": "dark",
   "inputNeededNotifEnabled": true,
