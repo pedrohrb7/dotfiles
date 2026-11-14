@@ -4,13 +4,12 @@ Source: docs/features/audit-hook-test-suite/spec.md, Testing (A1-A9); skills-doc
 (DR1-DR17: `project_docs_root()` / `normalize_docs_root()` and their effect on writes).
 """
 import os
-import subprocess
 import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from ._support import TempRepoCase, audit, call_main, config, declare_docs_root, payload, write_run_state
+from ._support import ForkedSuite, TempRepoCase, audit, call_main, config, declare_docs_root, init_repo, payload, write_run_state
 
 ROOTS = ["docs/", ".claude/docs/"]
 
@@ -429,7 +428,7 @@ class DocsRootEffect(TempRepoCase):
         self.declare("kb/")
         inner = self.repo / "sub"
         inner.mkdir()
-        subprocess.run(["git", "init", "-q", str(inner)], check=True)
+        init_repo(inner)
         declare_docs_root(inner, "notes/")
         out = self.ev(None, target=inner / "notes" / "x.md")
         self.assertEqual(out["rel"], "notes/x.md")
@@ -466,6 +465,11 @@ class DocsRootEffect(TempRepoCase):
             out = pre_output()
             assert out is not None
             self.assertIn("md_outside_docs", out["hookSpecificOutput"]["additionalContext"])
+
+
+def load_tests(loader, tests, pattern):
+    """Independent cases: run them in forked workers (see `ForkedSuite`)."""
+    return ForkedSuite(tests)
 
 
 if __name__ == "__main__":

@@ -27,13 +27,16 @@ Planned refactors that aren't urgent bugs but are worth doing deliberately, one 
 | [planner agent contradicts itself on where it may write (OPEN_QUESTIONS.md)](2026-11-13-planner-write-scope-contradiction.md) | Proposed |
 | [agent-workflow.md 13.1 says the hook is a no-op without an active run](2026-11-13-agent-workflow-13-1-outdated.md) | Proposed |
 | [agent-audit: no guard against interactive programs run through Bash](2026-11-13-audit-interactive-app-guard.md) | Proposed |
-| [agent-audit: strip_prefixes does not strip env, nice and nohup wrappers](2026-11-13-audit-strip-prefixes-wrappers.md) | Proposed |
-| [agent-audit: hook hardening (metrics file, run state size, timeouts)](2026-11-13-audit-hook-hardening.md) | Proposed |
-| [agent-audit: quote-blind SEGMENT_SPLIT splits inside quoted arguments](2026-11-13-audit-segment-split-quote-blind.md) | Proposed |
-| [agent-audit: nvim shell-execution forms not classified](2026-11-13-audit-nvim-shell-exec-unclassified.md) | Proposed |
-| [agent-audit: timeout parsing limits (locale strtod, nested unknown durations)](2026-11-13-audit-timeout-parsing-limits.md) | Proposed |
-| [agent-audit: nvim nesting depth cap reuses the docker_lifecycle deny](2026-11-13-audit-nvim-depth-cap-category.md) | Proposed |
+| [agent-audit: strip_prefixes does not strip env, nice and nohup wrappers](2026-11-13-audit-strip-prefixes-wrappers.md) | Merged into audit-shell-lexer |
+| [agent-audit: hook hardening (metrics file, run state size, timeouts)](2026-11-13-audit-hook-hardening.md) | Done |
+| [agent-audit: quote-blind SEGMENT_SPLIT splits inside quoted arguments](2026-11-13-audit-segment-split-quote-blind.md) | Merged into audit-shell-lexer |
+| [agent-audit: nvim shell-execution forms not classified](2026-11-13-audit-nvim-shell-exec-unclassified.md) | Merged into audit-shell-lexer |
+| [agent-audit: timeout parsing limits (locale strtod, nested unknown durations)](2026-11-13-audit-timeout-parsing-limits.md) | Done |
+| [agent-audit: nvim nesting depth cap reuses the docker_lifecycle deny](2026-11-13-audit-nvim-depth-cap-category.md) | Done |
 | [agent-audit: nvim -l ... --busted (lazy.nvim minit) not recognized as a Lua test runner](2026-11-13-audit-nvim-busted-minit-runner.md) | Proposed |
 | [agent-audit: PACKAGE_HINT treats ./spec and ./tests as package paths](2026-11-13-audit-package-hint-dot-slash.md) | Proposed |
 | [tdd skill: step 2 allows not-implemented throws, step 4 requires assertion failures](2026-11-13-tdd-stub-throw-rule.md) | Proposed |
-| [hooks tests: claude-hooks suite exceeds the 5 s target (8.4-8.8 s for 317 tests)](2026-11-13-hooks-tests-suite-slow.md) | Proposed |
+| [hooks tests: claude-hooks suite exceeds the 5 s target (about 6 s for 462 tests, goal under 5 s)](2026-11-13-hooks-tests-suite-slow.md) | Proposed (partly done by audit-hook-hardening) |
+| [agent-audit: shell lexer and parser for command positions (fails closed)](2026-11-13-audit-shell-lexer.md) | Proposed |
+| [agent-audit: hook compiled on every call (launcher with cached bytecode)](2026-11-13-audit-hook-launcher-performance.md) | Proposed |
+| [agent-audit: watchdog robustness notes](2026-11-13-audit-watchdog-robustness-notes.md) | Proposed |

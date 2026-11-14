@@ -279,6 +279,90 @@ class ReportSections(MetricsCase):
         self.assertIn("- runs: feat-a, feat-b", text)
 
 
+class UncertaintySection(MetricsCase):
+    """Cases MR1-MR5: "Parser uncertainty and hook health" (spec audit-hook-hardening, section 6)."""
+
+    HEAD = "Parser uncertainty and hook health"
+
+    def bash(self, event="PostToolUse", **kw) -> dict:
+        return ev(event, actor="main", categories=["container"], cmd=kw.pop("cmd", "x"), **kw)
+
+    def test_mr1_table_per_reason_counts_once(self):
+        with self.subTest(case="MR1"):
+            events = [
+                self.bash(cmd="a", uncertainty=["prefix_readings"], flags=["parse_uncertain"]),
+                self.bash("PreToolUse", cmd="b", uncertainty=["prefix_readings"], decision="warn", decision_category="git_commit"),
+                self.bash(cmd="b", uncertainty=["prefix_readings", "shlex_fallback"]),
+                self.bash("PreToolUse", cmd="c", uncertainty=["readings_cap"], decision="block", decision_category="unclassified_command"),
+                self.bash("PreToolUse", cmd="d", uncertainty=["prefix_readings"], decision="ask", decision_category="git_push"),
+            ]
+            body = section(self.report(events), self.HEAD)
+            self.assertIn("| prefix_readings | 3 | 0 | 1 | ", body)
+            self.assertIn("| shlex_fallback | 1 | 0 | 0 | ", body)
+            self.assertIn("| readings_cap | 1 | 1 | 0 | main: `c`", body)
+
+    def test_mr1_an_approved_ask_is_counted_once(self):
+        """The ask of PreToolUse and the PostToolUse of the same action are one action: only the Post counts."""
+        with self.subTest(case="MR1"):
+            events = [
+                self.bash("PreToolUse", cmd="git push", session="s", uncertainty=["prefix_readings"], decision="ask", decision_category="git_push"),
+                self.bash(cmd="git push", session="s", uncertainty=["prefix_readings"]),
+                self.bash("PreToolUse", cmd="refused", session="s", uncertainty=["prefix_readings"], decision="ask", decision_category="git_push"),
+                self.bash("PreToolUse", cmd="git push", session="other", uncertainty=["prefix_readings"], decision="ask", decision_category="git_push"),
+            ]
+            body = section(self.report(events), self.HEAD)
+            self.assertIn("| prefix_readings | 3 | 0 | 2 | ", body)  # post + the refused ask + the other session's ask
+
+    def test_mr2_false_positive_candidates(self):
+        with self.subTest(case="MR2"):
+            events = [
+                self.bash("PreToolUse", cmd="reads", uncertainty=["prefix_readings"], decision="block", decision_category="docker_lifecycle"),
+                self.bash("PreToolUse", cmd="cap", uncertainty=["readings_cap"], decision="block", decision_category="unclassified_command"),
+                self.bash("PreToolUse", cmd="loose", uncertainty=["loose_assignment_truncated"], decision="ask", decision_category="git_push"),
+                self.bash("PreToolUse", cmd="plain", decision="block", decision_category="docker_lifecycle"),
+            ]
+            body = section(self.report(events), self.HEAD)
+            fp = body.split("**False-positive candidates**")[1].split("**False-negative")[0]
+            self.assertIn("(3)", fp)
+            self.assertIn("`reads`", fp)
+            self.assertIn("`loose`", fp)
+            self.assertIn("`cap`", fp)
+            self.assertNotIn("`plain`", fp)
+
+    def test_mr3_false_negative_candidates(self):
+        with self.subTest(case="MR3"):
+            events = [
+                self.bash(cmd="escaped", uncertainty=["deny_token_unmatched"], flags=["parse_uncertain"]),
+                self.bash("PreToolUse", cmd="denied", uncertainty=["deny_token_unmatched"], decision="block", decision_category="docker_lifecycle"),
+            ]
+            body = section(self.report(events), self.HEAD)
+            fn = body.split("**False-negative candidates**")[1].split("**Hook health**")[0]
+            self.assertIn("(1)", fn)
+            self.assertIn("`escaped`", fn)
+            self.assertNotIn("`denied`", fn)
+
+    def test_mr4_hook_health(self):
+        with self.subTest(case="MR4"):
+            events = [
+                self.bash("PreToolUse", cmd="slow", flags=["analysis_timeout"], decision="block", decision_category="analysis_timeout"),
+                self.bash(cmd="e", uncertainty=["classifier_error"], error="ValueError"),
+                self.bash(cmd="t", run_tags="timeout", in_run=False),
+            ]
+            body = section(self.report(events), self.HEAD)
+            self.assertIn("analysis_timeout 1, analysis_crash 0, classifier_error 1, run_tags timeout 1", body)
+
+    def test_mr5_none_without_reasons(self):
+        with self.subTest(case="MR5"):
+            body = section(self.report([self.bash(cmd="plain")]), self.HEAD)
+            self.assertIn("None.", body)
+            self.assertNotIn("False-positive", body)
+
+    def test_section_sits_after_enforcement_decisions(self):
+        text = self.report([self.bash("PreToolUse", decision="block", decision_category="x"), self.bash(uncertainty=["shlex_fallback"])])
+        self.assertLess(text.index("## Enforcement decisions"), text.index(f"## {self.HEAD}"))
+        self.assertLess(text.index(f"## {self.HEAD}"), text.index("## Flags"))
+
+
 class Cli(MetricsCase):
     """Cases L1-L7: `main` argument handling, with `METRICS_DIR` patched to a temp dir."""
 

@@ -342,5 +342,65 @@ class FailSafeMarkersAnywhere(unittest.TestCase):
                 self.assertIn(LIFECYCLE, flags)
 
 
+BODY = "docker compose up"
+
+
+def _doc(prefix, body=BODY, delim="EOF"):
+    return f"{prefix}\n{body}\n{delim}"
+
+
+class HeredocCleanPrefix(unittest.TestCase):
+    """Spec audit-hook-hardening, section 4 (HS1-HS7): a body is data only when the prefix reads one clean way."""
+
+    def assertClassified(self, command):
+        self.assertIn(LIFECYCLE, classify(command)[1], command)
+
+    def assertStripped(self, command):
+        self.assertNotIn(LIFECYCLE, classify(command)[1], command)
+
+    def test_hs1_substitution_in_the_prefix_keeps_the_body(self):
+        for prefix in ("sh -s $(true) cat <<'EOF'", 'bash -s "$(true)" cat <<EOF', "sh -s $(echo) tee x <<EOF",
+                       "x=$(true) cat <<EOF"):
+            with self.subTest(prefix=prefix):
+                self.assertClassified(_doc(prefix))
+
+    def test_hs2_group_prefix_and_restored_segment_start(self):
+        self.assertClassified(_doc("(sh -s) cat <<EOF"))
+        cmd = ("git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)\" && cat <<X\n" + BODY + "\nX")
+        categories, flags = classify(cmd)
+        self.assertEqual(flags, ["git_commit"])
+
+    def test_hs3_timeout_prefix(self):
+        self.assertClassified(_doc('timeout -s KILL "$T" cat <<EOF'))
+        self.assertStripped(_doc("timeout 5 cat <<EOF"))
+
+    def test_hs4_dollar_up_to_the_head(self):
+        for prefix in ("$X cat <<EOF", "A=$B cat <<EOF", '"$C" <<EOF'):
+            with self.subTest(prefix=prefix):
+                self.assertClassified(_doc(prefix))
+        for prefix in ("cat > $SP/x.sh <<EOF", 'tee "$F" <<EOF'):
+            with self.subTest(prefix=prefix):
+                self.assertStripped(_doc(prefix))
+
+    def test_hs5_dollar_anywhere_under_git_or_gh(self):
+        self.assertClassified(_doc("git $X commit -F - <<EOF"))
+        self.assertClassified(_doc('gh pr create --title "$T" -F - <<EOF'))
+        self.assertStripped(_doc("git commit -F - <<EOF"))
+
+    def test_hs6_outer_text_of_a_substitution(self):
+        self.assertStripped(_sub("git commit -m "))
+        self.assertStripped(_sub("gh pr create --title t --body "))
+        self.assertClassified("git commit -m \"$X$(cat <<'EOF'\n" + BODY + "\nEOF\n)\"")
+
+    def test_hs7_clean_sink_tokens(self):
+        clean = audit._clean_sink_tokens
+        self.assertIsNone(clean("cat 'x"))
+        self.assertIsNone(clean("timeout zz cat"))
+        self.assertEqual(clean("FOO=1 cat > $F"), ["cat", ">", "$F"])
+        self.assertIsNone(clean("A=$B cat"))
+        self.assertIsNone(clean("git $X commit", any_dollar=True))
+        self.assertEqual(clean("git $X commit"), ["git", "$X", "commit"])
+
+
 if __name__ == "__main__":
     unittest.main()

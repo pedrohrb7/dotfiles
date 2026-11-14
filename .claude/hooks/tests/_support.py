@@ -1,9 +1,10 @@
 """Shared infrastructure for the agent-audit hook test suite.
 
 Everything is stdlib. Commands such as `docker compose up` or `git push` appear only as strings;
-the only processes started are `git init`, `git rev-parse` (by the hook itself) and the hook copy
-run by `HookProcess`.
+the only processes started are `git init` (once, copied by `init_repo`), `git rev-parse` (by the hook itself) and
+the hook copy run by `HookProcess`. `ForkedSuite` and `HookProcess.run_many` keep the suite inside its time budget.
 """
+import atexit
 import copy
 import io
 import json
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +46,8 @@ TEST_CONFIG: dict = {
         "design_director_write_outside": _BLOCK,
         "command_too_long": _BLOCK,
         "analysis_timeout": _BLOCK,
+        "unclassified_command": _BLOCK,
+        "parse_uncertain": _AUDIT,
         "git_commit": _ASK,
         "git_push": _ASK,
         "docker_build": _AUDIT,
@@ -63,6 +67,26 @@ def config(**overrides) -> dict:
     out = copy.deepcopy(TEST_CONFIG)
     out.update(copy.deepcopy(overrides))
     return out
+
+
+def _make_git_template() -> Path:
+    """The real `git init` (no template: only HEAD, config, objects and refs) in a private temp dir, once, when
+    this module is imported (before the forked workers of `ForkedSuite` exist, which skip `atexit`)."""
+    base = Path(tempfile.mkdtemp(prefix="agent-audit-tests-gitdir-"))
+    atexit.register(shutil.rmtree, base, ignore_errors=True)
+    subprocess.run(["git", "init", "-q", "--template=", str(base)], check=True)
+    return base / ".git"
+
+
+_GIT_TEMPLATE = _make_git_template()
+
+
+def init_repo(path) -> None:
+    """Make `path` a git repository, like `git init -q <path>`, without starting a process each time: a copy of
+    the `.git` of `_GIT_TEMPLATE`. The hook still runs the real `git rev-parse` against the result."""
+    target = Path(path)
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(_GIT_TEMPLATE, target / ".git")
 
 
 def assert_no_git_root(path) -> None:
@@ -101,7 +125,7 @@ class TempRepoCase(unittest.TestCase):
     def setUp(self):
         self.repo = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.repo, ignore_errors=True)
-        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        init_repo(self.repo)
         (self.repo / ".claude" / "runs").mkdir(parents=True)
 
     def write_run(self, **extra):
@@ -117,7 +141,7 @@ class TempRepoCase(unittest.TestCase):
         d = Path(tempfile.mkdtemp(prefix=prefix))
         self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         if git:
-            subprocess.run(["git", "init", "-q", str(d)], check=True)
+            init_repo(d)
         else:
             assert_no_git_root(d)
         return d
@@ -198,6 +222,30 @@ def call_main(payload: dict, config: dict | None = None, metrics_dir: Path | Non
     return HookResult(output=output, records=records)
 
 
+def _parallelism() -> int:
+    return max(1, min(8, os.cpu_count() or 1))
+
+
+class _Slots:
+    """A counting semaphore that works across threads and across forked processes: tokens in a pipe.
+
+    Bounds the hook processes alive at once, whichever worker or thread starts them (`run_many` and `ForkedSuite`
+    nest): at most one per core, so the short deadlines of the watchdog cases keep a core each and do not flake."""
+
+    def __init__(self, count: int):
+        self.read_fd, self.write_fd = os.pipe()
+        os.write(self.write_fd, b"x" * count)
+
+    def __enter__(self):
+        os.read(self.read_fd, 1)
+
+    def __exit__(self, *exc):
+        os.write(self.write_fd, b"x")
+
+
+_PROCESS_SLOTS = _Slots(_parallelism())
+
+
 class HookProcess:
     """The hook as a real process, run from a private copy with its own config, metrics and HOME."""
 
@@ -218,6 +266,16 @@ class HookProcess:
         elif config is not None:
             (self.dir / "agent-audit.json").write_text(json.dumps(config), encoding="utf-8")
 
+    def patch_source(self, old: str, new: str) -> None:
+        """Replace a snippet of the private copy of the hook (never the versioned file).
+
+        Fails when `old` does not appear exactly once, so a refactor cannot turn the patch into a no-op."""
+        text = self.script.read_text(encoding="utf-8")
+        found = text.count(old)
+        if found != 1:
+            raise AssertionError(f"patch_source: {old!r} appears {found} times in the hook copy, expected exactly 1")
+        self.script.write_text(text.replace(old, new), encoding="utf-8")
+
     def run(self, stdin: "dict | str", cwd, extra_env: "dict[str, str] | None" = None) -> CompletedProcess:
         data = stdin if isinstance(stdin, str) else json.dumps(stdin)
         env = {
@@ -228,10 +286,165 @@ class HookProcess:
             "GIT_CONFIG_NOSYSTEM": "1",
         }
         env.update(extra_env or {})
-        return subprocess.run(
-            [sys.executable, "-I", "-B", str(self.script)],
-            input=data, capture_output=True, text=True, cwd=str(cwd), env=env, timeout=self.TIMEOUT,
-        )
+        with _PROCESS_SLOTS:
+            return subprocess.run(
+                [sys.executable, "-I", "-B", str(self.script)],
+                input=data, capture_output=True, text=True, cwd=str(cwd), env=env, timeout=self.TIMEOUT,
+            )
 
     def records(self, session: str = "t") -> list[dict]:
         return read_jsonl(self.metrics_dir / f"{session}.jsonl")
+
+    @staticmethod
+    def run_many(items: "list[tuple[HookProcess, list[tuple]]]") -> "list[list[CompletedProcess]]":
+        """Run independent sessions in parallel; the runs of one session stay in order.
+
+        Each item is `(hook, steps)`, with `hook` its own `HookProcess` (own private copy, metrics and HOME, so the
+        order of its records is not mixed with another session's) and `steps` a list of `(stdin, cwd[, extra_env])`
+        run one after the other. Returns, per item and in the same order, the `CompletedProcess` of each step.
+        Nothing is asserted here: the caller checks the results in the test thread (so `subTest` stays usable). A
+        failing run (for instance `TimeoutExpired`) is raised when the results are collected."""
+        def session(item):
+            hook, steps = item
+            return [hook.run(*step) for step in steps]
+
+        if not items:
+            return []
+        with ThreadPoolExecutor(max_workers=min(_parallelism(), len(items))) as pool:
+            return list(pool.map(session, items))
+
+
+class RemoteFailure(Exception):
+    """A failure or error that happened in a `ForkedSuite` worker: its message is the worker's formatted traceback."""
+
+
+class _Recorder(unittest.TestResult):
+    """The result a `ForkedSuite` worker runs a test against: keeps plain, picklable events (the traceback already
+    formatted as text) to be replayed on the real result by the parent."""
+
+    def __init__(self):
+        super().__init__()
+        self.events: list[tuple] = []
+
+    def addSuccess(self, test):
+        self.events.append(("addSuccess",))
+
+    def addSkip(self, test, reason):
+        self.events.append(("addSkip", reason))
+
+    def addFailure(self, test, err):
+        self.events.append(("addFailure", self._exc_info_to_string(err, test)))
+
+    def addError(self, test, err):
+        self.events.append(("addError", self._exc_info_to_string(err, test)))
+
+    def addSubTest(self, test, subtest, err):
+        if err is not None:  # a passing subtest reports nothing; the test's own outcome follows
+            kind = "addFailure" if issubclass(err[0], test.failureException) else "addError"
+            self.events.append((kind, f"{subtest}\n{self._exc_info_to_string(err, test)}"))
+
+    def addExpectedFailure(self, test, err):
+        self.events.append(("addExpectedFailure", self._exc_info_to_string(err, test)))
+
+    def addUnexpectedSuccess(self, test):
+        self.events.append(("addUnexpectedSuccess",))
+
+
+class ForkedSuite(unittest.TestSuite):
+    """Runs the tests of a module in forked worker processes and reports them in order, in the process that ran it.
+
+    For modules whose tests are independent of each other (own temp dirs; patches and signals stay inside a worker,
+    which is a separate process): no class or module fixtures. A module that has any is not forked: the suite
+    falls back to the normal runner, which runs the fixtures. The workers take the
+    next test from a shared queue (a pipe of indexes), run it against a `_Recorder` and send the events back in a file;
+    the parent replays them on the real result test by test, so the counts, names and tracebacks are the usual ones
+    (a traceback is the worker's text inside a `RemoteFailure`). A worker that dies leaves its tests as errors.
+
+    The parent is single-threaded when it forks (the hook forks as well, in `call_main` tests)."""
+
+    def run(self, result, debug=False):
+        tests = list(_leaves(self))
+        if any(_has_fixtures(test) for test in tests):
+            return super().run(result, debug)  # the normal runner runs the class and module fixtures
+        if not tests:
+            return result
+        workers = min(_parallelism(), len(tests))
+        out_dir = Path(tempfile.mkdtemp(prefix="agent-audit-tests-forked-"))
+        try:
+            queue_r, queue_w = os.pipe()
+            os.write(queue_w, b"".join(i.to_bytes(2, "big") for i in range(len(tests))))
+            os.close(queue_w)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            pids = []
+            for k in range(workers):
+                pid = os.fork()
+                if pid == 0:  # worker: never returns, and skips the parent's atexit handlers
+                    code = 1
+                    try:
+                        _work(tests, queue_r, out_dir / f"{k}.json")
+                        code = 0
+                    finally:
+                        for stream in (sys.stdout, sys.stderr):  # os._exit skips the interpreter's flush
+                            try:
+                                stream.flush()
+                            except Exception:
+                                pass
+                        os._exit(code)
+                pids.append(pid)
+            os.close(queue_r)
+            for pid in pids:
+                os.waitpid(pid, 0)
+            events: dict[int, list] = {}
+            for k in range(workers):
+                try:
+                    with open(out_dir / f"{k}.json", encoding="utf-8") as fh:
+                        events.update({int(i): ev for i, ev in json.load(fh).items()})
+                except (OSError, ValueError):
+                    pass  # that worker's tests are reported as missing below
+        finally:
+            shutil.rmtree(out_dir, ignore_errors=True)
+        for i, test in enumerate(tests):
+            result.startTest(test)
+            try:
+                for name, *args in events.get(i, [("addError", "the forked worker died before reporting this test")]):
+                    if name in ("addFailure", "addError", "addExpectedFailure"):
+                        err = RemoteFailure(args[0])
+                        getattr(result, name)(test, (RemoteFailure, err, None))
+                    else:
+                        getattr(result, name)(test, *args)
+            finally:
+                result.stopTest(test)
+        return result
+
+
+def _has_fixtures(test) -> bool:
+    """True when the test's class has class fixtures or its module has `setUpModule` / `tearDownModule`."""
+    cls = type(test)
+    if cls.setUpClass.__func__ is not unittest.TestCase.setUpClass.__func__ or \
+            cls.tearDownClass.__func__ is not unittest.TestCase.tearDownClass.__func__:
+        return True
+    module = sys.modules.get(cls.__module__)
+    return module is not None and (hasattr(module, "setUpModule") or hasattr(module, "tearDownModule"))
+
+
+def _work(tests, queue_fd: int, out_path: Path) -> None:
+    """Body of a `ForkedSuite` worker: take indexes until the queue is empty, run them, save the events."""
+    events: dict[int, list] = {}
+    try:
+        while len(raw := os.read(queue_fd, 2)) == 2:
+            index = int.from_bytes(raw, "big")
+            recorder = _Recorder()
+            tests[index].run(recorder)
+            events[index] = recorder.events  # plain strings only: JSON
+    finally:
+        with open(out_path, "w", encoding="utf-8") as fh:
+            json.dump(events, fh)
+
+
+def _leaves(suite):
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            yield from _leaves(item)
+        else:
+            yield item

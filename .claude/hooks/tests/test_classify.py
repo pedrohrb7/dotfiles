@@ -1,4 +1,4 @@
-"""Command classification of agent-audit.py: classify_command and strip_prefixes.
+"""Command classification of agent-audit.py: classify_command (and the readings behind it).
 
 Source: docs/features/design-director/spec.md (Testing, cases C1-C37) and
 docs/features/audit-hook-test-suite/spec.md (Testing, cases X1-X14) and
@@ -12,7 +12,7 @@ import time
 import unittest
 from unittest import mock
 
-from ._support import audit
+from ._support import ForkedSuite, audit
 
 classify = audit.classify_command
 
@@ -325,14 +325,17 @@ class LuaCommands(unittest.TestCase):
                 self.assertIn("docker_lifecycle", result[1])
 
     def test_nesting_deeper_than_the_cap_fails_closed(self):
-        """LR12: shell escapes nested 4 levels deep are no longer dropped silently."""
+        """LR12: shell escapes nested 4 levels deep are no longer dropped silently; since the audit-hook-hardening
+        spec they are blocked as unclassified_command, not as a docker lifecycle command."""
         command = "docker ps"
         for _ in range(4):
             command = "nvim -c " + shlex.quote("!" + command)
         categories, flags = classify(command)
-        self.assertIn("nested_shell_unclassified", flags)
-        self.assertIn("docker_lifecycle", flags)
-        self.assertIn("docker-lifecycle", categories)
+        self.assertIn("unclassified_command", flags)
+        self.assertIn("unclassified", categories)
+        self.assertNotIn("docker_lifecycle", flags)
+        self.assertNotIn("docker-lifecycle", categories)
+        self.assertEqual(audit.analyze_command(command).uncertainty, ["nested_shell_depth"])
 
     def test_nesting_within_the_cap_is_still_classified(self):
         command = "docker restart x"
@@ -573,6 +576,11 @@ class HeredocOpenerBound(unittest.TestCase):
         with mock.patch.object(audit, "_is_data_sink", wraps=audit._is_data_sink) as sink:
             audit.strip_heredoc_bodies("cat <<a\nx\na\ncat <<b\ny\nb\n")
         self.assertEqual(sink.call_count, 2)
+
+
+def load_tests(loader, tests, pattern):
+    """Independent cases: run them in forked workers (see `ForkedSuite`)."""
+    return ForkedSuite(tests)
 
 
 if __name__ == "__main__":

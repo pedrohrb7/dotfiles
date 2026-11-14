@@ -26,3 +26,4 @@ Neste repo (dotfiles), o plan de uma etapa da config vive no `.claude/agent-work
 | [skills-docs-root](skills-docs-root/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-11-skills-configurable-docs-root.md)) | Implemented ([spec.md](skills-docs-root/spec.md)) | 2026-11-13 |
 | [audit-md-outside-docs](audit-md-outside-docs/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-11-audit-md-outside-docs-false-positive.md)) | Implemented ([spec.md](audit-md-outside-docs/spec.md)) | 2026-11-13 |
 | [lua-agent](lua-agent/) | Implemented ([agent-workflow.md, 15.2](../../agent-workflow.md#152-etapa-i---agent-lua-adendo-2026-11-12)) | Implemented ([spec.md](lua-agent/spec.md)) | 2026-11-13 |
+| [audit-hook-hardening](audit-hook-hardening/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-13-audit-hook-hardening.md)) | Implemented ([spec.md](audit-hook-hardening/spec.md)) | 2026-11-13 |

@@ -727,6 +727,7 @@ Sem a flag, nada muda: o stack agent escreve código e testes da task, como na s
 - **Com run ativo**, ele compara:
   - caminho escrito x `allowed_paths` de qualquer task em execução (`running_tasks`, mais a `current_task`) + `approved_scope` aprovado dessas tasks + uma lista sempre permitida (lockfiles, diretórios de migration, snapshots de teste, arquivos gerados por ferramenta);
   - comando Bash x mapa de comandos Docker (10.6) e regras de commit (4.1).
+- *Adendo 2026-11-13 (feature `audit-hook-hardening`):* a análise de Bash, escritas de arquivo e tools de browser roda num **processo filho** (`fork` + `socketpair`) com prazo duro; o pai só decide, imprime e grava. O filho responde em duas linhas JSON (análise, depois as tags do run), lidas com teto de 1 MiB; no `PreToolUse` ele espera um byte de "go" do pai antes de marcar o run. É líder do próprio grupo de processos: o pai o encerra com `killpg(SIGKILL)` (alcança os `git` netos) e um alarme de autodestruição o encerra se o pai falhar. Sem resposta no prazo: `analysis_timeout`; filho morto ou resposta inválida: `unclassified_command` (motivo `analysis_crash`). Se `fork` ou `socketpair` falham, vale o `SIGALRM` em processo. Toda leitura e gravação de arquivo do hook é limitada (config, run states, métricas) e o processo termina com `os._exit(0)` depois de descarregar a saída. Detalhes em 13.8 e no `README.md` dos hooks.
 
 ### 13.2 Modos
 
@@ -744,6 +745,8 @@ Sem a flag, nada muda: o stack agent escreve código e testes da task, como na s
 4. **Etapa H** (implementada, 15.1, 13.5): categoria nova `design_system_write_by_other` em `warn` (escrita em um `DESIGN_SYSTEM.md` por quem não é `design-director` nem a sessão principal) e categoria nova `design_director_write_outside` em `block` (qualquer escrita do `design-director` que não seja um `DESIGN_SYSTEM.md`); o `design-director` fica isento de `md_outside_docs` só para esse arquivo. A promoção da `design_system_write_by_other` a `block` segue a mesma regra dos dados.
 
 *Adendo 2026-11-13 (feature `audit-md-outside-docs`):* o falso positivo S5 do `md_outside_docs` está resolvido (ver 13.5, 13.7 e a spec da feature) e a flag está pronta para a análise de promoção a `block` do item 3. A promoção segue como decisão posterior, que exige dados de uso real.
+
+*Adendo 2026-11-13 (feature `audit-hook-hardening`):* o corpo de um heredoc só é dado se o **prefixo estiver limpo**: o texto antes do sink tem uma única leitura, sem fallback do shlex e, para `git`/`gh`, sem `$` (para `cat`/`tee`, `$` depois da cabeça é aceito, então `cat > $SP/x.sh <<EOF` continua sink); no `$(cat <<EOF)` o texto externo não pode ter `$`. Fora disso o corpo é classificado como comandos e, havendo leitura `cat`/`tee`/`git`/`gh`, o motivo `heredoc_unclean_prefix` (nível A, 13.8) é registrado. Ver 13.8.
 
 *Adendo 2026-11-13 (etapa I, feature `lua-agent`):* duas categorias novas nascem direto em `block`, por serem guardas do próprio classificador e não regras de fluxo: `command_too_long` e `analysis_timeout` (13.6, adendo; 15.2, adendo). Aprovadas pelo usuário durante a revisão.
 
@@ -818,7 +821,7 @@ Todo o resto (`bash`, `sh`, `python3`, `... | bash`, `eval`, `xargs`, `cat <<EOF
 
 **Testes:** `hooks/tests/` (`unittest` da biblioteca padrão), suite `claude-hooks` da tabela `Test suites` do `CLAUDE.md` da raiz do repo: `python3 -I -B -m unittest discover -s .claude/hooks/tests -t .claude/hooks`, a partir de `~/dotfiles` (`-I -B` isola do ambiente e não cria `__pycache__`).
 
-*Adendo 2026-11-13 (etapa I, feature `lua-agent`):* o classificador reconhece comandos Lua (busted, `luarocks test`, `nvim --headless` com plenary ou mini.test, tasks do mise, luacheck, selene, stylua, treefmt) e classifica os shell escapes do Neovim (`-c`, `--cmd`, `+`: `!`, `:!`, `silent !`, `w !`, `r !`) até 3 níveis de aninhamento (além disso, falha fechada com a flag `nested_shell_unclassified`). `strip_prefixes` remove, para toda stack, `timeout [opções] <duração>` (qualquer forma GNU; ilegível, a leitura falha fechada), `mise exec|x [flags] --` e o caminho de `busted`, `luacheck`, `selene`, `stylua` e `nvim`. Duas categorias novas em `block`, para todo ator: `command_too_long` (comando Bash acima de 16384 caracteres) e `analysis_timeout` (guarda de 7 s de relógio; `AGENT_AUDIT_ANALYSIS_TIMEOUT` só em testes, só baixa o limite). Mais de 32 abridores de heredoc (`MAX_HEREDOC_OPENERS`) deixam o comando classificado como comandos, não como dado. A suite `claude-hooks` tem 317 testes. Ver 15.2 (adendo) e a spec da feature `lua-agent`.
+*Adendo 2026-11-13 (etapa I, feature `lua-agent`):* o classificador reconhece comandos Lua (busted, `luarocks test`, `nvim --headless` com plenary ou mini.test, tasks do mise, luacheck, selene, stylua, treefmt) e classifica os shell escapes do Neovim (`-c`, `--cmd`, `+`: `!`, `:!`, `silent !`, `w !`, `r !`) até 3 níveis de aninhamento (além disso, falha fechada: `unclassified_command`, motivo `nested_shell_depth`; a flag `nested_shell_unclassified` deixou de existir, ver 13.8). `strip_prefixes` (hoje `command_readings`, ver 13.8) remove, para toda stack, `timeout [opções] <duração>` (qualquer forma GNU; ilegível, a leitura falha fechada), `mise exec|x [flags] --` e o caminho de `busted`, `luacheck`, `selene`, `stylua` e `nvim`. Duas categorias novas em `block`, para todo ator: `command_too_long` (comando Bash acima de 16384 caracteres) e `analysis_timeout` (guarda de 7 s de relógio; `AGENT_AUDIT_ANALYSIS_TIMEOUT` só em testes, só baixa o limite). Mais de 32 abridores de heredoc (`MAX_HEREDOC_OPENERS`) deixam o comando classificado como comandos, não como dado. A suite `claude-hooks` tem 317 testes. Ver 15.2 (adendo) e a spec da feature `lua-agent`.
 
 > 💬
 
@@ -831,6 +834,18 @@ A raiz que governa uma escrita é a raiz git do `cwd` da sessão (onde mora o ru
 - **`out_of_scope_write` fora do repositório:** um ator de escopo fixo (implementers, `quality-fixer`, `test-writer`) em um run só escreve fora se o alvo casar com um glob **absoluto** aprovado em `approved_scope`, do diretório canônico (casado literalmente após expandir `~`, sem resolver symlinks: escrever por um alias symlink é sinalizado), ou for scratch (`<tempdir>/claude-*` ou `/tmp/claude-*`). Globs relativos e a lista sempre permitida (`ALWAYS_ALLOWED`, convenções do repositório) nunca cobrem caminhos fora dele. *Adendo 2026-11-12 (feature `audit-scratch-exemption`):* o scratch passou a ser só o scratchpad da sessão, campo `scratchpad_dir` do payload (estritamente dentro dele, comparado como veio, sem resolver); sem o campo, sem isenção. O registro ganha `scratch` (`match`, `no-match`, `unavailable`) e o relatório de métricas separa os quatro casos.
 - **`md_outside_docs` (adendo 2026-11-13, feature `audit-md-outside-docs`):** não vale para a sessão principal nem para o `docs-writer`; para agents segue a regra acima (só `.md` novo, dentro do repositório e fora da raiz de docs, com as isenções de 13.5).
 - **Falha fechada:** caminho que não resolve mantém as flags de ator e, para ator de escopo fixo com run ativo (ou run que não dá para determinar), soma `out_of_scope_write`.
+
+### 13.8 Incerteza do parser: fail closed
+
+*Adendo 2026-11-13 (feature `audit-hook-hardening`).* Quando o classificador não tem certeza do que um comando é, ele nunca escolhe a leitura mais branda. Dois níveis:
+
+- **Nível A (registrar e classificar):** toda leitura possível é classificada e vale a mais estrita (`command_readings`, que substituiu `strip_prefixes`: `timeout`, `mise exec` e o resto são passos de prefixo por posição). O registro ganha `uncertainty` (lista de motivos) e a flag de auditoria `parse_uncertain` (`audit`, não nega). Motivos: `prefix_readings`, `shlex_fallback` (só quando as duas leituras diferem no texto e no que classificam), `heredoc_unclean_prefix` (13.6), `loose_assignment_truncated` (atribuição que abre aspa sem fechar; só registro, porque falhar fechado negou 91 comandos reais no replay), `git_root_unknown` (a raiz git do alvo de uma escrita não foi determinada; ator de escopo fixo recebe `out_of_scope_write`, os demais só registram).
+- **Nível B (negar):** o comando não pode ser lido. Categoria `block` `unclassified_command`, para todo ator, com a mensagem de simplificar ou dividir o comando. Motivos: `readings_cap` (mais de 8 inícios de comando distintos numa peça), `nested_shell_depth` (texto de shell do nvim além de 3 níveis), `classifier_error` (o classificador lançou; o registro guarda `error` com o nome da exceção, nunca a mensagem) e `analysis_crash` (o filho do watchdog morreu ou mandou resposta inválida, 13.1).
+- **Canário:** `deny_token_unmatched` (só registro) marca um token de container ou git fora de posição de comando seguido de verbo de lifecycle, push ou commit sem flag correspondente. Não nega; mostra a próxima forma que escapa.
+
+Registro: `uncertainty`, `error` e `run_tags` (`"timeout"` quando a marcação do run perdeu o prazo; o registro é gravado mesmo assim, com `in_run: false`). Atribuições `NOME=valor` e `NOME+=valor` antes do comando são puladas, com valor entre aspas. Lacunas conhecidas, para a spec `audit-shell-lexer`: expansões sem aspas com espaço no valor (`A=$(echo a b)`), separador entre aspas no valor (`A="x;y" ...`), `&`, subshells, `if`/`for`, `$(...)`, crases, `bash -c`, `eval`, `sudo -u`, `nohup`, `xargs`, `watch`.
+
+**Válvula de emergência:** se uma regra bloquear trabalho normal antes da correção, `"mode": "audit"` no `agent-audit.json` (só registra; a suite acusa no `test_config_contract.py`, de propósito) ou reverter a task.
 
 ---
 
@@ -867,6 +882,15 @@ O mesmo hook da seção 13 grava um JSONL por sessão (por exemplo em `~/.claude
 | Escritas em `DESIGN_SYSTEM.md` fora do `design-director` e da sessão principal (etapa H) | não medido | 0 |
 | Chamadas do `design-director` sem um sim do usuário antes (etapa H) | não existe | 0 |
 | Neovim interativo, app TUI ou app hospedeiro (wezterm, awesome, hammerspoon) aberto ou recarregado por agents (etapa I) | não existe | 0 |
+
+*Adendo 2026-11-13 (feature `audit-hook-hardening`): incerteza do parser.* O relatório do `agent-metrics.py` ganha a seção "Parser uncertainty and hook health", depois de "Enforcement decisions": tabela por motivo (registros, negados, perguntados, até 3 exemplos), **candidatos a falso positivo** (decisões block/ask com motivo de nível A e toda negação `unclassified_command`), **candidatos a falso negativo** (registros `deny_token_unmatched` sem decisão) e **saúde do hook** (`analysis_timeout`, `analysis_crash`, `classifier_error`, `run_tags: "timeout"`). Sem nada no período, diz "None.". Procedimento de ajuste:
+
+1. Antes do merge, a sessão principal reexecuta os comandos Bash das métricas locais nas duas versões do classificador; cada diferença é mudança pretendida ou defeito.
+2. Depois de cerca de uma semana nas duas máquinas: `agent-metrics.py --since <data do merge> --merge` e ler a seção.
+3. Falso positivo (trabalho legítimo bloqueado): a correção é uma regra de parse precisa para aquela forma (teste primeiro, entrada no backlog pelo `backlog-keeper`); nunca remover o fail-closed nem subir um teto às cegas (`MAX_READINGS` e `NVIM_MAX_DEPTH` são fixados por teste).
+4. Falso negativo: uma forma que escapou; vira entrada para a spec do lexer.
+5. Metas: zero negação de trabalho normal; `analysis_timeout`, `analysis_crash` e `classifier_error` em zero.
+6. Válvula de emergência: ver 13.8.
 
 A métrica "pedidos de escopo por run" também avalia o `specker`: se as tasks sempre precisam de arquivos extras, o campo `Files` da spec está sendo escrito estreito demais.
 
@@ -1482,7 +1506,7 @@ Registrado depois da implementação e da revisão; não reabre as decisões a-j
   - S3: busted, `luarocks test`, luacheck, selene, stylua e treefmt entram nas regex genéricas do hook; `mise` e `nvim` ganham ramos próprios; a dica `--filter` vale só para o busted (`pnpm --filter api test` segue `test-package`).
   - S4: formas do mise além da regra 46: `mise tasks run <task>`, o atalho `mise <task>`, várias tasks com `:::` e flags antes do nome da task; `mise test-tool` não é task.
   - S5: `luarocks test` é teste completo; `treefmt` (com ou sem `--ci`) é lint.
-  - S6: `timeout [opções] <duração>` é prefixo removido pelo `strip_prefixes` **para todas as stacks** (`timeout 5 git push` passa a ser `git-push`, `timeout 60 pytest` passa a ser `test-full`). O adendo A2 da spec estende a toda forma GNU, com falha fechada.
+  - S6: `timeout [opções] <duração>` é prefixo removido pelo `strip_prefixes` (hoje `command_readings`, ver 13.8) **para todas as stacks** (`timeout 5 git push` passa a ser `git-push`, `timeout 60 pytest` passa a ser `test-full`). O adendo A2 da spec estende a toda forma GNU, com falha fechada.
   - S7: `busted`, `luacheck`, `selene`, `stylua` e `nvim` chamados por caminho (`./.luarocks/bin/busted`) contam pelo nome do arquivo.
   - S8: marcadores de roteamento `.stylua.toml` e `selene.toml`, além dos da regra 38.
   - S9: a `design-system` ganha um bullet no passo 1: UI de Neovim ou TUI de terminal sem `DESIGN_SYSTEM.md` não abre pedido de escopo (evita o conflito com as regras 24 e 31).

@@ -4,7 +4,7 @@ Source: spec of the design-director feature (Testing, cases H), as reconstructed
 docs/features/audit-hook-test-suite/spec.md. Each case sends a PreToolUse and a PostToolUse with the
 same payload through `main()` in process, with TEST_CONFIG (enforce) unless the case says otherwise.
 """
-from ._support import TempRepoCase, assert_no_git_root, call_main, config, payload
+from ._support import ForkedSuite, TempRepoCase, assert_no_git_root, call_main, config, payload
 
 DS = "DESIGN_SYSTEM.md"
 DSBO = "design_system_write_by_other"
@@ -136,3 +136,8 @@ class DesignSystemRules(TempRepoCase):
                 assert_no_git_root(outside)
                 pre_payload, _ = self._payloads("design-director", tool, path, False, outside, outside)
                 self._assert_pre(call_main(pre_payload).output, pre, case)
+
+
+def load_tests(loader, tests, pattern):
+    """Independent cases: run them in forked workers (see `ForkedSuite`)."""
+    return ForkedSuite(tests)

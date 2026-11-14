@@ -13,4 +13,4 @@ This repo's docs live under `.claude/docs/`, not `docs/` (the folder is not link
 |---|---|---|---|---|
 | claude-hooks | .claude/hooks | unit + integration | `python3 -I -B -m unittest discover -s .claude/hooks/tests -t .claude/hooks` | task |
 
-Always run with `-I -B` (isolates from `PYTHON*` and the user site, and keeps `__pycache__` out of the repo). Narrow run of one module: the same command with `-p 'test_<module>.py'`.
+Always run with `-I -B` (isolates from `PYTHON*` and the user site, and keeps `__pycache__` out of the repo). Narrow run of one module: the same command with `-p 'test_<module>.py'`. One test: `-I` cannot run it by dotted name, so add `-k <name>` to the same command. The suite has 462 tests and takes about 6 s.

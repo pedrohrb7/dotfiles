@@ -7,17 +7,26 @@ exit code 0 and an empty stderr.
 """
 import json
 import os
+import shlex
 import shutil
+import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
-from ._support import HookProcess, config, declare_docs_root, payload, write_run_state
+from ._support import ForkedSuite, HookProcess, config, declare_docs_root, init_repo, payload, write_run_state
 
 MCP_SCREENSHOT = "mcp__playwright__browser_take_screenshot"
 RUN_ALLOWED = {"1": ["services/web/src/**"]}
 _DEFAULT = object()  # `hook()` default: the standard test config (None and str are meaningful values)
+
+
+def load_tests(loader, tests, pattern):
+    """Every case here is independent (own temp dir and private hook copy, only processes started): run them in
+    parallel. The report is the usual one, in order; see `ForkedSuite`."""
+    return ForkedSuite(tests)
 
 
 class ProcessCase(unittest.TestCase):
@@ -28,7 +37,7 @@ class ProcessCase(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
-        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        init_repo(self.repo)
 
     def hook(self, cfg: "dict | str | None | object" = _DEFAULT) -> HookProcess:
         """cfg: a dict (JSON), a str (raw file content), None (no file) or the default test config."""
@@ -51,6 +60,26 @@ class ProcessCase(unittest.TestCase):
         self.assertTrue(proc.stdout.endswith("\n"), repr(proc.stdout))
         self.assertEqual(len(proc.stdout.splitlines()), 1, repr(proc.stdout))
         return json.loads(proc.stdout)
+
+    def session(self, name: str, cfg: "dict | str | None | object" = _DEFAULT) -> "tuple[HookProcess, Path]":
+        """An independent hook copy (own metrics and HOME) and its own git repo, for `HookProcess.run_many`."""
+        base = self.tmp / name
+        repo = base / "repo"
+        repo.mkdir(parents=True)
+        init_repo(repo)
+        return HookProcess(base, config() if cfg is _DEFAULT else cfg), repo  # type: ignore[arg-type]
+
+    def parsed(self, proc: subprocess.CompletedProcess) -> dict | None:
+        """The contract every case shares (exit 0, empty stderr) and the hook's one JSON line, for a run that
+        `HookProcess.run_many` already made."""
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr, "")
+        return self.output(proc)
+
+    @staticmethod
+    def edit_step(repo, actor, rel, tool="Edit", event="PreToolUse") -> tuple:
+        """A `run_many` step: the payload of an edit of `<repo>/<rel>` and the cwd."""
+        return payload(event, tool, actor=actor, cwd=repo, tool_input={"file_path": str(repo / rel)}), repo
 
     def pre(self, hp, actor, tool, tool_input=None, event="PreToolUse", tool_response=None):
         return self.output(self.run_hook(hp, payload(
@@ -184,23 +213,28 @@ class ProcessContract(ProcessCase):
 
     def test_p6_design_system_rules_match_the_h_table(self):
         """H1, H3 and H5 of test_design_system.py, through the process."""
-        hp = self.hook()
+        (h1, r1), (h3, r3), (h5, r5) = self.session("h1"), self.session("h3"), self.session("h5")
+        write_run_state(r5, RUN_ALLOWED)  # H5 runs inside an /implement run; H1 and H3 do not
+        a1 = ("design-director", "DESIGN_SYSTEM.md")
+        a3 = ("design-director", "NOTES.md")
+        a5 = ("frontend-react", "DESIGN_SYSTEM.md")
+        res1, res3, res5 = HookProcess.run_many([
+            (h1, [self.edit_step(r1, *a1, tool="Write"), self.edit_step(r1, *a1, tool="Write", event="PostToolUse")]),
+            (h3, [self.edit_step(r3, *a3, tool="Write"), self.edit_step(r3, *a3, tool="Write", event="PostToolUse")]),
+            (h5, [self.edit_step(r5, *a5), self.edit_step(r5, *a5, event="PostToolUse")]),
+        ])
         with self.subTest(case="H1"):
-            args = ("design-director", "DESIGN_SYSTEM.md")
-            self.assertIsNone(self.edit(hp, *args, tool="Write"))
-            self.edit(hp, *args, tool="Write", event="PostToolUse")
-            self.assertEqual(self.post_flags(hp), [[]])
+            self.assertIsNone(self.parsed(res1[0]))
+            self.parsed(res1[1])
+            self.assertEqual(self.post_flags(h1), [[]])
         with self.subTest(case="H3"):
-            args = ("design-director", "NOTES.md")
-            self.assert_decision(self.edit(hp, *args, tool="Write"), "deny", "design_director_write_outside")
-            self.edit(hp, *args, tool="Write", event="PostToolUse")
-            self.assertEqual(self.post_flags(hp)[-1], ["design_director_write_outside", "md_outside_docs"])
+            self.assert_decision(self.parsed(res3[0]), "deny", "design_director_write_outside")
+            self.parsed(res3[1])
+            self.assertEqual(self.post_flags(h3)[-1], ["design_director_write_outside", "md_outside_docs"])
         with self.subTest(case="H5"):
-            self.write_run()
-            args = ("frontend-react", "DESIGN_SYSTEM.md")
-            self.assert_warn(self.edit(hp, *args), "design_system_write_by_other")
-            self.edit(hp, *args, event="PostToolUse")
-            self.assertEqual(self.post_flags(hp)[-1], ["design_system_write_by_other", "out_of_scope_write"])
+            self.assert_warn(self.parsed(res5[0]), "design_system_write_by_other")
+            self.parsed(res5[1])
+            self.assertEqual(self.post_flags(h5)[-1], ["design_system_write_by_other", "out_of_scope_write"])
 
     def test_p_dr_declared_docs_root_is_read_by_the_process(self):
         """Skills-docs-root spec, P-DR: the real process judges `kb/` as docs and `docs/` as code.
@@ -250,6 +284,11 @@ class AnalysisTimeoutProcess(ProcessCase):
         self.assertEqual(proc.stderr, "")  # never a stack trace
         return self.output(proc)
 
+    @staticmethod
+    def bash_step(repo, event, command, extra_env=None, actor="backend-node") -> tuple:
+        """A `run_many` step of `run_bash`."""
+        return payload(event, "Bash", actor=actor, cwd=repo, tool_input={"command": command}), repo, extra_env
+
     def test_pre_deny_with_analysis_timeout_and_the_record(self):
         hp = self.hook()
         out = self.run_bash(hp, "PreToolUse", "pytest tests/test_a.py", self.TINY)
@@ -281,24 +320,192 @@ class AnalysisTimeoutProcess(ProcessCase):
         self.assertEqual(self.post_flags(hp), [[]])
 
     def test_an_invalid_override_falls_back_to_the_default_limit(self):
-        for value in ("abc", "0", "-1", ""):
+        values = ("abc", "0", "-1", "")
+        sessions = [self.session(f"v{i}") for i in range(len(values))]
+        results = HookProcess.run_many([
+            (hp, [self.bash_step(repo, "PreToolUse", "pytest tests/test_a.py", {"AGENT_AUDIT_ANALYSIS_TIMEOUT": value})])
+            for value, (hp, repo) in zip(values, sessions)])
+        for value, [proc] in zip(values, results):
             with self.subTest(value=value):
-                out = self.run_bash(self.hook(), "PreToolUse", "pytest tests/test_a.py",
-                                    {"AGENT_AUDIT_ANALYSIS_TIMEOUT": value})
-                self.assertIsNone(out)
+                self.assertIsNone(self.parsed(proc))
 
     def test_huge_or_non_finite_overrides_are_clamped_never_a_silent_allow(self):
         """Round 5: inf / 1e300 / 1e10 made setitimer raise OverflowError and the hook allowed everything."""
-        for value in ("inf", "-inf", "nan", "1e300", "1e10"):
-            with self.subTest(value=value):
-                env = {"AGENT_AUDIT_ANALYSIS_TIMEOUT": value}
-                hp = self.hook()
-                out = self.run_bash(hp, "PreToolUse", "docker compose restart api", env)
-                self.assert_decision(out, "deny", "docker_lifecycle")
-                self.assertIsNone(self.run_bash(hp, "PreToolUse", "pytest tests/test_a.py", env))
-                self.assertIsNone(self.run_bash(hp, "PostToolUse", "pytest tests/test_a.py", env))
-                self.assertEqual(self.post_flags(hp)[-1], [])  # the hook is shared by the subtests
+        self.assert_clamped(("inf", "-inf", "nan"))
 
+    def test_huge_finite_overrides_are_clamped_never_a_silent_allow(self):
+        """Same, for the finite values (split in two tests so that no single test takes longer than 0.5 s)."""
+        self.assert_clamped(("1e300", "1e10"))
+
+    def assert_clamped(self, values):
+        sessions = [self.session(f"v{i}") for i in range(len(values))]
+        results = HookProcess.run_many([
+            (hp, [self.bash_step(repo, event, command, {"AGENT_AUDIT_ANALYSIS_TIMEOUT": value})
+                  for event, command in (("PreToolUse", "docker compose restart api"),
+                                         ("PreToolUse", "pytest tests/test_a.py"),
+                                         ("PostToolUse", "pytest tests/test_a.py"))])
+            for value, (hp, repo) in zip(values, sessions)])
+        for value, (hp, _), (deny, allow, post) in zip(values, sessions, results):
+            with self.subTest(value=value):
+                self.assert_decision(self.parsed(deny), "deny", "docker_lifecycle")
+                self.assertIsNone(self.parsed(allow))
+                self.assertIsNone(self.parsed(post))
+                self.assertEqual(self.post_flags(hp)[-1], [])
+
+
+class HardeningProcess(ProcessCase):
+    """Spec audit-hook-hardening: bounded I/O (Task 1: P-HH1, P-HH2) and uncertainty (Task 2: P-HH3-P-HH6)
+    through the real process."""
+
+    def timed_hook(self, hp, stdin):
+        start = time.monotonic()
+        proc = self.run_hook(hp, stdin)
+        self.assertLess(time.monotonic() - start, 2.0)
+        return proc
+
+    def test_p_hh1_a_fifo_as_the_metrics_file_blocks_nothing(self):
+        hp = self.hook()
+        hp.metrics_dir.mkdir(parents=True)
+        os.mkfifo(hp.metrics_dir / "t.jsonl")
+        pre = self.timed_hook(hp, payload("PreToolUse", "Bash", actor="backend-python", cwd=self.repo,
+                                          tool_input={"command": "docker compose restart api"}))
+        self.assert_decision(self.output(pre), "deny", "docker_lifecycle")
+        post = self.timed_hook(hp, payload("PostToolUse", "Bash", actor="backend-python", cwd=self.repo,
+                                           tool_input={"command": "pytest tests/test_a.py"}))
+        self.assertEqual(post.stdout, "")
+        # No record: the path is still the FIFO (reading it would block, so it is only stat'ed).
+        self.assertTrue(stat.S_ISFIFO(os.stat(hp.metrics_dir / "t.jsonl").st_mode))
+
+    def test_p_hh2_stray_and_huge_run_states_do_not_break_the_run_tags(self):
+        self.write_run()  # the valid state, feat-x.json
+        runs = self.repo / ".claude" / "runs"
+        (runs / "a.json").write_text("[]")
+        with open(runs / "b.json", "wb") as fh:
+            fh.truncate(50 * 1024 * 1024)
+        now = time.time() + 10
+        for name in ("a.json", "b.json"):
+            os.utime(runs / name, (now, now))  # both newer than the valid state
+        hp = self.hook()
+        for event in ("PreToolUse", "PostToolUse"):
+            stdin = payload(event, "Write", actor="frontend-react", cwd=self.repo,
+                            tool_input={"file_path": str(self.repo / "README.md")})
+            self.timed_hook(hp, stdin)
+        [record] = [r for r in hp.records() if r["event"] == "PostToolUse"]
+        self.assertIn("docs_write_by_implementer", record["flags"])
+        self.assertIn("out_of_scope_write", record["flags"])
+        self.assertEqual(record["area"], "code")
+        self.assertEqual(record["run"], "feat-x")
+
+    def bash_pre(self, hp, command):
+        return self.output(self.timed_hook(hp, payload("PreToolUse", "Bash", actor="backend-python", cwd=self.repo,
+                                                       tool_input={"command": command})))
+
+    def test_p_hh3_more_readings_than_the_cap_is_denied_as_unclassified(self):
+        hp = self.hook()
+        out = self.bash_pre(hp, "timeout a " * 9 + "docker restart x")
+        self.assert_decision(out, "deny", "unclassified_command")
+        [record] = hp.records()
+        self.assertEqual(record["uncertainty"], ["readings_cap"])
+        self.assertEqual(record["decision_category"], "unclassified_command")
+
+    def test_p_hh4_nvim_nested_four_levels_is_denied_as_unclassified(self):
+        command = "docker ps"
+        for _ in range(4):
+            command = "nvim -c " + shlex.quote("!" + command)
+        hp = self.hook()
+        self.assert_decision(self.bash_pre(hp, command), "deny", "unclassified_command")
+        [record] = hp.records()
+        self.assertEqual(record["uncertainty"], ["nested_shell_depth"])
+
+    def test_p_hh5_an_exception_in_the_classifier_is_denied_as_unclassified(self):
+        hp = self.hook()
+        hp.patch_source('    if not seg or seg.startswith("cd "):\n        return\n',
+                        '    raise RecursionError("probe")\n')
+        self.assert_decision(self.bash_pre(hp, "echo hi"), "deny", "unclassified_command")
+        [record] = hp.records()
+        self.assertEqual(record["uncertainty"], ["classifier_error"])
+        self.assertEqual(record["error"], "RecursionError")
+
+    def test_p_hh6_stacked_timeouts_no_longer_hide_the_command(self):
+        hp = self.hook()
+        self.assert_decision(self.bash_pre(hp, "timeout a " * 4 + "docker restart x"), "deny", "docker_lifecycle")
+
+    def test_p_hh7_a_substitution_in_the_prefix_does_not_hide_the_body(self):
+        hp = self.hook()
+        command = "sh -s $(true) cat <<'EOF'\ndocker restart x\nEOF"
+        self.assert_decision(self.bash_pre(hp, command), "deny", "docker_lifecycle")
+
+
+class WatchdogProcess(ProcessCase):
+    """Spec audit-hook-hardening, Task 4 (P-HH8-P-HH11): the fork watchdog through the real process. A failure is
+    patched into the private copy of the hook, at the first line of `_classify_segment`."""
+
+    SEGMENT_HEAD = '    if not seg or seg.startswith("cd "):\n        return\n'
+    # The classifier never ends (HH8): any limit gives the same result, so the smallest. The tagging never ends
+    # (HH10) but the analysis must finish in time: a margin over the fork and the analysis under load.
+    SHORT = {"AGENT_AUDIT_ANALYSIS_TIMEOUT": "0.05"}
+    TAGGING_STUCK = {"AGENT_AUDIT_ANALYSIS_TIMEOUT": "0.15"}
+
+    def run_timed(self, hp, event, command, env=None, actor="backend-python"):
+        stdin = payload(event, "Bash", actor=actor, cwd=self.repo, tool_input={"command": command})
+        start = time.monotonic()
+        proc = hp.run(stdin, self.repo, env)
+        elapsed = time.monotonic() - start
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr, "")
+        return self.output(proc), elapsed
+
+    def test_p_hh8_a_long_c_call_in_the_classifier_is_an_analysis_timeout(self):
+        hp = self.hook()
+        hp.patch_source(self.SEGMENT_HEAD, "    sum(range(10**12))\n" + self.SEGMENT_HEAD)
+        out, elapsed = self.run_timed(hp, "PreToolUse", "echo hi", self.SHORT)
+        self.assert_decision(out, "deny", "analysis_timeout")
+        self.assertLess(elapsed, 2.0)
+        [record] = hp.records()
+        self.assertEqual(record["flags"], ["analysis_timeout"])
+
+    def test_p_hh9_a_classifier_that_kills_the_process_is_an_analysis_crash(self):
+        hp = self.hook()
+        hp.patch_source(self.SEGMENT_HEAD, "    os._exit(3)\n" + self.SEGMENT_HEAD)
+        out, elapsed = self.run_timed(hp, "PreToolUse", "echo hi")
+        self.assert_decision(out, "deny", "unclassified_command")
+        self.assertLess(elapsed, 2.0)
+        [record] = hp.records()
+        self.assertEqual(record["uncertainty"], ["analysis_crash"])
+        self.assertEqual(record["decision_category"], "unclassified_command")
+
+    def test_p_hh10_a_stuck_git_in_the_tagging_still_records(self):
+        fake = self.tmp / "fakebin"
+        fake.mkdir()
+        (fake / "git").write_text("#!/bin/sh\nexec sleep 3\n", encoding="utf-8")
+        (fake / "git").chmod(0o755)
+        hp = self.hook()
+        env = {**self.TAGGING_STUCK, "PATH": f"{fake}:{os.environ.get('PATH', '/usr/bin:/bin')}"}
+        out, elapsed = self.run_timed(hp, "PostToolUse", "pytest tests/test_a.py", env)
+        self.assertIsNone(out)
+        self.assertLess(elapsed, 2.0)
+        [record] = hp.records()
+        self.assertIs(record["in_run"], False)
+        self.assertEqual(record["run_tags"], "timeout")
+        self.assertEqual(record["flags"], [])
+
+    def test_p_hh11_the_normal_path_keeps_its_contract(self):
+        hp = self.hook()
+        out, _ = self.run_timed(hp, "PreToolUse", "pytest tests/test_a.py")
+        self.assertIsNone(out)
+        out, _ = self.run_timed(hp, "PreToolUse", "docker compose restart api")
+        self.assert_decision(out, "deny", "docker_lifecycle")
+        self.assertIsNone(self.run_timed(hp, "PostToolUse", "pytest tests/test_a.py")[0])
+        self.assertEqual([r["event"] for r in hp.records()], ["PreToolUse", "PostToolUse"])
+
+    def test_wd8_whatever_the_child_writes_never_reaches_the_hook_output(self):
+        hp = self.hook()
+        hp.patch_source(self.SEGMENT_HEAD, (
+            '    print("noise")\n    try:\n        os.write(1, b"raw\\n")\n        os.write(2, b"raw\\n")\n'
+            "    except OSError:\n        pass\n") + self.SEGMENT_HEAD)
+        self.assertIsNone(self.run_timed(hp, "PreToolUse", "echo hi")[0])  # stdout empty and stderr empty
+        out, _ = self.run_timed(hp, "PreToolUse", "docker compose restart api")
+        self.assert_decision(out, "deny", "docker_lifecycle")  # exactly one JSON line, no noise around it
 
 if __name__ == "__main__":
     unittest.main()

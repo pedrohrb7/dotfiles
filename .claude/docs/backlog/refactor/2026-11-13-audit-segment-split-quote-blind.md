@@ -1,6 +1,6 @@
 # agent-audit: quote-blind SEGMENT_SPLIT splits inside quoted arguments
 
-- **Status:** Proposed
+- **Status:** Merged into [audit-shell-lexer](2026-11-13-audit-shell-lexer.md)
 - **Opened:** 2026-11-13
 - **Scope:** `.claude/hooks/agent-audit.py` (`SEGMENT_SPLIT`); affects every stack
 - **Source:** agent run: feature lua-agent, code-reviewer and security-reviewer (2026-11-13)

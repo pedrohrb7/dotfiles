@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
-from ._support import TempRepoCase, audit
+from ._support import ForkedSuite, TempRepoCase, audit, init_repo
 
 
 class ParallelTasksScope(TempRepoCase):
@@ -320,7 +320,7 @@ class OutsideRepoHardening(TempRepoCase):
         """self.repo has no run; self.repo/sub is its own repo with a run allowing only a/**."""
         sub = self.repo / "sub"
         sub.mkdir()
-        subprocess.run(["git", "init", "-q", str(sub)], check=True)
+        init_repo(sub)
         runs = sub / ".claude" / "runs"
         runs.mkdir(parents=True)
         (runs / "feat-y.json").write_text(json.dumps(
@@ -464,7 +464,7 @@ class OutsideRepoHardening(TempRepoCase):
         self.write_run(allowed_paths={"1": ["a/**"]})
         nested = self.repo / "n"
         nested.mkdir()
-        subprocess.run(["git", "init", "-q", str(nested)], check=True)
+        init_repo(nested)
         out = self.eval_at(nested / "x.py", "backend-node")
         self.assertIn("out_of_scope_write", out.get("flags", []))
         self.assertTrue(out.get("in_run"))
@@ -715,6 +715,120 @@ class InRepoScope(TempRepoCase):
         with mock.patch.object(audit.PurePosixPath, "full_match", side_effect=ValueError("boom")):
             self.assertTrue(audit.matches("services/api/x.py", ["services/api/**"]))
             self.assertFalse(audit.matches("services/apix/a", ["services/api/**"]))
+
+
+class GitRootUnknownCase(TempRepoCase):
+    """Review fix (security low): a git timeout or failure is not "not a repository"; it is uncertainty."""
+
+    def unknown(self, why="TimeoutExpired"):
+        return mock.patch.object(audit, "git_toplevel", side_effect=audit.GitRootUnknown(why))
+
+    def test_not_a_repository_is_none_not_unknown(self):
+        outside = self.make_dir()
+        self.assertIsNone(audit.git_toplevel(outside))
+        self.assertIsNone(audit.git_root(outside))
+        self.assertEqual(audit.git_toplevel(self.repo), self.repo.resolve())
+
+    def test_a_timeout_or_failure_is_unknown(self):
+        for effect in (subprocess.TimeoutExpired("git", 2), OSError("no git"), PermissionError("x")):
+            with self.subTest(effect=type(effect).__name__):
+                with mock.patch.object(audit.subprocess, "run", side_effect=effect):
+                    with self.assertRaises(audit.GitRootUnknown):
+                        audit.git_toplevel(self.repo)
+                    self.assertIsNone(audit.git_root(self.repo))  # the tagging reading stays "no run"
+        for rc, err in ((128, "fatal: unable to read config file"), (1, ""), (0, "")):
+            with self.subTest(rc=rc):
+                done = subprocess.CompletedProcess(["git"], rc, stdout="", stderr=err)
+                with mock.patch.object(audit.subprocess, "run", return_value=done):
+                    with self.assertRaises(audit.GitRootUnknown):
+                        audit.git_toplevel(self.repo)
+
+    def test_the_not_a_repository_condition_is_recognized_by_its_text(self):
+        done = subprocess.CompletedProcess(["git"], 128, stdout="", stderr="fatal: not a git repository (or any parent)")
+        with mock.patch.object(audit.subprocess, "run", return_value=done):
+            self.assertIsNone(audit.git_toplevel(self.repo))
+
+    def test_a_scoped_actor_in_a_run_fails_closed(self):
+        self.write_run()
+        for actor in ("backend-python", "quality-fixer", "test-writer"):
+            with self.subTest(actor=actor):
+                with self.unknown():
+                    out = self.evaluate("services/api/src/main.py", actor=actor)
+                self.assertIn("out_of_scope_write", out["flags"])
+                self.assertIs(out["in_run"], True)
+                self.assertEqual(out["uncertainty"], ["git_root_unknown"])
+
+    def test_an_unscoped_actor_is_not_blocked_but_the_uncertainty_is_recorded(self):
+        for actor in ("main", "code-reviewer"):
+            with self.subTest(actor=actor):
+                with self.unknown():
+                    out = self.evaluate("services/api/src/main.py", actor=actor)
+                self.assertNotIn("out_of_scope_write", out["flags"])
+                self.assertEqual(out["uncertainty"], ["git_root_unknown"])
+
+    def test_a_known_root_has_no_uncertainty(self):
+        self.write_run()
+        self.assertNotIn("uncertainty", self.evaluate("services/api/src/main.py", actor="backend-python"))
+        outside = self.make_dir()
+        out = audit.evaluate_write(str(outside / "x.py"), str(outside), "backend-python", "Write", None)
+        self.assertNotIn("uncertainty", out)
+
+    def test_the_hook_records_the_reason_and_blocks_the_scoped_write(self):
+        from ._support import call_main, payload
+        self.write_run()
+        target = str(self.repo / "services" / "web" / "x.py")
+        with self.unknown():
+            res = call_main(payload("PostToolUse", "Write", actor="backend-python", cwd=self.repo,
+                                    tool_input={"file_path": target}))
+        [record] = res.records
+        self.assertEqual(record["uncertainty"], ["git_root_unknown"])
+        self.assertIn("parse_uncertain", record["flags"])
+        self.assertIn("out_of_scope_write", record["flags"])  # the same flag, and so the same decision, as a known root
+        self.assertIs(record["in_run"], True)
+
+
+class RunEntryCap(TempRepoCase):
+    """Review fix: every directory entry counts against MAX_RUN_ENTRIES, not only the `*.json` files."""
+
+    def test_many_stray_files_stop_the_listing(self):
+        runs = self.repo / ".claude" / "runs"
+        for n in range(audit.MAX_RUN_ENTRIES + 20):
+            (runs / f"stray-{n:04d}.txt").write_text("x")
+        self.write_run()  # created after the strays: scandir order is arbitrary, the cap bounds the work
+        seen = []
+        real = audit.os.scandir
+
+        def counting(path):
+            it = real(path)
+
+            class Spy:
+                def __enter__(self_inner):
+                    self_inner.it = it.__enter__()
+                    return self_inner
+
+                def __exit__(self_inner, *exc):
+                    return it.__exit__(*exc)
+
+                def __iter__(self_inner):
+                    for entry in self_inner.it:
+                        seen.append(entry.name)
+                        yield entry
+            return Spy()
+        with mock.patch.object(audit.os, "scandir", counting):
+            audit.active_run(self.repo)
+        self.assertLessEqual(len(seen), audit.MAX_RUN_ENTRIES + 1)
+
+    def test_a_run_among_few_stray_entries_is_still_found(self):
+        runs = self.repo / ".claude" / "runs"
+        (runs / "sub").mkdir()
+        (runs / "notes.txt").write_text("x")
+        self.write_run()
+        self.assertEqual(audit.active_run(self.repo)["_slug"], "feat-x")
+
+
+def load_tests(loader, tests, pattern):
+    """Independent cases: run them in forked workers (see `ForkedSuite`)."""
+    return ForkedSuite(tests)
 
 
 if __name__ == "__main__":

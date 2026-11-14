@@ -1,6 +1,6 @@
 # agent-audit: nvim shell-execution forms not classified
 
-- **Status:** Proposed
+- **Status:** Merged into [audit-shell-lexer](2026-11-13-audit-shell-lexer.md)
 - **Opened:** 2026-11-13
 - **Scope:** `.claude/hooks/agent-audit.py`
 - **Source:** agent run: feature lua-agent, code-reviewer and security-reviewer (2026-11-13)

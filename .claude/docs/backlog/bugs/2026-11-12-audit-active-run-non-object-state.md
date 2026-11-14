@@ -1,6 +1,7 @@
 # agent-audit: active_run crashes on a run state that is not a JSON object
 
-- **Status:** Open
+- **Status:** Fixed (implemented by the spec audit-hook-hardening (2026-11-13); the change is uncommitted and has no PR yet)
+- **Spec:** [audit-hook-hardening](../../features/audit-hook-hardening/spec.md)
 - **Reported:** 2026-11-12
 - **Severity:** medium
 - **Environment:** local (hook run by Claude Code)

@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ._support import TempRepoCase, TEST_CONFIG, audit, call_main, config, payload, read_jsonl, write_run_state
+from ._support import ForkedSuite, TempRepoCase, TEST_CONFIG, audit, call_main, config, payload, read_jsonl, write_run_state
 
 DOCKER_UP = "docker compose up"
 SCREENSHOT = "mcp__playwright__browser_take_screenshot"
@@ -165,12 +165,17 @@ class BashRecords(TempRepoCase):
         self.assertEqual(audit.IMPLEMENTERS, set(IMPLEMENTERS))
         self.assertEqual(audit.READ_ONLY_AGENTS, set(READ_ONLY_AGENTS))
 
+    # Two tests, so that no single test of the suite takes longer than 0.5 s.
     def test_e9_suites_by_non_runners_are_flagged(self):
         actors = [*IMPLEMENTERS, "quality-fixer", "test-writer"]
         for actor in actors:
             for command in ("pytest", "pnpm --filter api test", "k6 run x.js"):
                 with self.subTest(case="E9", actor=actor, command=command):
                     self.assertIn("suite_by_non_runner", self.flags(actor, command))
+
+    def test_e9_a_narrow_test_by_non_runners_is_not_flagged(self):
+        actors = [*IMPLEMENTERS, "quality-fixer", "test-writer"]
+        for actor in actors:
             with self.subTest(case="E9", actor=actor, command="pytest tests/test_a.py"):
                 self.assertNotIn("suite_by_non_runner", self.flags(actor, "pytest tests/test_a.py"))
 
@@ -188,14 +193,22 @@ class BashRecords(TempRepoCase):
 
 
 class AnalysisTimeout(TempRepoCase):
-    """Wall-clock guard in process: a classifier that never finishes is cut off by SIGALRM (lua-agent review
-    round 4). The limit is patched to 0.2 s; the classifier sleeps far longer, so the test takes about 0.2 s."""
+    """Wall-clock guard on the no-fork fallback path: a classifier that never finishes is cut off by SIGALRM
+    (lua-agent review round 4). `_fork_available` is patched to false, so the analysis runs in this process under
+    the timer (the fork watchdog is covered by `test_watchdog.py`). The limit is patched to 0.05 s: nothing here
+    ever finishes in time, so a short limit cannot flake."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(audit, "_fork_available", lambda: False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def run_slow(self, event, actor="backend-python"):
         def slow(command, _depth=0):
             time.sleep(30)
-            return ["other"], []
-        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.2), mock.patch.object(audit, "classify_command", slow):
+            return audit.Analysis(["other"], [], [])
+        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.05), mock.patch.object(audit, "analyze_command", slow):
             start = time.monotonic()
             res = call_main(payload(event, "Bash", actor=actor, cwd=self.repo, tool_input={"command": "echo hi"}))
         self.assertLess(time.monotonic() - start, 5.0)
@@ -225,9 +238,9 @@ class AnalysisTimeout(TempRepoCase):
             try:
                 time.sleep(30)
             except Exception:
-                return ["other"], []
-            return ["other"], []
-        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.2), mock.patch.object(audit, "classify_command", swallowing):
+                return audit.Analysis(["other"], [], [])
+            return audit.Analysis(["other"], [], [])
+        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.05), mock.patch.object(audit, "analyze_command", swallowing):
             res = call_main(payload("PreToolUse", "Bash", cwd=self.repo, tool_input={"command": "echo hi"}))
         self.assertEqual(res.output["hookSpecificOutput"]["permissionDecision"], "deny")
 
@@ -239,8 +252,8 @@ class AnalysisTimeout(TempRepoCase):
     def test_a_regex_search_is_interrupted_too(self):
         def stuck(command, _depth=0):
             re.compile(r"(a+)+$").search("a" * 40 + "b")  # exponential backtracking inside the regex engine
-            return ["other"], []
-        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.2), mock.patch.object(audit, "classify_command", stuck):
+            return audit.Analysis(["other"], [], [])
+        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.05), mock.patch.object(audit, "analyze_command", stuck):
             start = time.monotonic()
             res = call_main(payload("PreToolUse", "Bash", cwd=self.repo, tool_input={"command": "echo hi"}))
         self.assertLess(time.monotonic() - start, 5.0)
@@ -249,7 +262,14 @@ class AnalysisTimeout(TempRepoCase):
 
 class AnalysisLimitAndArming(TempRepoCase):
     """Round 5: the env override is clamped to (0, ANALYSIS_TIMEOUT_S], and a timer that cannot be armed is a
-    timeout (PreToolUse denies), never a silent allow."""
+    timeout (PreToolUse denies), never a silent allow. Runs the analysis in process (spec audit-hook-hardening,
+    Task 4): the SIGALRM timer only arms the analysis on the no-fork fallback path."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(audit, "_fork_available", lambda: False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def pre(self, command="echo hi", event="PreToolUse"):
         return call_main(payload(event, "Bash", actor="backend-python", cwd=self.repo, tool_input={"command": command}))
@@ -277,7 +297,15 @@ class AnalysisLimitAndArming(TempRepoCase):
 
 class DecisionBeforeRecording(TempRepoCase):
     """Round 5: on PreToolUse the decision is printed and flushed before git_root / active_run / the metrics
-    write, and the recording runs under the remaining budget, so it can neither delay nor lose the decision."""
+    write, and the recording runs under the remaining budget, so it can neither delay nor lose the decision.
+    Runs the analysis in process (spec audit-hook-hardening, Task 4): the spies replace `git_root` of this
+    process; the fork path is covered by WD7."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(audit, "_fork_available", lambda: False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def pre(self, command=DOCKER_UP):
         return call_main(payload("PreToolUse", "Bash", actor="backend-python", cwd=self.repo, tool_input={"command": command}))
@@ -301,18 +329,24 @@ class DecisionBeforeRecording(TempRepoCase):
             with self.subTest(command=command):
                 def slow(start):
                     time.sleep(30)
-                with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.3), mock.patch.object(audit, "git_root", slow):
+                with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.15), mock.patch.object(audit, "RECORD_FLOOR_S", 0.1), \
+                        mock.patch.object(audit, "git_root", slow):
                     start = time.monotonic()
                     res = self.pre(command)
                 self.assertLess(time.monotonic() - start, 5.0)
                 self.assertEqual(res.output["hookSpecificOutput"]["permissionDecision"], perm)
-                self.assertEqual(res.records, [])  # the record is what is lost, not the decision
+                # spec audit-hook-hardening R1: the record is not lost, only its run tagging is
+                [record] = res.records
+                self.assertIs(record["in_run"], False)
+                self.assertEqual(record["run_tags"], "timeout")
+                self.assertEqual(record["decision_category"], "docker_lifecycle" if perm == "deny" else "git_commit")
                 self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
 
     def test_slow_metrics_write_cannot_delay_or_lose_the_decision(self):
         def slow(self_path, *a, **k):
             time.sleep(30)
-        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.3), mock.patch.object(Path, "mkdir", slow):
+        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.15), mock.patch.object(audit, "RECORD_FLOOR_S", 0.1), \
+                mock.patch.object(Path, "mkdir", slow):
             start = time.monotonic()
             res = self.pre()
         self.assertLess(time.monotonic() - start, 5.0)
@@ -606,6 +640,11 @@ class MetricsFile(TempRepoCase):
             self.run_main(metrics_dir, pl)
             self.assertEqual([p.name for p in metrics_dir.iterdir()], ["unknown.jsonl"])
             self.assertEqual(len(read_jsonl(metrics_dir / "unknown.jsonl")), 1)
+
+
+def load_tests(loader, tests, pattern):
+    """Independent cases: run them in forked workers (see `ForkedSuite`)."""
+    return ForkedSuite(tests)
 
 
 if __name__ == "__main__":

@@ -29,11 +29,13 @@ Any error is swallowed: an audit hook must never break a session.
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import os
 import re
 import functools
+import select
 import shlex
 import signal
 import stat
@@ -41,6 +43,12 @@ import subprocess
 import sys
 import time
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
+
+try:  # the C module: `socket` itself costs about 2 ms of imports on every hook call
+    import _socket
+except ImportError:  # no fork watchdog then (see `_fork_available`)
+    _socket = None
 
 METRICS_DIR = Path(os.environ.get("AGENT_AUDIT_DIR", str(Path.home() / ".claude" / "metrics")))
 CONFIG_PATH = Path(__file__).resolve().with_name("agent-audit.json")
@@ -56,6 +64,27 @@ ANALYSIS_TIMEOUT_S = 7.0
 ANALYSIS_TIMEOUT_ENV = "AGENT_AUDIT_ANALYSIS_TIMEOUT"
 # Heredoc openers in one command above this: nothing is stripped (the command is classified as it is).
 MAX_HEREDOC_OPENERS = 32
+# Command readings (spec audit-hook-hardening, section 3): distinct command starts per piece above this, and
+# nvim `-c '!cmd'` shell text still present at this depth, cannot be classified: blocked as unclassified_command.
+MAX_READINGS = 8
+LOOSE_VALUE_TOKENS = 3  # raw-split assignment that opens a quote: the value may swallow up to this many next tokens
+NVIM_MAX_DEPTH = 3
+# Bounded I/O (spec audit-hook-hardening, section 2): every file the hook reads or writes goes through
+# `_read_bounded` / `_append_line`, so no input can be unbounded in size or block on a FIFO.
+MAX_CONFIG_BYTES = 65536
+MAX_RUN_STATE_BYTES = 262144  # the largest run state seen is 7.2 KB
+MAX_RUN_ENTRIES = 256
+MAX_RUN_READS = 16
+RECORD_FLOOR_S = 0.25  # minimum budget of the recording step
+# Fork watchdog (spec audit-hook-hardening, section 5): the analysis runs in a child process that sends the
+# parent two JSON lines (the analysis, then the run tags). The parent reads at most this many bytes per line.
+MAX_CHILD_MESSAGE = 1 << 20
+CHILD_GRACE_S = 1.0  # a child that is still alive this long after the analysis limit ends itself (SIGALRM, default action)
+REAP_TRIES = 40  # waitpid(WNOHANG) polls after the SIGKILL, 0.5 ms apart
+REAP_STEP_S = 0.0005
+WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
+_O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
 class AnalysisTimeout(BaseException):
@@ -118,7 +147,7 @@ VISUAL_TOOL = re.compile(r"(?i)(screenshot|browser|playwright|chrome|computer|si
 DIRECT_BINARIES = {"vitest", "jest", "mocha", "playwright", "eslint", "prettier", "tsc", "biome", "stylelint"}
 
 SEGMENT_SPLIT = re.compile(r"&&|\|\||;|\||\n")  # linear; the pieces are stripped after splitting
-ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
+ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")  # on shlex tokens: the value may hold spaces (A="x y"); `A+=x` appends
 
 TEST_RUNNERS = re.compile(
     r"^(pytest|py\.test|jest|vitest|mocha|ava|go test|cargo test|cargo nextest|"
@@ -199,9 +228,62 @@ LOCAL_HOST = re.compile(r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[a
 URL = re.compile(r"https?://[^\s'\"]+")
 
 
+def _read_bounded(path, limit: int, *, truncate: bool = False) -> bytes | None:
+    """Read a regular file without ever blocking or reading more than `limit` bytes; None on any problem.
+
+    O_NONBLOCK: opening a FIFO must not wait for a writer. fstat on the fd (after following any symlink)
+    must say regular file, so a FIFO, directory or char device is never read, and a sparse 50 MB file is
+    rejected by the limit before it is materialized. Over `limit` bytes: None, or the first `limit` bytes
+    with `truncate=True`. Never raises."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | _O_CLOEXEC)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None
+            chunks: list[bytes] = []
+            remaining = limit + 1
+            while remaining > 0:
+                chunk = os.read(fd, remaining)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+        finally:
+            os.close(fd)
+        data = b"".join(chunks)
+        if len(data) > limit:
+            return data[:limit] if truncate else None
+        return data
+    except Exception:
+        return None
+
+
+def _append_line(path, line: str) -> bool:
+    """Append `line` to a regular file (created 0600) with one non-blocking, symlink-refusing open.
+
+    A FIFO, symlink, directory or any error drops the line and returns False; it never blocks or raises."""
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK | _O_NOFOLLOW | _O_CLOEXEC, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return False
+            data = memoryview(line.encode("utf-8"))
+            while data:
+                written = os.write(fd, data)
+                data = data[written:]
+            return True
+        finally:
+            os.close(fd)
+    except Exception:
+        return False
+
+
 def load_config() -> dict:
     try:
-        return json.loads(CONFIG_PATH.read_text())
+        raw = _read_bounded(CONFIG_PATH, MAX_CONFIG_BYTES)
+        if raw is None:
+            return {"mode": "audit"}
+        return json.loads(raw)
     except Exception:
         return {"mode": "audit"}
 
@@ -247,16 +329,10 @@ def project_docs_root(root: Path) -> str:
     R5 only that section of that file counts; R10 a missing, unreadable, directory, binary or huge file
     is the same as no declaration, and nothing is raised."""
     try:
-        # O_NONBLOCK: opening a FIFO must not wait for a writer. fstat on the fd (after following any
-        # symlink) must say regular file, so a FIFO or a char device such as /dev/tty is never read.
-        fd = os.open(Path(root) / "CLAUDE.md", os.O_RDONLY | os.O_NONBLOCK)
-        try:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                return DEFAULT_DOCS_ROOT
-            with os.fdopen(fd, "rb", closefd=False) as fh:
-                text = fh.read(262144).decode("utf-8", errors="replace")
-        finally:
-            os.close(fd)
+        raw = _read_bounded(Path(root) / "CLAUDE.md", 262144, truncate=True)
+        if raw is None:
+            return DEFAULT_DOCS_ROOT
+        text = raw.decode("utf-8", errors="replace")
         in_section = False
         for line in text.splitlines():
             if in_section:
@@ -273,52 +349,125 @@ def project_docs_root(root: Path) -> str:
         return DEFAULT_DOCS_ROOT
 
 
-def strip_prefixes(segment: str) -> str:
-    """Normalize a command segment so it can be classified by its real program.
-
-    Drops env assignments, `rtk`/`rtk proxy`, `sudo`, `time`, `command`, `exec`; `timeout [options] DURATION`
-    (every GNU form, and fail closed: an option shape not understood still drops the option-looking tokens and
-    the duration, so the real command is classified); `mise [global flags] exec|x [...] --` (cut up to the
-    `--`); path-prefixed Lua tools (`./.luarocks/bin/busted` -> `busted`); `luarocks [global flags] test`
-    -> `luarocks test`; and docker compose global flags (`docker compose -f x.yml up` -> `docker compose up`)."""
-    return strip_prefix_variants(segment)[0]
-
-
-def strip_prefix_variants(segment: str) -> list[str]:
-    """Like `strip_prefixes`, but a `timeout` whose shape is not understood yields every plausible reading
-    (the first is the primary one), so a real command cannot hide behind a duration form the parser misses."""
-    try:
-        tokens = shlex.split(segment, posix=True)
-    except ValueError:
-        tokens = segment.split()
-    out: list[str] = []
-    for variant in _strip_tokens(tokens, 0):
-        if variant not in out:
-            out.append(variant)
-    return out[:8]
+class Readings(NamedTuple):
+    """Every plausible reading of a command piece (spec audit-hook-hardening, section 3.2)."""
+    texts: list[str]  # normalized segments, primary first, deduplicated
+    reasons: frozenset[str]  # "prefix_readings", "shlex_fallback", "readings_cap"
+    complete: bool  # False when readings_cap was hit (texts is then empty)
+    fallback: bool = False  # shlex failed: the piece was read as two token lists
+    by_list: tuple[tuple[str, ...], ...] = ()  # the texts of each token list (two when `fallback`)
+    truncated: bool = False  # a loose assignment window ended before the tokens did (`loose_assignment_truncated`)
 
 
-def _strip_tokens(tokens: list[str], depth: int) -> list[str]:
-    while tokens:
-        if ENV_ASSIGN.match(tokens[0]) or tokens[0] in {"rtk", "proxy", "sudo", "time", "command", "exec"}:
-            tokens.pop(0)
-        elif tokens[0] == "mise":
-            j = _skip_mise_flags(tokens, 1)
-            if j < len(tokens) and tokens[j] in {"exec", "x"} and "--" in tokens[j:]:
-                del tokens[:tokens.index("--", j) + 1]  # mise -C d exec lua@5.4 -- busted x -> busted x
-            else:
-                break
-        elif tokens[0] == "timeout":
-            lengths = _timeout_prefix_lengths(tokens)
-            if len(lengths) > 1 and depth < 3:
-                results: list[str] = []
-                for length in lengths:
-                    results.extend(_strip_tokens(tokens[length:], depth + 1))
-                return results
-            del tokens[:lengths[0]]
+_PLAIN_PREFIXES = frozenset({"rtk", "proxy", "sudo", "time", "command", "exec"})
+
+
+def _opens_unclosed_quote(tok: str) -> bool:
+    """True for a raw-split assignment whose value opens a quote that the token does not close (`A="x`)."""
+    m = ENV_ASSIGN.match(tok)
+    value = tok[m.end():] if m else ""
+    return value.count('"') % 2 == 1 or value.count("'") % 2 == 1
+
+
+def _prefix_steps(tokens: list[str], p: int, loose: bool = False) -> list[int]:
+    """Positions that can follow the prefix at `tokens[p]`, or `[]` when `p` starts the command.
+
+    Prefixes: env assignments, `rtk`/`proxy`/`sudo`/`time`/`command`/`exec`; `timeout [options] DURATION` (every
+    GNU form; an option shape not understood yields several readings, fail closed); `mise [global flags]
+    exec|x [...] --` (cut up to the `--`). Every step moves forward, so a search over positions ends."""
+    if p >= len(tokens):
+        return []
+    tok = tokens[p]
+    if ENV_ASSIGN.match(tok):
+        if loose and _opens_unclosed_quote(tok):  # `A="x y cmd`: the value may swallow a few of the next tokens
+            return list(range(p + 1, min(p + 1 + LOOSE_VALUE_TOKENS, len(tokens)) + 1))
+        return [p + 1]
+    if tok in _PLAIN_PREFIXES:
+        return [p + 1]
+    if tok == "mise":
+        j = _skip_mise_flags(tokens, p + 1)
+        if j < len(tokens) and tokens[j] in {"exec", "x"}:
+            try:
+                return [tokens.index("--", j) + 1]  # mise -C d exec lua@5.4 -- busted x -> busted x
+            except ValueError:
+                return []
+        return []
+    if tok == "timeout":
+        return [p + length for length in _timeout_prefix_lengths(tokens, p)]
+    return []
+
+
+def _command_starts(tokens: list[str], loose: bool = False) -> tuple[list[int], bool, bool]:
+    """Token positions where a command can start after the prefixes, primary first then ascending, whether
+    more than MAX_READINGS distinct starts were found (then the list is empty), and whether a loose assignment
+    window ended before the token list did (the value may swallow more tokens than the window covers). Each
+    position is visited once: linear in the number of tokens, no recursion."""
+    steps: dict[int, list[int]] = {}
+    starts: set[int] = set()
+    truncated = False
+    stack = [0]
+    while stack:
+        p = stack.pop()
+        if p in steps:
+            continue
+        following = _prefix_steps(tokens, p, loose)
+        if loose and p < len(tokens) and ENV_ASSIGN.match(tokens[p]) and _opens_unclosed_quote(tokens[p]) \
+                and p + 2 + LOOSE_VALUE_TOKENS < len(tokens):  # a longer value would still leave a command token
+            truncated = True
+        steps[p] = following
+        if following:
+            stack.extend(reversed(following))
         else:
-            break
-    return [_finish_strip(tokens)]
+            starts.add(p)
+            if len(starts) > MAX_READINGS:
+                return [], True, truncated
+    primary = 0
+    while steps[primary]:
+        primary = steps[primary][0]  # the first step of each position: the strict reading
+    return [primary] + sorted(s for s in starts if s != primary), False, truncated
+
+
+def command_readings(segment: str) -> Readings:
+    """Normalize a command piece so it can be classified by its real program, as a set of readings.
+
+    Drops the prefixes of `_prefix_steps`; path-prefixed Lua tools (`./.luarocks/bin/busted` -> `busted`);
+    `luarocks [global flags] test` -> `luarocks test`; and docker compose global flags (`docker compose -f x.yml
+    up` -> `docker compose up`). When the prefix shape is ambiguous (`timeout -s KILL "$T" cmd`), every
+    plausible reading is returned, the first is the primary one. A `shlex` failure reads the piece twice (raw
+    split, and the same without quote characters). More than MAX_READINGS distinct starts: incomplete."""
+    reasons: set[str] = set()
+    try:
+        token_lists = [shlex.split(segment, posix=True)]
+    except ValueError:
+        raw = segment.split()
+        token_lists = [raw, [t.replace("'", "").replace('"', "") for t in raw]]
+    fallback = len(token_lists) > 1  # the reason itself is added by `analyze_command`, only when the lists differ
+    texts: list[str] = []
+    by_list: list[tuple[str, ...]] = []
+    truncated = False
+    for n, tokens in enumerate(token_lists):
+        loose = fallback and n == 0  # the raw split reads an assignment that opens a quote as a possible prefix
+        starts, capped, cut = _command_starts(tokens, loose)
+        if capped:
+            return Readings([], frozenset(reasons | {"readings_cap"}), False, fallback)
+        truncated = truncated or cut
+        own = _distinct_texts(tokens, starts)
+        # the extra readings of a loose assignment are the fallback's own (see `_fallback_lists_differ`)
+        strict = _distinct_texts(tokens, _command_starts(tokens)[0]) if loose else own
+        if len(strict) > 1:
+            reasons.add("prefix_readings")
+        by_list.append(tuple(own))
+        texts.extend(t for t in own if t not in texts)
+    return Readings(texts, frozenset(reasons), True, fallback, tuple(by_list), truncated)
+
+
+def _distinct_texts(tokens: list[str], starts: list[int]) -> list[str]:
+    own: list[str] = []
+    for start in starts:
+        text = _finish_strip(list(tokens[start:]))
+        if text not in own:
+            own.append(text)
+    return own
 
 
 def _finish_strip(tokens: list[str]) -> str:
@@ -378,11 +527,11 @@ _TIMEOUT_SHORT_VALUE = set("ks")
 _PATH_TOOLS = {"busted", "luacheck", "selene", "stylua", "nvim"}
 
 
-def _timeout_duration_index(tokens: list[str]) -> int | None:
-    """Index where the DURATION of `timeout [GNU options] [--] DURATION` sits when every option is understood
-    (value options -s/-k/--signal/--kill-after consume their next token), else None. The token there is not
-    checked: it may be a variable or any other word the shell expands."""
-    i = 1
+def _timeout_duration_index(tokens: list[str], start: int = 0) -> int | None:
+    """Index where the DURATION of `timeout [GNU options] [--] DURATION` sits (the `timeout` token is at `start`)
+    when every option is understood (value options -s/-k/--signal/--kill-after consume their next token), else
+    None. The token there is not checked: it may be a variable or any other word the shell expands."""
+    i = start + 1
     n = len(tokens)
     while i < n:
         tok = tokens[i]
@@ -412,8 +561,9 @@ def _timeout_duration_index(tokens: list[str]) -> int | None:
     return i
 
 
-def _timeout_prefix_lengths(tokens: list[str]) -> list[int]:
-    """Token counts to drop for a leading `timeout ...` (each at least 1, so the wrapped command is classified).
+def _timeout_prefix_lengths(tokens: list[str], start: int = 0) -> list[int]:
+    """Token counts to drop for the `timeout ...` at `tokens[start]` (each at least 1, so the wrapped command is
+    classified).
 
     Strict parse first: when every option is understood and a duration follows, that is the only reading. When
     the shape is not fully understood (fail closed), drop the leading option-looking tokens and the
@@ -422,24 +572,24 @@ def _timeout_prefix_lengths(tokens: list[str]) -> list[int]:
     but the token at the duration position is not a duration (`timeout -s KILL "$T" cmd`), readings that drop up
     to that position and up to the next one are added too."""
     n = len(tokens)
-    at = _timeout_duration_index(tokens)
+    at = _timeout_duration_index(tokens, start)
     if at is not None and at < n and _is_duration(tokens[at]):
-        return [at + 1]
-    i = 1
+        return [at + 1 - start]
+    i = start + 1
     while i < n and tokens[i].startswith("-"):
         i += 1
     unknown_duration = i < n and not _is_duration(tokens[i])
     for _ in range(2):
         if i < n and _is_duration(tokens[i]):
             i += 1
-    lengths = [i]
+    lengths = [i - start]
     if unknown_duration and i + 1 <= n:
-        lengths.append(i + 1)
+        lengths.append(i + 1 - start)
     if at is not None:
-        lengths.extend([at, at + 1])
+        lengths.extend([at - start, at + 1 - start])
     out: list[int] = []
     for length in lengths:
-        length = max(1, min(length, n))
+        length = max(1, min(length, n - start))
         if length not in out:
             out.append(length)
     return out
@@ -492,7 +642,42 @@ def _read_delimiter(text: str, i: int) -> tuple[str, int] | None:
     return "".join(delim), i
 
 
-def _is_data_sink(prefix: str, rest: str, outer: str | None, depth: int) -> bool:
+_SINK_HEADS = frozenset({"cat", "tee", "git", "gh"})
+
+
+def _clean_sink_tokens(prefix: str, *, any_dollar: bool = False) -> list[str] | None:
+    """Tokens of the single clean reading of a heredoc prefix, or None (H2): exactly one reading, complete, no
+    shlex fallback, and no `$` in the tokens up to the head (in any token when `any_dollar`)."""
+    text = prefix.strip()
+    readings = command_readings(text)
+    if not readings.complete or len(readings.texts) != 1 or readings.fallback:
+        return None
+    tokens = readings.texts[0].split()
+    if not tokens:
+        return None
+    try:
+        original = shlex.split(text, posix=True)
+    except ValueError:
+        return None
+    if any_dollar:
+        checked = original
+    else:
+        try:
+            checked = original[:original.index(tokens[0]) + 1]  # up to the head: the prefix tokens never repeat it
+        except ValueError:
+            return None  # the head is not a token of the text (normalized away): not understood
+    if any("$" in tok for tok in checked):
+        return None
+    return tokens
+
+
+def _has_sink_head(text: str) -> bool:
+    """True when some reading of the piece starts with `cat`, `tee`, `git` or `gh`."""
+    return any(t.split()[:1] and t.split()[0] in _SINK_HEADS for t in command_readings(text.strip()).texts)
+
+
+def _is_data_sink(prefix: str, rest: str, outer: str | None, depth: int,
+                  reasons: set[str] | None = None) -> bool:
     """True when the heredoc opened by `prefix` (the simple command before `<<`) is provably data.
 
     `rest` is the remainder of the opener's logical line; `outer` is the text before the enclosing
@@ -500,12 +685,17 @@ def _is_data_sink(prefix: str, rest: str, outer: str | None, depth: int) -> bool
     groups/substitutions (1 = top level). Data sinks: top-level `cat`/`tee` that is not piped or fed
     to a `$(`; `git commit -F -` and `gh pr|issue|release create|edit|comment|review -F -` (no
     `-c alias.*`/`core.*`); and a lone `$(cat <<EOF ...)` that is the value of `git commit -m` or of
-    a `gh` message option.
+    a `gh` message option. Only a clean prefix counts (`_clean_sink_tokens`); a body kept because the
+    prefix is not clean, while some reading is a sink head, adds `heredoc_unclean_prefix` to `reasons`.
     """
-    if _CODE_FEED.search(prefix + rest):
+    tokens = _clean_sink_tokens(prefix)
+    if tokens and tokens[0] in ("git", "gh"):
+        tokens = _clean_sink_tokens(prefix, any_dollar=True)
+    if tokens is None:
+        if reasons is not None and _has_sink_head(prefix):
+            reasons.add("heredoc_unclean_prefix")
         return False
-    tokens = strip_prefixes(prefix.strip()).split()
-    if not tokens:
+    if _CODE_FEED.search(prefix + rest):
         return False
     text = " ".join(tokens)
     head = tokens[0]
@@ -514,7 +704,12 @@ def _is_data_sink(prefix: str, rest: str, outer: str | None, depth: int) -> bool
     if outer is not None:
         if tokens != ["cat"]:
             return False
-        outer_text = strip_prefixes(outer.strip())
+        outer_tokens = _clean_sink_tokens(outer.rstrip().rstrip('"').rstrip(), any_dollar=True)
+        if outer_tokens is None:
+            if reasons is not None and _has_sink_head(outer):
+                reasons.add("heredoc_unclean_prefix")
+            return False
+        outer_text = " ".join(outer_tokens)
         if _GIT_CONFIG.search(outer_text):
             return False
         return bool(_GIT_MESSAGE_VALUE.match(outer_text) or _GH_MESSAGE_VALUE.match(outer_text))
@@ -527,15 +722,17 @@ def _is_data_sink(prefix: str, rest: str, outer: str | None, depth: int) -> bool
     return depth == 1 and head in ("cat", "tee")
 
 
-def _scan_heredocs(command: str) -> str:
-    """Single pass over `command` (see strip_heredoc_bodies); may raise, the caller falls back."""
+def _scan_heredocs(command: str, reasons: set[str] | None = None) -> str:
+    """Single pass over `command` (see strip_heredoc_bodies); may raise, the caller falls back.
+    Uncertainty reasons found on the way are added to `reasons`."""
     if _UNMODELED.search(command):
         return command
     n = len(command)
     out: list[str] = []
-    # Context stack of (kind, outer): kind is cmd, sq, dq or arith; outer is the text before the
-    # `$(` that opened a command substitution, else None.
-    stack: list[tuple[str, str | None]] = [("cmd", None)]
+    # Context stack of (kind, outer, saved_seg_start): kind is cmd, sq, dq or arith; outer is the text before
+    # the `$(` that opened a command substitution, else None; saved_seg_start is the start of the enclosing
+    # simple command, restored when the group closes (H1).
+    stack: list[tuple[str, str | None, int]] = [("cmd", None, 0)]
     pending: list[tuple[str, bool, bool]] = []  # (delimiter, strip leading tabs, body is data)
     seg_start = 0  # index in `out` where the current simple command starts
     sink_cache: dict[int, bool] = {}  # seg_start -> data-sink verdict of the simple command that starts there
@@ -580,24 +777,25 @@ def _scan_heredocs(command: str) -> str:
                 out.append(c)
                 i += 1
                 c = "("
-                stack.append(("arith" if command.startswith("((", i) else "cmd", outer))
+                stack.append(("arith" if command.startswith("((", i) else "cmd", outer, seg_start))
                 seg_start = len(out) + 1
         elif c == "'":
-            stack.append(("sq", None))
+            stack.append(("sq", None, seg_start))
         elif c == '"':
-            stack.append(("dq", None))
+            stack.append(("dq", None, seg_start))
         elif c == "(":
             # `((` and `$((` open arithmetic, where `<<` is a shift; the second `(` sees ctx arith.
             if ctx == "arith" or command.startswith("((", i):
-                stack.append(("arith", None))
+                stack.append(("arith", None, seg_start))
             else:
                 outer = "".join(out[seg_start:]) if out and out[-1] == "$" else None
-                stack.append(("cmd", outer))
+                stack.append(("cmd", outer, seg_start))
             seg_start = len(out) + 1
         elif c == ")":
             if len(stack) > 1:
-                stack.pop()
-            seg_start = len(out) + 1
+                seg_start = stack.pop()[2]  # the enclosing command goes on (`sh -s $(true) cat <<EOF`)
+            else:
+                seg_start = len(out) + 1
         elif ctx == "arith":
             pass
         elif c == "#" and (not out or out[-1] in " \t\n;&|()"):
@@ -629,7 +827,8 @@ def _scan_heredocs(command: str) -> str:
                     eol = re.search(r"(?<!\\)\n", command[end:])
                     rest = command[i:end + eol.start()] if eol else command[i:]
                     sink_cache[seg_start] = _is_data_sink(
-                        "".join(out[seg_start:]), rest.replace("\\\n", ""), stack[-1][1], len(stack))
+                        "".join(out[seg_start:]), rest.replace("\\\n", ""), stack[-1][1], len(stack),
+                        reasons)
                 is_data = sink_cache[seg_start]
                 pending.append((delim, strip_tabs, is_data))
                 out.extend(command[i:end].replace("\\\n", ""))
@@ -638,6 +837,16 @@ def _scan_heredocs(command: str) -> str:
         out.append(c)
         i += 1
     return "".join(out)
+
+
+def _strip_heredocs(command: str) -> tuple[str, frozenset[str]]:
+    """`strip_heredoc_bodies` plus the uncertainty reasons found while scanning (`heredoc_unclean_prefix`).
+    A scanner error returns the original command."""
+    try:
+        reasons: set[str] = set()
+        return _scan_heredocs(command, reasons), frozenset(reasons)
+    except Exception:
+        return command, frozenset()
 
 
 def strip_heredoc_bodies(command: str) -> str:
@@ -655,10 +864,7 @@ def strip_heredoc_bodies(command: str) -> str:
     substitution, mkfifo, coproc, exec redirections, cat/tee functions, fds >= 3), or a newline inside
     quotes while a heredoc is pending. A scanner error also returns the original.
     """
-    try:
-        return _scan_heredocs(command)
-    except Exception:
-        return command
+    return _strip_heredocs(command)[0]
 
 
 @functools.lru_cache(maxsize=64)
@@ -797,46 +1003,125 @@ def nvim_shell_texts(raw: str) -> list[str]:
     return texts
 
 
-def classify_command(command: str, _depth: int = 0) -> tuple[list[str], list[str]]:
+class Analysis(NamedTuple):
+    """Result of `analyze_command`: what `classify_command` returns, plus why the parser was not certain."""
+    categories: list[str]
+    flags: list[str]  # never contains "parse_uncertain" (main adds it from `uncertainty`)
+    uncertainty: list[str]  # sorted reasons
+
+
+# Docker and git forms the canary (U7) looks for outside the command head.
+_CANARY_SPLIT = re.compile(r"[\s'\"`(){};&|=$]+")
+_DOCKER_VERBS = frozenset({"up", "down", "start", "stop", "restart", "rm", "kill", "pull", "create", "run", "exec"})
+_CANARY_GIT_FLAGS = (("push", "git_push"), ("commit", "git_commit"))
+
+
+def _deny_token_unmatched(raw: str, flags: set[str]) -> bool:
+    """U7: a blocked program shows up outside the head of the piece, followed by its verb, and no rule flagged
+    the command. Only a record: it makes the forms the parser does not model visible in the metrics."""
+    if "docker" not in raw and "git" not in raw:
+        return False
+    tokens = [t for t in _CANARY_SPLIT.split(raw) if t]
+    for i, tok in enumerate(tokens):
+        if i == 0:
+            continue
+        name = tok.rsplit("/", 1)[-1]
+        if name in {"docker", "docker-compose"} and "docker_lifecycle" not in flags:
+            if any(t in _DOCKER_VERBS for t in tokens[i + 1:]):
+                return True
+        elif name == "git":
+            rest = tokens[i + 1:]
+            if any(verb in rest and flag not in flags for verb, flag in _CANARY_GIT_FLAGS):
+                return True
+    return False
+
+
+def _fallback_lists_differ(raw: str, readings: Readings, _depth: int) -> bool:
+    """True when the two token lists of a shlex failure read the piece differently: their texts differ and the
+    categories or flags found by classifying them differ too (`grep -E "a` reads the same either way)."""
+    if len(readings.by_list) != 2 or set(readings.by_list[0]) == set(readings.by_list[1]):
+        return False
+    found: list[tuple[set[str], set[str]]] = []
+    for texts in readings.by_list:
+        categories: list[str] = []
+        flags: list[str] = []
+        for seg in texts:
+            _classify_segment(raw, seg, categories, flags, _depth, [], set())
+        found.append((set(categories), set(flags)))
+    return found[0] != found[1]
+
+
+def analyze_command(command: str, _depth: int = 0) -> Analysis:
+    """Classify a Bash command: categories, flags and the reasons of any parser uncertainty (spec
+    audit-hook-hardening, section 3). Uncertainty never becomes an allow: alternative readings are all
+    classified (level A), and what cannot be enumerated is `unclassified` / `unclassified_command` (level B)."""
     command = command or ""
     if len(command) > MAX_COMMAND_LEN:  # checked before any regex or parse touches the text
-        return ["other"], ["command_too_long"]
+        return Analysis(["other"], ["command_too_long"], [])
     categories: list[str] = []
     flags: list[str] = []
-    for piece in SEGMENT_SPLIT.split(strip_heredoc_bodies(command)):
+    reasons: set[str] = set()
+    text, heredoc_reasons = _strip_heredocs(command)
+    reasons.update(heredoc_reasons)
+    raws: list[str] = []
+    for piece in SEGMENT_SPLIT.split(text):
         raw = piece.strip()
+        readings = command_readings(raw)
+        reasons.update(readings.reasons)
+        if not readings.complete:  # too many possible readings: not classified, blocked (no canary: already denied)
+            categories.append("unclassified")
+            flags.append("unclassified_command")
+            continue
+        if readings.truncated:  # level A only: the value may extend past the window (91 real python heredoc
+            reasons.add("loose_assignment_truncated")  # bodies with stray quotes would be denied if this failed closed)
+        if readings.fallback and _fallback_lists_differ(raw, readings, _depth):
+            reasons.add("shlex_fallback")
+        raws.append(raw)
         nested: list[tuple[list[str], list[str]]] = []  # nvim shell texts, classified once per raw segment
-        for n, seg in enumerate(strip_prefix_variants(raw)):
+        for n, seg in enumerate(readings.texts):
             seg_categories: list[str] = []
-            _classify_segment(raw, seg, seg_categories, flags, _depth, nested)
+            _classify_segment(raw, seg, seg_categories, flags, _depth, nested, reasons)
             # an alternate reading only adds what it found, never its "other" (the primary reading owns that)
             categories.extend(seg_categories if n == 0 else [c for c in seg_categories if c != "other"])
-    return sorted(set(categories)) or ["other"], sorted(set(flags))
+    flag_set = set(flags)  # the flag may come from another piece of the same command
+    if any(_deny_token_unmatched(raw, flag_set) for raw in raws):
+        reasons.add("deny_token_unmatched")
+    return Analysis(sorted(set(categories)) or ["other"], sorted(set(flags)), sorted(reasons))
 
 
-def _nvim_nested(raw: str, _depth: int) -> tuple[list[str], list[str]]:
-    """Categories and flags of the shell text an nvim invocation runs through `-c '!cmd'` (fail closed when
-    nested too deep)."""
+def classify_command(command: str, _depth: int = 0) -> tuple[list[str], list[str]]:
+    analysis = analyze_command(command, _depth)
+    return analysis.categories, analysis.flags
+
+
+def _nvim_nested(raw: str, _depth: int) -> tuple[list[str], list[str], set[str]]:
+    """Categories, flags and uncertainty reasons of the shell text an nvim invocation runs through
+    `-c '!cmd'` (blocked as unclassified_command when nested NVIM_MAX_DEPTH levels deep)."""
     categories: list[str] = []
     flags: list[str] = []
+    reasons: set[str] = set()
     texts = nvim_shell_texts(raw)
-    if _depth < 3:  # shell text run by `-c '!cmd'` is classified as its own command
+    if _depth < NVIM_MAX_DEPTH:  # shell text run by `-c '!cmd'` is classified as its own command
         for text in texts:
-            sub_categories, sub_flags = classify_command(text, _depth + 1)
-            categories.extend(sub_categories)
-            flags.extend(sub_flags)
-    elif texts:  # nested too deep to classify: fail closed with the strictest existing deny
-        categories.append("docker-lifecycle")
-        flags.extend(["docker_lifecycle", "nested_shell_unclassified"])
-    return categories, flags
+            sub = analyze_command(text, _depth + 1)
+            categories.extend(sub.categories)
+            flags.extend(sub.flags)
+            reasons.update(sub.uncertainty)
+    elif texts:  # nested too deep to classify: level B
+        categories.append("unclassified")
+        flags.append("unclassified_command")
+        reasons.add("nested_shell_depth")
+    return categories, flags, reasons
 
 
 def _classify_segment(raw: str, seg: str, categories: list[str], flags: list[str], _depth: int,
-                      nested: list[tuple[list[str], list[str]]] | None = None) -> None:
+                      nested: list[tuple[list[str], list[str]]] | None = None,
+                      reasons: set[str] | None = None) -> None:
     """Classify one segment (already stripped of prefixes), appending to `categories` and `flags`.
 
     `nested` is a one-slot cache shared by the readings of one raw segment, so the nvim shell texts are
-    classified once per raw segment however many readings start with nvim."""
+    classified once per raw segment however many readings start with nvim; `reasons` collects the
+    uncertainty reasons of those nested texts."""
     if not seg or seg.startswith("cd "):
         return
     padded = " " + seg + " "
@@ -867,7 +1152,10 @@ def _classify_segment(raw: str, seg: str, categories: list[str], flags: list[str
         if nested is None:
             nested = []
         if not nested:
-            nested.append(_nvim_nested(raw, _depth))
+            sub_categories, sub_flags, sub_reasons = _nvim_nested(raw, _depth)
+            nested.append((sub_categories, sub_flags))
+            if reasons is not None:
+                reasons.update(sub_reasons)
         categories.extend(nested[0][0])
         flags.extend(nested[0][1])
     elif LOAD_RUNNERS.match(seg):
@@ -891,36 +1179,74 @@ def _classify_segment(raw: str, seg: str, categories: list[str], flags: list[str
         categories.append("other")
 
 
-def git_root(start: Path) -> Path | None:
+class GitRootUnknown(Exception):
+    """git timed out or failed for a reason other than "not a repository": the root cannot be told."""
+
+
+def git_toplevel(start: Path) -> Path | None:
+    """The git root of `start`; None when it is not in a repository; GitRootUnknown when git timed out, could not
+    run or failed in any other way (the caller decides what uncertainty means)."""
     try:
         out = subprocess.run(
             ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=2,
+            capture_output=True, text=True, timeout=2, env={**os.environ, "LC_ALL": "C"},
         )
-        if out.returncode == 0:
-            return Path(out.stdout.strip())
-    except Exception:
-        pass
-    return None
+    except Exception as exc:  # TimeoutExpired, OSError (git missing, no memory), undecodable output
+        raise GitRootUnknown(type(exc).__name__) from exc
+    if out.returncode == 0:
+        if not out.stdout.strip():
+            raise GitRootUnknown("empty")
+        return Path(out.stdout.strip())
+    if out.returncode == 128 and "not a git repository" in out.stderr:
+        return None
+    raise GitRootUnknown(f"rc{out.returncode}")
+
+
+def git_root(start: Path) -> Path | None:
+    """`git_toplevel` where "cannot tell" reads as no repository (run tags, where nothing is judged)."""
+    try:
+        return git_toplevel(start)
+    except GitRootUnknown:
+        return None
 
 
 def active_run(root: Path) -> dict | None:
-    runs_dir = root / ".claude" / "runs"
-    if not runs_dir.is_dir():
+    """Newest run state with phase != "done" (spec audit-hook-hardening, B2): at most MAX_RUN_ENTRIES directory
+    entries listed (of any kind), regular `*.json` files only, newest first, at most MAX_RUN_READS read, each up to MAX_RUN_STATE_BYTES;
+    invalid, oversized or non-object states are skipped. With MAX_RUN_READS newer finished states, an older
+    active run is not seen (the active run is the file updated last during an /implement)."""
+    entries: list[tuple[float, str]] = []
+    seen = 0
+    try:
+        with os.scandir(root / ".claude" / "runs") as it:
+            for entry in it:
+                seen += 1  # every entry counts against the cap, stray files and directories included
+                if seen > MAX_RUN_ENTRIES:
+                    break
+                if not entry.name.endswith(".json"):
+                    continue
+                try:
+                    st = entry.stat()  # follows symlinks; a FIFO is only stat'ed, never opened here
+                except OSError:
+                    continue
+                if not stat.S_ISREG(st.st_mode):
+                    continue
+                entries.append((st.st_mtime, entry.name))
+    except OSError:
         return None
-    candidates = []
-    for f in runs_dir.glob("*.json"):
+    entries.sort(reverse=True)
+    for _, name in entries[:MAX_RUN_READS]:
+        raw = _read_bounded(root / ".claude" / "runs" / name, MAX_RUN_STATE_BYTES)
+        if raw is None:
+            continue
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(raw)
         except Exception:
             continue
-        if data.get("phase") != "done":
-            candidates.append((f.stat().st_mtime, f.stem, data))
-    if not candidates:
-        return None
-    _, slug, data = max(candidates, key=lambda c: c[0])
-    data["_slug"] = slug
-    return data
+        if isinstance(data, dict) and data.get("phase") != "done":
+            data["_slug"] = name[: -len(".json")]
+            return data
+    return None
 
 
 def run_task_keys(run: dict) -> list[str]:
@@ -1119,8 +1445,8 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roo
             lexical = Path(os.path.normpath(path))
             if lexical != resolved:
                 forms.append(lexical)
-        cwd_root = git_root(Path(cwd)) if cwd and Path(cwd).is_dir() else None
-        target_root = git_root(nearest_existing(resolved.parent))
+        cwd_root = git_toplevel(Path(cwd)) if cwd and Path(cwd).is_dir() else None
+        target_root = git_toplevel(nearest_existing(resolved.parent))
         judged = [cwd_root] if cwd_root else [target_root] if target_root else []
         if cwd_root and target_root and target_root != cwd_root and _under(target_root, cwd_root) is not None:
             judged.append(target_root)  # nested repo / submodule: judged by its own root and run too
@@ -1134,12 +1460,18 @@ def evaluate_write(path_str: str, cwd: str, actor: str, tool: str, response, roo
             if not (rec_oos and not oos):  # the nested root wins, unless an earlier root is the one that flagged
                 rec, rec_oos = cur, oos
         out.update(rec)
-    except Exception:  # fail closed: unresolvable path -> outside, actor-only flags (+ out of scope in a run)
+    except Exception as exc:  # fail closed: unresolvable path -> outside, actor-only flags (+ out of scope in a run)
         out.update({"rel": path_str, "area": "outside", "in_run": False})
+        unknown_root = isinstance(exc, GitRootUnknown)
+        if unknown_root:  # git could not tell the root: nothing was judged, which is never an allow
+            out["uncertainty"] = ["git_root_unknown"]
         if scoped:
             try:
-                root = git_root(Path(cwd)) if cwd else None
-                in_run = bool(active_run(root)) if root else False
+                if unknown_root:
+                    in_run = True  # the run lives under the git root, which cannot be found: assume one is active
+                else:
+                    root = git_root(Path(cwd)) if cwd else None
+                    in_run = bool(active_run(root)) if root else False
             except Exception:
                 in_run = True  # cannot tell: assume a run is active
             if in_run:
@@ -1168,6 +1500,8 @@ WHY = {
     "external_request": "requests go only to local hosts (localhost, 127.0.0.1, compose service names)",
     "command_too_long": "a Bash command over 16384 characters is not analyzed and is never run; write large content (files, scripts, heredoc bodies) with the Write tool and keep commands short",
     "analysis_timeout": "this tool call was too complex to analyze in time, so it is blocked and never run; simplify or split the command, and write large content (files, scripts, heredoc bodies) with the Write tool",
+    "unclassified_command": "the hook could not classify this command with certainty (too many possible readings, shell text nested too deep, or an analysis error), so it is blocked and never run",
+    "parse_uncertain": "the command had more than one plausible reading; every reading was classified and the strictest one applies",
 }
 
 
@@ -1179,6 +1513,9 @@ def what_to_do(actor: str, category: str) -> str:
     if category == "analysis_timeout":
         return ("Simplify the command or split it into several short commands, and write large content to a file "
                 "with the Write tool instead of putting it in the command.")
+    if category == "unclassified_command":
+        return ("Run each program as its own short command, without stacked wrappers (timeout, sudo, mise exec) "
+                "or nested shells, and write large content to a file with the Write tool.")
     if category == "visual_tool":
         return "List the states to check in manual_checks; the user can ask for a ui-verifier check."
     if actor == "main":
@@ -1285,86 +1622,351 @@ def main() -> None:
         "cwd": payload.get("cwd"),
     }
 
-    if event in {"SubagentStart", "SubagentStop"}:
-        record["agent_type"] = payload.get("agent_type")
+    child: _Child | None = None
+    try:  # the finally kills and reaps the analysis child on every path (return, decision, exception)
+        if event in {"SubagentStart", "SubagentStop"}:
+            record["agent_type"] = payload.get("agent_type")
+        else:
+            tool = payload.get("tool_name", "")
+            if not _audited_tool(tool):
+                return  # reads, searches and other tools are not audited
+            record["tool"] = tool
+            if event != "PreToolUse":
+                record["failed"] = event == "PostToolUseFailure"
+            # The analysis runs in a forked child under a hard deadline (W1-W6); without fork, in this process
+            # under the SIGALRM guard (W5). Either way a classifier defect or overrun is never an allow.
+            if _fork_available():
+                child = _start_child(payload, event, actor)
+            if child is not None:
+                outcome = child.analysis(started + _analysis_limit())
+            else:
+                outcome = _analyze_in_process(payload, event, actor)
+            _apply_outcome(record, payload, outcome)
+
+        if event == "PreToolUse":
+            decision = decide(record, config)
+            if decision is None:
+                return  # allowed silently; PostToolUse records the action itself
+            print(json.dumps(decision))
+            sys.stdout.flush()  # the decision is out before any slow recording step can delay or lose it
+            if record.get("decision") == "warn":
+                return  # the action still runs and PostToolUse records it with its flags
+
+        # The run tagging runs under what is left of the analysis budget; when it overruns, the record is still
+        # written (R1), untagged: in_run false and run_tags "timeout". The write has its own short guard.
+        if "in_run" not in record:  # tag commands and lifecycle events with the active /implement run
+            remaining = max(RECORD_FLOOR_S, _analysis_limit() - (time.monotonic() - started))
+            tags: dict | None = None
+            if child is not None:
+                tags = child.tags(time.monotonic() + remaining, go=event == "PreToolUse")
+            else:
+                box: dict = {}
+                if _run_guarded(remaining, lambda: box.update(_run_tags(payload))):
+                    tags = box
+            if tags is not None:
+                record.update(tags)
+            else:
+                record["in_run"] = False
+                record["run_tags"] = "timeout"
+        _run_guarded(RECORD_FLOOR_S, lambda: _write_record(record))  # a lost record never affects the decision
+    finally:
+        if child is not None:
+            child.close()
+
+
+def _audited_tool(tool) -> bool:
+    """Bash, the file-writing tools and the browser/screenshot tools are analyzed; everything else is not."""
+    return isinstance(tool, str) and (tool == "Bash" or tool in WRITE_TOOLS or bool(VISUAL_TOOL.search(tool)))
+
+
+def _analysis(payload: dict, event: str, actor: str) -> dict:
+    """The audited-tool analysis, as record fields: `categories`, `flags`, `uncertainty` and, for Bash, `cmd`,
+    plus the fields of `evaluate_write` for a file write. JSON-serializable; may raise (U4 handles it)."""
+    tool = payload.get("tool_name", "")
+    tinput = payload.get("tool_input") or {}
+    out: dict = {}
+    flags: list[str] = []
+    uncertainty: list[str] = []
+    if tool == "Bash":
+        cmd = tinput.get("command", "")
+        out["cmd"] = cmd[:MAX_CMD]
+        out["categories"], flags, uncertainty = analyze_command(cmd)
+        suites = {"test-full", "test-package", "test-load"} & set(out["categories"])
+        if suites and actor in IMPLEMENTERS | {"quality-fixer", "test-writer"}:
+            flags.append("suite_by_non_runner")
+    elif tool in WRITE_TOOLS:
+        path = tinput.get("file_path") or tinput.get("notebook_path") or ""
+        out["categories"] = ["write"]
+        out.update(evaluate_write(path, payload.get("cwd", ""), actor, tool,
+                                  payload.get("tool_response"),
+                                  scratchpad=payload.get("scratchpad_dir"),
+                                  failed=event == "PostToolUseFailure"))
+        flags = out.pop("flags", [])
+        uncertainty = out.pop("uncertainty", [])  # git_root_unknown
     else:
-        tool = payload.get("tool_name", "")
-        tinput = payload.get("tool_input") or {}
-        record["tool"] = tool
-        if event != "PreToolUse":
-            record["failed"] = event == "PostToolUseFailure"
-        flags: list[str] = []
-        timed_out = False
-        previous = None
+        out["categories"] = ["visual"]
+        flags = [] if actor == "ui-verifier" else ["visual_tool"]
+    out["flags"] = list(flags)
+    out["uncertainty"] = list(uncertainty)
+    return out
+
+
+def _analyze_in_process(payload: dict, event: str, actor: str) -> tuple[str, object]:
+    """The analysis in this process under the SIGALRM guard: ("ok", fields), ("error", exception name) or
+    ("timeout", None). The limit also fires inside the arm and disarm calls (the timer is one shot)."""
+    box: list = []
+
+    def run() -> None:
         try:
-            try:  # the classification runs under a wall-clock limit (a hook timeout fails open)
-                previous = _arm_analysis_timer()
-                if tool == "Bash":
-                    cmd = tinput.get("command", "")
-                    record["cmd"] = cmd[:MAX_CMD]
-                    record["categories"], flags = classify_command(cmd)
-                    suites = {"test-full", "test-package", "test-load"} & set(record["categories"])
-                    if suites and actor in IMPLEMENTERS | {"quality-fixer", "test-writer"}:
-                        flags.append("suite_by_non_runner")
-                elif tool in {"Write", "Edit", "MultiEdit", "NotebookEdit"}:
-                    path = tinput.get("file_path") or tinput.get("notebook_path") or ""
-                    record["categories"] = ["write"]
-                    record.update(evaluate_write(path, payload.get("cwd", ""), actor, tool,
-                                                  payload.get("tool_response"),
-                                                  scratchpad=payload.get("scratchpad_dir"),
-                                                  failed=event == "PostToolUseFailure"))
-                    flags = record.pop("flags", [])
-                elif VISUAL_TOOL.search(tool):
-                    record["categories"] = ["visual"]
-                    flags = [] if actor == "ui-verifier" else ["visual_tool"]
-                else:
-                    return  # reads, searches and other tools are not audited
-            finally:
-                _disarm_analysis_timer(previous)
-        except AnalysisTimeout:  # also when it fires inside the arm or disarm calls (the timer is one shot)
-            timed_out = True
-        if timed_out:  # too complex to analyze in time: PreToolUse denies it, PostToolUse records it
-            if "cmd" not in record and tool == "Bash":
-                record["cmd"] = str(tinput.get("command", ""))[:MAX_CMD]
+            box.append(("ok", _analysis(payload, event, actor)))
+        except Exception as exc:  # a defect of the classifier is never an allow (U4): blocked, with the error name
+            box.append(("error", type(exc).__name__))
+
+    if not _run_guarded(_analysis_limit(), run) or not box:
+        return ("timeout", None)
+    return box[0]
+
+
+def _apply_outcome(record: dict, payload: dict, outcome: tuple[str, object]) -> None:
+    """Fold an analysis outcome ("ok", "error", "timeout" or "crash") into the record: categories, flags and
+    the uncertainty reasons. Everything but "ok" is fail closed (analysis_timeout or unclassified_command)."""
+    kind, data = outcome
+    flags: list[str] = []
+    uncertainty: list[str] = []
+    if kind == "ok" and isinstance(data, dict):
+        fields = dict(data)
+        flags = list(fields.pop("flags", []))
+        uncertainty = list(fields.pop("uncertainty", []))
+        record.update(fields)
+    else:
+        if "cmd" not in record and payload.get("tool_name") == "Bash":
+            tinput = payload.get("tool_input")
+            record["cmd"] = str(tinput.get("command", "") if isinstance(tinput, dict) else "")[:MAX_CMD]
+        if kind == "timeout":  # too complex to analyze in time: PreToolUse denies it, PostToolUse records it
             record["categories"] = ["other"]
             flags = ["analysis_timeout"]
-        record["flags"] = sorted(set(flags))
+        else:  # "error" (U4, W3) or "crash" (W2): level B, blocked as unclassified_command
+            record["categories"] = ["unclassified"]
+            flags = ["unclassified_command"]
+            if kind == "error":
+                record["error"] = str(data)[:100]
+                uncertainty = ["classifier_error"]
+            else:
+                uncertainty = ["analysis_crash"]
+    if uncertainty:
+        record["uncertainty"] = sorted(set(uncertainty))
+        flags = [*flags, "parse_uncertain"]
+    record["flags"] = sorted(set(flags))
 
-    if event == "PreToolUse":
-        decision = decide(record, config)
-        if decision is None:
-            return  # allowed silently; PostToolUse records the action itself
-        print(json.dumps(decision))
-        sys.stdout.flush()  # the decision is out before any slow recording step can delay or lose it
-        if record.get("decision") == "warn":
-            return  # the action still runs and PostToolUse records it with its flags
 
-    # The recording runs under what is left of the analysis budget, so it can never push the hook past its timeout.
-    remaining = max(0.25, _analysis_limit() - (time.monotonic() - started))
+def _fork_available() -> bool:
+    return hasattr(os, "fork") and _socket is not None
+
+
+class _ChildTimeout(Exception):
+    """The deadline passed before the child's next line."""
+
+
+class _ChildCrash(Exception):
+    """The child ended without a valid line (EOF, an oversized line)."""
+
+
+class _Child:
+    """The parent's end of the analysis child: a socket carrying newline-terminated JSON lines, read with a
+    hard deadline and a size cap. `close` always kills and reaps the child."""
+
+    def __init__(self, pid: int, sock) -> None:
+        self.pid = pid
+        self.sock = sock
+        self.buf = b""
+        self.alive = True
+        self.closed = False
+
+    def _line(self, deadline: float) -> bytes:
+        while True:
+            end = self.buf.find(b"\n")
+            if end >= 0:
+                line, self.buf = self.buf[:end], self.buf[end + 1:]
+                if len(line) > MAX_CHILD_MESSAGE:
+                    raise _ChildCrash()
+                return line
+            if len(self.buf) > MAX_CHILD_MESSAGE:
+                raise _ChildCrash()
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise _ChildTimeout()
+            ready, _, _ = select.select([self.sock], [], [], left)
+            if not ready:
+                raise _ChildTimeout()
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise _ChildCrash()
+            self.buf += chunk
+
+    def analysis(self, deadline: float) -> tuple[str, object]:
+        """Line 1: ("ok", fields), ("error", name), ("timeout", None) or ("crash", None)."""
+        try:
+            message = json.loads(self._line(deadline))
+        except _ChildTimeout:
+            self.alive = False
+            return ("timeout", None)
+        except Exception:  # _ChildCrash, OSError, or a line that is not JSON
+            self.alive = False
+            return ("crash", None)
+        if isinstance(message, dict):
+            if isinstance(message.get("analysis"), dict):
+                return ("ok", message["analysis"])
+            if isinstance(message.get("error"), str):
+                return ("error", message["error"])
+        self.alive = False
+        return ("crash", None)
+
+    def tags(self, deadline: float, go: bool) -> dict | None:
+        """Line 2, the run tags (None when the child is gone, late or sent something else). `go` releases a child
+        that waits for the parent to say the record is needed (PreToolUse)."""
+        if not self.alive:
+            return None
+        try:
+            if go:
+                self.sock.sendall(b"g")
+            message = json.loads(self._line(deadline))
+        except Exception:  # timeout, crash, closed socket, invalid JSON
+            self.alive = False
+            return None
+        tags = message.get("tags") if isinstance(message, dict) else None
+        if not isinstance(tags, dict) or not isinstance(tags.get("in_run"), bool):
+            return None
+        return {key: tags[key] for key in ("in_run", "run", "task") if key in tags}
+
+    def close(self) -> None:
+        """SIGKILL, then a short bounded reap; a child stuck in state D is collected by init when this exits."""
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            os.killpg(self.pid, signal.SIGKILL)  # the child and its git grandchildren (it leads its own group)
+        except OSError:  # no such group (the child never became its leader) or already gone
+            try:
+                os.kill(self.pid, signal.SIGKILL)
+            except OSError:
+                pass
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+        for _ in range(REAP_TRIES):
+            try:
+                done, _status = os.waitpid(self.pid, os.WNOHANG)
+            except OSError:
+                return
+            if done:
+                return
+            time.sleep(REAP_STEP_S)
+
+
+def _start_child(payload: dict, event: str, actor: str) -> _Child | None:
+    """Fork the analysis child; None when the pipe or the fork fails (the caller falls back to the SIGALRM path)."""
+    try:
+        parent_end, child_end = _socket.socketpair()
+    except Exception:
+        return None
+    try:
+        sys.stdout.flush()  # nothing buffered may be written a second time from the child
+        sys.stderr.flush()
+    except Exception:
+        pass
+    try:
+        pid = os.fork()
+    except Exception:  # OSError: out of processes or memory
+        parent_end.close()
+        child_end.close()
+        return None
+    try:  # the child leads its own process group, so `_Child.close` reaches its git grandchildren too
+        os.setpgid(pid, pid)
+    except OSError:  # the child did it first, or is already gone
+        pass
+    if pid == 0:  # the child never returns to the caller of main()
+        try:
+            parent_end.close()
+            _run_child(payload, event, actor, child_end)
+        except BaseException:
+            pass
+        finally:
+            os._exit(0)
+    child_end.close()
+    return _Child(pid, parent_end)
+
+
+def _kill_own_group(_signum, _frame) -> None:
+    """Child self-destruct (SIGALRM): SIGKILL to the child's own process group, which it leads."""
+    try:
+        if os.getpgrp() == os.getpid():  # never the hook's own group, should the setpgid have failed
+            os.killpg(0, signal.SIGKILL)
+    except Exception:
+        pass
+    os._exit(0)  # not a group leader (or the kill failed): end the child alone
+
+
+def _run_child(payload: dict, event: str, actor: str, sock) -> None:
+    """Child body (W1-W6): only the analysis and the run tags; never prints, never touches the metrics."""
+    try:  # stdout and stderr go nowhere (W6): the parent alone writes the decision
+        sys.stdout = sys.stderr = io.StringIO()
+        dead, nowhere = _socket.socketpair()
+        dead.close()  # a write to the other end fails at once instead of reaching the hook's pipes
+        os.dup2(nowhere.fileno(), 1)
+        os.dup2(nowhere.fileno(), 2)
+    except Exception:
+        pass
+    try:  # if the parent died before killing this child, it ends its whole group (itself and its git processes)
+        signal.signal(signal.SIGALRM, _kill_own_group)
+        signal.setitimer(signal.ITIMER_REAL, _analysis_limit() + CHILD_GRACE_S)
+    except Exception:
+        pass
+    fields: dict | None
+    try:
+        fields = _analysis(payload, event, actor)
+        line = json.dumps({"analysis": fields})
+    except Exception as exc:  # W3: the parent applies U4
+        fields = None
+        line = json.dumps({"error": type(exc).__name__})
+    sock.sendall(line.encode("utf-8") + b"\n")
+    if fields is not None and "in_run" in fields:
+        return  # the write analysis already tagged the record
+    if event == "PreToolUse" and sock.recv(1) != b"g":
+        return  # no decision to record: the parent does not need the tags
+    sock.sendall(json.dumps({"tags": _run_tags(payload)}).encode("utf-8") + b"\n")
+
+
+def _run_guarded(seconds: float, fn) -> bool:
+    """Run `fn` under the SIGALRM wall-clock limit; False when it timed out (the limit also fires inside the
+    arm and disarm calls, the timer is one shot)."""
     previous = None
     try:
         try:
-            previous = _arm_analysis_timer(remaining)
-            _write_record(payload, record)
+            previous = _arm_analysis_timer(seconds)
+            fn()
         finally:
             _disarm_analysis_timer(previous)
-    except AnalysisTimeout:  # the record is lost, the decision (if any) was already printed
-        pass
+    except AnalysisTimeout:
+        return False
+    return True
 
 
-def _write_record(payload: dict, record: dict) -> None:
-    if "in_run" not in record:  # tag commands and lifecycle events with the active /implement run
-        root = git_root(Path(payload.get("cwd") or "."))
-        run = active_run(root) if root else None
-        record["in_run"] = bool(run)
-        if run:
-            record["run"] = run.get("_slug")
-            record["task"] = ",".join(run_task_keys(run))
+def _run_tags(payload: dict) -> dict:
+    """Tags of the active /implement run for a record: `in_run`, and `run` and `task` when there is one."""
+    root = git_root(Path(payload.get("cwd") or "."))
+    run = active_run(root) if root else None
+    tags: dict = {"in_run": bool(run)}
+    if run:
+        tags["run"] = run.get("_slug")
+        tags["task"] = ",".join(run_task_keys(run))
+    return tags
 
+
+def _write_record(record: dict) -> None:
     session = record.get("session") or "unknown"
-    METRICS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(METRICS_DIR / f"{session}.jsonl", "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    METRICS_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _append_line(METRICS_DIR / f"{session}.jsonl", json.dumps(record, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":
@@ -1372,4 +1974,11 @@ if __name__ == "__main__":
         main()
     except (Exception, AnalysisTimeout):  # never a stack trace, always exit 0
         pass
-    sys.exit(0)
+    # Leave without the interpreter teardown: after the analysis fork every heap page is copy-on-write, and
+    # tearing the objects down costs about 5 ms of page faults (more than the fork itself). All output is flushed.
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(0)

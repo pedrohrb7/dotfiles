@@ -1,9 +1,18 @@
 # hooks tests: claude-hooks suite exceeds the 5 s target (8.4-8.8 s for 317 tests)
 
-- **Status:** Proposed
+- **Status:** Proposed (partly covered, stays open)
+- **Spec:** [audit-hook-hardening](../../features/audit-hook-hardening/spec.md) - Task 6 only
 - **Opened:** 2026-11-13
 - **Source:** agent run: lua-agent, test-runner, 2026-11-13
 - **Scope:** `.claude/hooks/tests/`
+
+## Spec coverage (2026-11-13)
+
+Partly covered by the audit-hook-hardening spec: its Task 6 keeps the suite at or under 8.5 s. The under-5 s target stays open, so this entry stays open after that run. See also [hook performance](2026-11-13-audit-hook-launcher-performance.md).
+
+## Result of audit-hook-hardening (2026-11-13)
+
+The suite went from about 16 s down to about 6 s with 462 tests, within the 8.5 s budget of Task 6. It reached 4.2-5.4 s at 436 tests, but is about 6 s now. Kept open for the under-5 s goal. The change is uncommitted and has no PR yet.
 
 ## Motivation
 

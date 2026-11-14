@@ -40,10 +40,96 @@ FLAG_LABELS = {
     "external_request": "requests to non-local hosts (target 0)",
     "command_too_long": "Bash commands over 16384 chars, denied before classification - write large content with the Write tool (target 0)",
     "analysis_timeout": "tool calls the hook could not analyze within its wall-clock limit, denied on PreToolUse - simplify or split the command (target 0)",
+    "unclassified_command": "commands the hook could not classify with certainty, denied (readings cap, nested shell depth, analysis error or crash) - see the uncertainty field (target 0)",
+    "parse_uncertain": "commands classified under parse uncertainty (several readings, shlex fallback, unclean heredoc prefix, deny token outside a classified command) - review in Parser uncertainty",
 }
 
 
 SCRATCH_LABELS = ("match", "no-match", "unavailable")
+
+# Uncertainty reasons whose denial may come from an alternative reading or a kept heredoc body (level A), as
+# opposed to the level B reasons, which always end in an unclassified_command denial.
+LEVEL_A_REASONS = ("prefix_readings", "shlex_fallback", "heredoc_unclean_prefix", "loose_assignment_truncated")
+HEALTH_LABELS = ("analysis_timeout", "analysis_crash", "classifier_error")
+
+
+def _example(e: dict) -> str:
+    return f"{e.get('actor')}: `{(e.get('rel') or e.get('cmd') or e.get('tool') or '')[:60]}`"
+
+
+def _reasons(e: dict) -> list[str]:
+    """Uncertainty reasons of a record, plus the hook-health reasons (timeout, crash) it carries."""
+    reasons = list(e.get("uncertainty") or [])
+    flags = e.get("flags") or []
+    reasons += [h for h in HEALTH_LABELS if h in flags and h not in reasons]
+    if e.get("error") and "classifier_error" not in reasons:
+        reasons.append("classifier_error")
+    return reasons
+
+
+def uncertainty_section(events: list[dict]) -> list[str]:
+    """Parser uncertainty and hook health: one record per action (PostToolUse*, plus PreToolUse block/ask)."""
+    def action(e: dict) -> tuple:
+        return (e.get("session"), e.get("actor"), e.get("cmd") or e.get("rel") or e.get("path"))
+
+    ran = {action(e) for e in events if e.get("event") != "PreToolUse"}
+    records = [
+        e
+        for e in events
+        if e.get("event") != "PreToolUse"
+        or (e.get("decision") == "block")
+        or (e.get("decision") == "ask" and action(e) not in ran)  # an approved ask also has its PostToolUse record
+    ]
+    records = [e for e in records if _reasons(e) or e.get("run_tags") == "timeout"]
+    out = ["## Parser uncertainty and hook health", ""]
+    if not records:
+        return out + ["None.", ""]
+
+    by_reason: dict[str, list[dict]] = defaultdict(list)
+    for e in records:
+        for r in _reasons(e):
+            by_reason[r].append(e)
+    if by_reason:
+        out += ["| reason | records | denied | asked | examples |", "|---|---|---|---|---|"]
+        for r, items in sorted(by_reason.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            denied = sum(1 for e in items if e.get("decision") == "block")
+            asked = sum(1 for e in items if e.get("decision") == "ask")
+            out.append(f"| {r} | {len(items)} | {denied} | {asked} | {'; '.join(_example(e) for e in items[:3])} |")
+        out.append("")
+
+    false_pos = [
+        e
+        for e in records
+        if e.get("decision") in ("block", "ask")
+        and (set(e.get("uncertainty") or ()) & set(LEVEL_A_REASONS) or e.get("decision_category") == "unclassified_command")
+    ]
+    false_neg = [e for e in records if "deny_token_unmatched" in (e.get("uncertainty") or ()) and not e.get("decision")]
+    for title, items, hint in (
+        ("False-positive candidates", false_pos, "denied or asked on an uncertain parse: was it legitimate work?"),
+        ("False-negative candidates", false_neg, "a deny token outside command position, no decision: did a forbidden form escape?"),
+    ):
+        out.append(f"**{title}** ({len(items)}): {hint}")
+        for e in items[:5]:
+            out.append(f"  - {e.get('ts')} {_example(e)} ({', '.join(_reasons(e)) or e.get('decision_category', '?')})")
+        if len(items) > 5:
+            out.append(f"  - ... {len(items) - 5} more")
+        out.append("")
+
+    health = {h: sum(1 for e in records if h in _reasons(e)) for h in HEALTH_LABELS}
+    tags_timeout = sum(1 for e in records if e.get("run_tags") == "timeout")
+    out.append(
+        "**Hook health** (target 0): "
+        + ", ".join(f"{h} {n}" for h, n in health.items())
+        + f", run_tags timeout {tags_timeout}"
+    )
+    out += [
+        "",
+        "Tuning: a legitimate denial is fixed by a precise parse rule for that form (test first, backlog entry), never by dropping fail-closed or raising MAX_READINGS / NVIM_MAX_DEPTH blindly; "
+        "each false-negative candidate is a form that escaped and goes to the lexer spec. "
+        "Emergency valve: \"mode\": \"audit\" in agent-audit.json.",
+        "",
+    ]
+    return out
 
 
 def load(paths: list[Path]) -> list[dict]:
@@ -160,6 +246,8 @@ def report(title: str, events: list[dict]) -> str:
             examples = "; ".join(f"{e.get('actor')}: `{(e.get('rel') or e.get('cmd') or e.get('tool') or '')[:60]}`" for e in items[:3])
             out.append(f"| {decision} | {cat} | {len(items)} | {examples} |")
         out += ["", "A blocked action that the user later approved, or a warn category with no real violation, is a false positive: keep it at warn. A warn category with only real violations and no false positives can be promoted to block in agent-audit.json.", ""]
+
+    out += uncertainty_section(events)
 
     flagged = defaultdict(list)
     for e in events:

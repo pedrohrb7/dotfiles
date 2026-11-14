@@ -5,7 +5,7 @@ and config() are used; the live agent-audit.json is never read.
 """
 import unittest
 
-from ._support import TEST_CONFIG, audit, config
+from ._support import TEST_CONFIG, ForkedSuite, audit, config
 
 
 def cfg(**categories):
@@ -137,6 +137,59 @@ class Decide(unittest.TestCase):
         self.assertLess(audit.SEVERITY["audit"], audit.SEVERITY["warn"])
         self.assertLess(audit.SEVERITY["warn"], audit.SEVERITY["ask"])
         self.assertLess(audit.SEVERITY["ask"], audit.SEVERITY["block"])
+
+
+class ForkedSuiteFixtures(unittest.TestCase):
+    """`ForkedSuite` does not fork modules with fixtures: the normal runner runs them (review fix)."""
+
+    def run_suite(self, **module_attrs):
+        import sys
+        import types
+
+        calls: list[str] = []
+        module = types.ModuleType("forked_suite_fixture_probe")
+        for name, value in module_attrs.items():
+            setattr(module, name, (lambda n=name: calls.append(n)) if value else None)
+        sys.modules[module.__name__] = module
+        self.addCleanup(sys.modules.pop, module.__name__, None)
+
+        class Probe(unittest.TestCase):
+            def test_a(self):
+                calls.append("test_a")
+
+            def test_b(self):
+                calls.append("test_b")
+        Probe.__module__ = module.__name__
+        suite = ForkedSuite([Probe("test_a"), Probe("test_b")])
+        result = unittest.TestResult()
+        suite.run(result)
+        return result, calls
+
+    def test_module_fixtures_run_in_this_process(self):
+        result, calls = self.run_suite(setUpModule=True, tearDownModule=True)
+        self.assertTrue(result.wasSuccessful())
+        self.assertEqual(calls, ["setUpModule", "test_a", "test_b", "tearDownModule"])
+
+    def test_class_fixtures_run_too(self):
+        calls: list[str] = []
+
+        class Probe(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls):
+                calls.append("setUpClass")
+
+            def test_a(self):
+                calls.append("test_a")
+        result = unittest.TestResult()
+        ForkedSuite([Probe("test_a")]).run(result)
+        self.assertTrue(result.wasSuccessful())
+        self.assertEqual(calls, ["setUpClass", "test_a"])
+
+    def test_without_fixtures_the_tests_run_in_workers(self):
+        result, calls = self.run_suite()
+        self.assertTrue(result.wasSuccessful())
+        self.assertEqual(result.testsRun, 2)
+        self.assertEqual(calls, [])  # they ran in forked workers: nothing was recorded here
 
 
 if __name__ == "__main__":

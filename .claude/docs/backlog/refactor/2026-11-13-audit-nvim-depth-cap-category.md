@@ -1,6 +1,7 @@
 # agent-audit: nvim nesting depth cap reuses the docker_lifecycle deny
 
-- **Status:** Proposed
+- **Status:** Done (implemented by the spec audit-hook-hardening (2026-11-13); the change is uncommitted and has no PR yet)
+- **Spec:** [audit-hook-hardening](../../features/audit-hook-hardening/spec.md)
 - **Opened:** 2026-11-13
 - **Scope:** `.claude/hooks/agent-audit.py`
 - **Source:** agent run: feature lua-agent, code-reviewer and security-reviewer (2026-11-13)

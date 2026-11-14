@@ -1,6 +1,6 @@
 # agent-audit: strip_prefixes does not strip env, nice and nohup wrappers
 
-- **Status:** Proposed
+- **Status:** Merged into [audit-shell-lexer](2026-11-13-audit-shell-lexer.md)
 - **Opened:** 2026-11-13
 - **Scope:** `.claude/hooks/agent-audit.py` `strip_prefixes` (around line 223)
 - **Source:** agent run: specker, feature lua-agent (spec `../../features/lua-agent/spec.md`)
