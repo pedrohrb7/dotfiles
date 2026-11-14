@@ -313,6 +313,112 @@ class FileAccessInvariant(unittest.TestCase):
         self.assertTrue(all("helper" in o or "other" in o for o in self.offenders(bad)))
 
 
+class ShellModuleInvariant(unittest.TestCase):
+    """BIO11 (spec audit-shell-lexer, P2): `agent_audit_shell.py` is pure.
+
+    It imports only `re` and `__future__` (not `typing`), never names `sys`, `os`, `io`, `subprocess` or `pathlib`,
+    makes no file, process or dynamic-code call, and keeps no mutable state at module level."""
+
+    MODULE = Path(HOOK_SOURCE).with_name("agent_audit_shell.py")
+    ALLOWED_IMPORTS = {"re", "__future__"}
+    FORBIDDEN_NAMES = {"sys", "os", "io", "subprocess", "pathlib", "shutil", "tempfile", "socket", "signal"}
+    FORBIDDEN_CALLS = {"open", "exec", "eval", "compile", "__import__", "input", "breakpoint"}
+    MUTABLE_FACTORIES = {"list", "dict", "set", "bytearray", "defaultdict", "deque", "OrderedDict", "Counter"}
+
+    def offenders(self, source: str) -> list[str]:
+        tree = ast.parse(source)
+        found: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                found += [f"import {a.name} at line {node.lineno}" for a in node.names
+                          if a.name.split(".")[0] not in self.ALLOWED_IMPORTS]
+            elif isinstance(node, ast.ImportFrom):
+                if (node.module or "").split(".")[0] not in self.ALLOWED_IMPORTS or node.level:
+                    found.append(f"from {node.module} import ... at line {node.lineno}")
+            elif isinstance(node, ast.Name) and node.id in self.FORBIDDEN_NAMES:
+                found.append(f"name {node.id} at line {node.lineno}")
+            elif isinstance(node, ast.Global):
+                found.append(f"global statement at line {node.lineno}")
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id in self.FORBIDDEN_CALLS:
+                    found.append(f"{node.func.id}() at line {node.lineno}")
+                elif isinstance(node.func, ast.Attribute) and node.func.attr in FileAccessInvariant.FILE_ATTRS:
+                    found.append(f".{node.func.attr}() at line {node.lineno}")
+        for node in tree.body:  # module-level state
+            value = node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
+            if value is None:
+                continue
+            mutable = isinstance(value, (ast.List, ast.Dict, ast.Set, ast.ListComp, ast.DictComp, ast.SetComp))
+            if isinstance(value, ast.Call):
+                callee = value.func.id if isinstance(value.func, ast.Name) else getattr(value.func, "attr", "")
+                mutable = callee in self.MUTABLE_FACTORIES
+            if mutable:
+                found.append(f"mutable module-level value at line {node.lineno}")
+        return found
+
+    def test_the_module_is_pure(self):
+        self.assertTrue(self.MODULE.is_file(), self.MODULE)
+        self.assertEqual(self.offenders(self.MODULE.read_text(encoding="utf-8")), [])
+
+    def test_the_check_flags_each_kind_of_impurity(self):
+        bad = {
+            "import os": "import os\n",
+            "import subprocess as sp": "import subprocess as sp\n",
+            "from pathlib import Path": "from pathlib import Path\n",
+            "from sys import argv": "from sys import argv\n",
+            "from typing import NamedTuple": "from typing import NamedTuple\n",
+            "import typing": "import typing\n",
+            "relative import": "from . import x\n",
+            "open": "def f(p):\n    return open(p)\n",
+            "read_text": "def f(p):\n    return p.read_text()\n",
+            "exec": "def f(s):\n    exec(s)\n",
+            "eval": "def f(s):\n    return eval(s)\n",
+            "__import__": "def f():\n    return __import__('os')\n",
+            "global": "X = 1\ndef f():\n    global X\n    X = 2\n",
+            "module list": "CACHE = []\n",
+            "module dict call": "CACHE = dict()\n",
+            "module annotated set": "CACHE: set = set()\n",
+            "module comprehension": "CACHE = {k: 1 for k in 'ab'}\n",
+        }
+        for ident, source in bad.items():
+            with self.subTest(ident):
+                self.assertTrue(self.offenders(source), source)
+        good = "import re\nfrom __future__ import annotations\nX = frozenset()\nY = re.compile('a')\n"
+        self.assertEqual(self.offenders(good), [])
+
+
+class ClassifierModuleInvariant(ShellModuleInvariant):
+    """BIO12 (review fix part C): `agent_audit_classify.py` does no I/O and starts no process: it imports only `re`,
+    `functools`, `collections`, `__future__` and the parser (`agent_audit_shell`, which the hook registers in
+    `sys.modules`), never names `sys`, `os`, `io`, `subprocess` or `pathlib`, and makes no file, process or
+    dynamic-code call. Its tables are module-level dicts and sets (read-only by convention), so the mutable-state
+    rule of the parser does not apply."""
+
+    MODULE = Path(HOOK_SOURCE).with_name("agent_audit_classify.py")
+    ALLOWED_IMPORTS = {"re", "functools", "collections", "__future__", "agent_audit_shell"}
+
+    def offenders(self, source: str) -> list[str]:
+        return [o for o in super().offenders(source) if not o.startswith("mutable module-level")]
+
+    def test_the_check_flags_each_kind_of_impurity(self):
+        bad = {
+            "import os": "import os\n",
+            "from pathlib import Path": "from pathlib import Path\n",
+            "the hook": "import agent_audit\n",
+            "relative import": "from . import x\n",
+            "open": "def f(p):\n    return open(p)\n",
+            "read_text": "def f(p):\n    return p.read_text()\n",
+            "exec": "def f(s):\n    exec(s)\n",
+            "__import__": "def f():\n    return __import__('os')\n",
+            "global": "X = 1\ndef f():\n    global X\n    X = 2\n",
+        }
+        for ident, source in bad.items():
+            with self.subTest(ident):
+                self.assertTrue(self.offenders(source), source)
+        good = "import re\nimport functools\nimport agent_audit_shell as shell\nT = {'a': 1}\nY = re.compile('a')\n"
+        self.assertEqual(self.offenders(good), [])
+
+
 class DocsRootStillBounded(TmpCase):
     """BIO10: `project_docs_root` keeps its behavior on top of `_read_bounded(..., truncate=True)`."""
 

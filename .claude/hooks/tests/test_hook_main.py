@@ -14,7 +14,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ._support import ForkedSuite, TempRepoCase, TEST_CONFIG, audit, call_main, config, payload, read_jsonl, write_run_state
+from ._support import (ForkedSuite, TempRepoCase, TEST_CONFIG, audit, call_main, classifier, config, payload, read_jsonl,
+                       write_run_state)
 
 DOCKER_UP = "docker compose up"
 SCREENSHOT = "mcp__playwright__browser_take_screenshot"
@@ -207,8 +208,8 @@ class AnalysisTimeout(TempRepoCase):
     def run_slow(self, event, actor="backend-python"):
         def slow(command, _depth=0):
             time.sleep(30)
-            return audit.Analysis(["other"], [], [])
-        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.05), mock.patch.object(audit, "analyze_command", slow):
+            return classifier.Analysis(["other"], [], [])
+        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.05), mock.patch.object(classifier, "analyze_command", slow):
             start = time.monotonic()
             res = call_main(payload(event, "Bash", actor=actor, cwd=self.repo, tool_input={"command": "echo hi"}))
         self.assertLess(time.monotonic() - start, 5.0)
@@ -238,9 +239,9 @@ class AnalysisTimeout(TempRepoCase):
             try:
                 time.sleep(30)
             except Exception:
-                return audit.Analysis(["other"], [], [])
-            return audit.Analysis(["other"], [], [])
-        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.05), mock.patch.object(audit, "analyze_command", swallowing):
+                return classifier.Analysis(["other"], [], [])
+            return classifier.Analysis(["other"], [], [])
+        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.05), mock.patch.object(classifier, "analyze_command", swallowing):
             res = call_main(payload("PreToolUse", "Bash", cwd=self.repo, tool_input={"command": "echo hi"}))
         self.assertEqual(res.output["hookSpecificOutput"]["permissionDecision"], "deny")
 
@@ -252,8 +253,8 @@ class AnalysisTimeout(TempRepoCase):
     def test_a_regex_search_is_interrupted_too(self):
         def stuck(command, _depth=0):
             re.compile(r"(a+)+$").search("a" * 40 + "b")  # exponential backtracking inside the regex engine
-            return audit.Analysis(["other"], [], [])
-        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.05), mock.patch.object(audit, "analyze_command", stuck):
+            return classifier.Analysis(["other"], [], [])
+        with mock.patch.object(audit, "ANALYSIS_TIMEOUT_S", 0.05), mock.patch.object(classifier, "analyze_command", stuck):
             start = time.monotonic()
             res = call_main(payload("PreToolUse", "Bash", cwd=self.repo, tool_input={"command": "echo hi"}))
         self.assertLess(time.monotonic() - start, 5.0)
@@ -360,7 +361,7 @@ class CommandTooLong(TempRepoCase):
         return call_main(payload("PreToolUse", "Bash", actor=actor, cwd=self.repo, tool_input={"command": command}))
 
     def test_too_long_command_is_denied_for_every_actor(self):
-        command = "echo " + "a" * audit.MAX_COMMAND_LEN
+        command = "echo " + "a" * classifier.MAX_COMMAND_LEN
         for actor in ("main", "subagent", "backend-python", "test-runner", "lua"):
             with self.subTest(actor=actor):
                 res = self.pre(actor, command)
@@ -373,8 +374,8 @@ class CommandTooLong(TempRepoCase):
                 self.assertEqual(len(res.records[0]["cmd"]), 300)
 
     def test_command_at_the_cap_is_allowed(self):
-        command = "echo " + "a" * (audit.MAX_COMMAND_LEN - 5)
-        self.assertEqual(len(command), audit.MAX_COMMAND_LEN)
+        command = "echo " + "a" * (classifier.MAX_COMMAND_LEN - 5)
+        self.assertEqual(len(command), classifier.MAX_COMMAND_LEN)
         self.assertIsNone(self.pre("main", command).output)
 
     def test_denied_fast_on_a_pathological_token(self):

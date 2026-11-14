@@ -12,9 +12,9 @@ import time
 import unittest
 from unittest import mock
 
-from ._support import ForkedSuite, audit
+from ._support import ForkedSuite, classifier
 
-classify = audit.classify_command
+classify = classifier.classify_command
 
 # (case id, command, categories, flags)
 COMMAND_TABLE = [
@@ -111,6 +111,27 @@ class PrefixesAndSegments(unittest.TestCase):
                     self.assertEqual(classify(command), (categories, flags))
 
 
+class GitCommitSubcommand(unittest.TestCase):
+    """GC1 (audit-shell-lexer, A2): `commit` counts only as the git subcommand, after git's global options."""
+
+    def test_gc1_commit_as_an_argument_is_not_a_commit(self):
+        for command in ("git config --get commit.gpgsign", "S=$(git config --get commit.gpgsign)",
+                        "echo $(git config --get commit.gpgsign)", "git log --grep commit", "git -C repo show commit"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertNotIn("git_commit", flags)
+                self.assertNotIn("git-commit", categories)
+                self.assertIn("git-other", categories)
+                self.assertEqual(classifier.analyze_command(command).uncertainty, [])
+
+    def test_gc1_commit_as_the_subcommand_is_one(self):
+        for command in ("git commit -m x", "git -C repo commit -m x", "git -c user.name=x commit -m x",
+                        "git --git-dir=.git --no-pager commit -m x", "git --git-dir .git commit -m x",
+                        "git --frobnicate x commit -m y", "/usr/bin/git commit -m x", "sudo git -C r commit -m x"):
+            with self.subTest(command=command):
+                self.assertEqual(classify(command), (["git-commit"], ["git_commit"]))
+
+
 NV = "nvim --headless"
 MT = "--noplugin -u scripts/minimal_init.lua"
 PB = "{minimal_init = 'tests/minimal_init.lua'}"
@@ -138,7 +159,9 @@ LUA_TABLE = [
     ("L11", f"""{NV} {MT} -c "lua MiniTest.run_at_location({{file = 'tests/test_a.lua', line = 3}})\"""", ["test-narrow"]),
     ("L12", f'{NV} {MT} -c "lua MiniTest.run()"', ["test-full"]),
     ("L12", f"""{NV} -c "lua require('mini.test').run()\"""", ["test-full"]),
-    ("L13", f"""{NV} -c "lua MiniTest.run(); vim.cmd('qa!')\"""", ["other", "test-full"]),
+    # audit-shell-lexer S2: the `;` is inside the quoted -c argument, so it is text and no longer splits the command
+    # (the old quote-blind split made `vim.cmd('qa!')` a second command, which is where the `other` came from)
+    ("L13", f"""{NV} -c "lua MiniTest.run(); vim.cmd('qa!')\"""", ["test-full"]),
     ("L14", f"{NV} -c checkhealth -c qa", ["other"]),
     ("L14", f"{NV} +qa", ["other"]),
     ("L14", "nvim lua/a.lua", ["other"]),
@@ -169,7 +192,8 @@ LUA_TABLE = [
     ("L19", "mise install", ["other"]),
     ("L19", "mise ls", ["other"]),
     ("L19", "mise test-tool node", ["other"]),
-    ("L19", "mise exec -c busted", ["other"]),
+    # `-c` runs its value through a shell (mise docs), so the value is classified (X1)
+    ("L19", "mise exec -c busted", ["other", "test-full"]),
     ("L20", "mise exec -- busted tests/a_spec.lua", ["test-narrow"]),
     ("L20", "mise x -- busted tests/a_spec.lua", ["test-narrow"]),
     ("L20", "mise exec lua@5.4 -- busted tests/a_spec.lua", ["test-narrow"]),
@@ -335,7 +359,7 @@ class LuaCommands(unittest.TestCase):
         self.assertIn("unclassified", categories)
         self.assertNotIn("docker_lifecycle", flags)
         self.assertNotIn("docker-lifecycle", categories)
-        self.assertEqual(audit.analyze_command(command).uncertainty, ["nested_shell_depth"])
+        self.assertEqual(classifier.analyze_command(command).uncertainty, ["nested_shell_depth"])
 
     def test_nesting_within_the_cap_is_still_classified(self):
         command = "docker restart x"
@@ -390,8 +414,8 @@ class Round3(unittest.TestCase):
     def test_nvim_shell_texts_are_computed_once_per_raw_segment(self):
         """Before the cache, this shape made ~55x more calls (2404 vs 43) and grew with every reading."""
         command = self.amplifying_nvim_command(6)
-        self.assertLess(len(command), audit.MAX_COMMAND_LEN)
-        with mock.patch.object(audit, "nvim_shell_texts", wraps=audit.nvim_shell_texts) as spy:
+        self.assertLess(len(command), classifier.MAX_COMMAND_LEN)
+        with mock.patch.object(classifier, "nvim_shell_texts", wraps=classifier.nvim_shell_texts) as spy:
             start = time.monotonic()
             result = classify(command)
             elapsed = time.monotonic() - start
@@ -410,22 +434,22 @@ class CommandLengthCap(unittest.TestCase):
     """Commands over MAX_COMMAND_LEN are never fed to the regex classifier (every time-budget DoS class)."""
 
     def test_cap_is_16_kib(self):
-        self.assertEqual(audit.MAX_COMMAND_LEN, 16384)
+        self.assertEqual(classifier.MAX_COMMAND_LEN, 16384)
 
     def test_one_char_over_the_cap_is_flagged(self):
-        command = "echo " + "a" * (audit.MAX_COMMAND_LEN - 4)
-        self.assertEqual(len(command), audit.MAX_COMMAND_LEN + 1)
+        command = "echo " + "a" * (classifier.MAX_COMMAND_LEN - 4)
+        self.assertEqual(len(command), classifier.MAX_COMMAND_LEN + 1)
         self.assertEqual(classify(command), (["other"], ["command_too_long"]))
 
     def test_exactly_the_cap_is_classified_normally(self):
-        command = "pytest -k " + "a" * (audit.MAX_COMMAND_LEN - len("pytest -k "))
-        self.assertEqual(len(command), audit.MAX_COMMAND_LEN)
+        command = "pytest -k " + "a" * (classifier.MAX_COMMAND_LEN - len("pytest -k "))
+        self.assertEqual(len(command), classifier.MAX_COMMAND_LEN)
         categories, flags = classify(command)
         self.assertEqual(flags, [])
         self.assertIn("test-narrow", categories)
 
     def test_the_cap_applies_before_heredoc_stripping(self):
-        command = "cat <<EOF\n" + "x" * audit.MAX_COMMAND_LEN + "\nEOF"
+        command = "cat <<EOF\n" + "x" * classifier.MAX_COMMAND_LEN + "\nEOF"
         self.assertEqual(classify(command), (["other"], ["command_too_long"]))
 
     def test_quadratic_shapes_are_denied_fast(self):
@@ -453,7 +477,8 @@ class CommandLengthCap(unittest.TestCase):
     def test_pieces_are_stripped_after_the_split(self):
         self.assertEqual(classify("  pytest tests/test_a.py \t&&\t  docker restart x  \n "),
                          (["docker-lifecycle", "test-narrow"], ["docker_lifecycle"]))
-        self.assertEqual(audit.SEGMENT_SPLIT.split("a  ;  b"), ["a  ", "  b"])
+        # audit-shell-lexer S1: `SEGMENT_SPLIT` is gone, so its own assertion (the split of `a  ;  b`) is gone; the
+        # parser gives words, never padded pieces, and the assertion above keeps checking the classification
 
 
 class Round4Timing(unittest.TestCase):
@@ -464,7 +489,7 @@ class Round4Timing(unittest.TestCase):
     LIFECYCLE = "docker re" + "start x"  # assembled so the literal is not one in this file's text
 
     def assert_fast_lifecycle(self, command):
-        self.assertLess(len(command), audit.MAX_COMMAND_LEN)
+        self.assertLess(len(command), classifier.MAX_COMMAND_LEN)
         start = time.monotonic()
         categories, flags = classify(command)
         self.assertLess(time.monotonic() - start, 2.0)
@@ -489,7 +514,7 @@ class Round4Timing(unittest.TestCase):
         }.items():
             with self.subTest(shape=name):
                 start = time.monotonic()
-                for rx in (audit._NVIM_FILE, audit._NVIM_DIRECTORY, audit._NVIM_RUN):
+                for rx in (classifier._NVIM_FILE, classifier._NVIM_DIRECTORY, classifier._NVIM_RUN):
                     rx.search(text)
                 self.assertLess(time.monotonic() - start, 2.0)
 
@@ -501,19 +526,19 @@ class Round4Timing(unittest.TestCase):
                 self.assert_fast_lifecycle("pytest " + token + "; " + self.LIFECYCLE)
 
     def test_test_scope_runs_once_per_distinct_reading(self):
-        audit.test_scope.cache_clear()
+        classifier.test_scope.cache_clear()
         classify('timeout -k 2 "$T" pytest tests/test_a.py')
-        first = audit.test_scope.cache_info()
+        first = classifier.test_scope.cache_info()
         classify('timeout -k 2 "$T" pytest tests/test_a.py')
-        again = audit.test_scope.cache_info()
+        again = classifier.test_scope.cache_info()
         self.assertEqual(again.misses, first.misses)
         self.assertGreater(again.hits, first.hits)
 
     def test_nvim_category_is_cached_per_segment(self):
-        audit.nvim_category.cache_clear()
-        audit.nvim_category("nvim --headless -c 'PlenaryBustedFile x'")
-        audit.nvim_category("nvim --headless -c 'PlenaryBustedFile x'")
-        info = audit.nvim_category.cache_info()
+        classifier.nvim_category.cache_clear()
+        classifier.nvim_category("nvim --headless -c 'PlenaryBustedFile x'")
+        classifier.nvim_category("nvim --headless -c 'PlenaryBustedFile x'")
+        info = classifier.nvim_category.cache_info()
         self.assertEqual((info.misses, info.hits), (1, 1))
 
 
@@ -553,6 +578,109 @@ class Round4Equivalence(unittest.TestCase):
                 self.assertEqual(classify(command)[0], [expected])
 
 
+class AnsiCQuotedWords(unittest.TestCase):
+    """Review fix B1: a `$'...'` part with certain text is classified by its decoded text (the words are built from
+    pieces; nothing runs)."""
+
+    def test_the_decoded_text_names_the_program_and_the_verb(self):
+        for command, categories, flags in (
+            ("$'\\x64ocker' re" + "start x", ["docker-lifecycle"], ["docker_lifecycle"]),
+            ("git $'\\x70ush'", ["git-push"], ["git_push"]),
+            ("git $'\\x63ommit' -m x", ["git-commit"], ["git_commit"]),
+            ("docker compose $'\\165p' -d", ["docker-lifecycle"], ["docker_lifecycle"]),
+            ("$'g\\u0069t' push", ["git-push"], ["git_push"]),
+            ("sudo $'docker' stop x", ["docker-lifecycle"], ["docker_lifecycle"]),
+            ("docker $'ps'", ["docker-read"], []),
+            ("git $'status'", ["git-other"], []),
+        ):
+            with self.subTest(command=command):
+                result = classifier.analyze_command(command)
+                self.assertEqual((result.categories, result.flags, result.uncertainty), (categories, flags, []))
+
+    def test_an_escape_that_cannot_be_decoded_with_certainty_is_not_guessed(self):
+        for command in ("$'\\q'ocker x", "git $'pu\\qsh'", "$'\\x'ocker x"):
+            with self.subTest(command=command):
+                result = classifier.analyze_command(command)
+                self.assertIn("unclassified_command", result.flags)
+                self.assertIn("dynamic_code", result.uncertainty)
+
+
+class ParserFormsAtTheHookLevel(unittest.TestCase):
+    """Spec audit-shell-lexer, open question 10 (review fix part D2): the forms of the parser fix A5 and A6, asserted
+    through the classifier, so a change in the classifier cannot lose one without a test failing. The blocked words
+    are built from pieces; nothing runs."""
+
+    LIFECYCLE = "docker re" + "start x"
+    PUSH = "git pu" + "sh"
+
+    def result(self, command):
+        result = classifier.analyze_command(command)
+        return result.categories, result.flags, result.uncertainty
+
+    def assert_lifecycle(self, command):
+        categories, flags, uncertainty = self.result(command)
+        self.assertIn("docker-lifecycle", categories, command)
+        self.assertEqual((flags, uncertainty), (["docker_lifecycle"], []), command)
+
+    def assert_level_b(self, command, reason):
+        categories, flags, uncertainty = self.result(command)
+        self.assertEqual((flags, uncertainty), (["unclassified_command"], [reason]), command)
+        self.assertIn("unclassified", categories)
+
+    def test_decoded_ansi_c_heads_and_verbs(self):
+        for command in ("$'\\x64ocker' re" + "start x", "$'\\144ocker' re" + "start x", "docker $'re\\x73tart' x",
+                        "$'git' $'\\x70ush'", "sudo $'\\x67it' pu" + "sh", "env A=1 $'docker' re" + "start x"):
+            with self.subTest(command=command):
+                categories, flags, uncertainty = self.result(command)
+                self.assertTrue(set(flags) & {"docker_lifecycle", "git_push"}, (command, flags))
+                self.assertEqual(uncertainty, [])
+        self.assert_level_b("$'\\q'ocker x", "dynamic_code")
+        self.assert_level_b("git $'pu\\qsh'", "dynamic_code")
+
+    def test_a_process_substitution_inside_a_word_or_a_conditional_is_a_nested_script(self):
+        for command in ("A=<(true) " + self.LIFECYCLE, "echo a<(" + self.LIFECYCLE + ")b", "cat <(" + self.LIFECYCLE + ")",
+                        "[[ -n <(" + self.LIFECYCLE + ") ]]", "[[ -n >(" + self.LIFECYCLE + ") ]]"):
+            with self.subTest(command=command):
+                self.assert_lifecycle(command)
+        self.assertEqual(self.result("[[ -n <(true) ]]"), (["other"], [], []))
+
+    def test_zsh_expansions_at_the_head_are_level_b(self):
+        for command in ("$=X restart x", "$~X restart x", "$^X restart x", "${=X} restart x", "$=X"):
+            with self.subTest(command=command):
+                self.assert_level_b(command, "dynamic_code")
+        self.assertEqual(self.result("echo $=X"), (["other"], [], []))  # an argument is data
+
+    def test_repeat_with_a_brace_body_is_rejected_and_the_wrapper_form_is_read(self):
+        self.assert_level_b("repeat 2 { " + self.LIFECYCLE + " }", "lex_error")
+        self.assert_lifecycle("repeat 2 " + self.LIFECYCLE)
+        self.assertEqual(self.result("repeat 2 true"), (["other"], [], []))
+
+    def test_a_pending_heredoc_is_read_at_the_newline_inside_a_conditional_or_an_array(self):
+        for quote in ("'EOF'", "EOF"):
+            for opener in ("[[ a == b", "x=( a"):
+                closer = " ]]" if opener.startswith("[[") else " b )"
+                with self.subTest(quote=quote, opener=opener):
+                    categories, flags, uncertainty = self.result(
+                        f"cat <<{quote} && {opener}\n{self.LIFECYCLE}\nEOF\n{closer}")
+                    self.assertEqual((categories, flags), (["other"], []))  # the body is data, not commands
+                    self.assertNotIn("lex_error", uncertainty)
+        for opener, closer in (("[[ a == b", " ]]"), ("x=( a", " b )")):  # an unquoted body still substitutes
+            with self.subTest(opener=opener):
+                self.assert_lifecycle(f"cat <<EOF && {opener}\n$({self.LIFECYCLE})\nEOF\n{closer}")
+        self.assert_lifecycle("cat <<'EOF' && x=( a\nEOF\n b ); " + self.LIFECYCLE)
+
+    def test_a_heredoc_delimiter_written_with_an_ansi_c_escape_closes_the_body(self):
+        self.assertEqual(self.result("cat <<$'E\\x4fF'\n" + self.LIFECYCLE + "\nEOF\n"), (["other"], [], []))
+
+    def test_forms_that_evaluate_text_as_code_are_level_b(self):
+        for command in ("echo ${(e)X}", "echo ${X@P}", "echo ${(%)X}", "echo ${(e)${X}}", 'echo "${X@P}"'):
+            with self.subTest(command=command):
+                self.assert_level_b(command, "dynamic_code")
+        for command in ("echo ${(L)X}", "echo ${X@Q}", "echo ${X@U}"):
+            with self.subTest(command=command):
+                self.assertEqual(self.result(command), (["other"], [], []))
+
+
 class HeredocOpenerBound(unittest.TestCase):
     """More than MAX_HEREDOC_OPENERS openers: nothing is stripped (fail closed)."""
 
@@ -560,21 +688,23 @@ class HeredocOpenerBound(unittest.TestCase):
         return classify("cat " + "<<a " * openers + "\n" + "docker re" + "start x" + "\na\n")
 
     def test_up_to_the_bound_the_data_body_is_stripped(self):
-        self.assertEqual(audit.MAX_HEREDOC_OPENERS, 32)
+        self.assertEqual(classifier.MAX_HEREDOC_OPENERS, 32)
         self.assertEqual(self.body(2), (["other"], []))
-        self.assertEqual(self.body(audit.MAX_HEREDOC_OPENERS), (["other"], []))
+        self.assertEqual(self.body(classifier.MAX_HEREDOC_OPENERS), (["other"], []))
 
     def test_over_the_bound_the_body_is_classified_as_commands(self):
-        categories, flags = self.body(audit.MAX_HEREDOC_OPENERS + 1)
+        categories, flags = self.body(classifier.MAX_HEREDOC_OPENERS + 1)
         self.assertIn("docker-lifecycle", categories)
         self.assertEqual(flags, ["docker_lifecycle"])
 
     def test_the_sink_verdict_is_shared_by_the_openers_of_one_command(self):
-        with mock.patch.object(audit, "_is_data_sink", wraps=audit._is_data_sink) as sink:
-            audit.strip_heredoc_bodies("cat <<a <<b <<c\nx\na\ny\nb\nz\nc\n")
+        """audit-shell-lexer, tests that change: `strip_heredoc_bodies` and `_is_data_sink` are gone; the spy is on
+        `_heredoc_is_data`, reached through `analyze_command`, still one verdict per simple command."""
+        with mock.patch.object(classifier, "_heredoc_is_data", wraps=classifier._heredoc_is_data) as sink:
+            classifier.analyze_command("cat <<a <<b <<c\nx\na\ny\nb\nz\nc\n")
         self.assertEqual(sink.call_count, 1)
-        with mock.patch.object(audit, "_is_data_sink", wraps=audit._is_data_sink) as sink:
-            audit.strip_heredoc_bodies("cat <<a\nx\na\ncat <<b\ny\nb\n")
+        with mock.patch.object(classifier, "_heredoc_is_data", wraps=classifier._heredoc_is_data) as sink:
+            classifier.analyze_command("cat <<a\nx\na\ncat <<b\ny\nb\n")
         self.assertEqual(sink.call_count, 2)
 
 

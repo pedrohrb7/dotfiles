@@ -17,6 +17,10 @@ Small robustness gaps left in the watchdog added by [hook hardening](2026-11-13-
 - After an analysis timeout or crash, the record gets `run_tags: "timeout"`, which conflates slow tagging with failed analysis in hook health.
 - The `WHY["parse_uncertain"]` text only says "more than one plausible reading", but the reasons now cover more cases.
 
+## Partly covered
+
+The [audit-shell-lexer spec](../../features/audit-shell-lexer/spec.md) rewrites only the `WHY["parse_uncertain"]` text. SIGCHLD, the `waitpid` margin and `run_tags` stay open. Status stays Proposed.
+
 ## Proposed change
 
 Verify the SIGCHLD item first; then widen the `waitpid` margin, give failed analysis its own `run_tags` value, and reword the `parse_uncertain` text. Small enough to do without a spec.

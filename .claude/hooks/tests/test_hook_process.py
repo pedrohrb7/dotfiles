@@ -420,7 +420,7 @@ class HardeningProcess(ProcessCase):
     def test_p_hh5_an_exception_in_the_classifier_is_denied_as_unclassified(self):
         hp = self.hook()
         hp.patch_source('    if not seg or seg.startswith("cd "):\n        return\n',
-                        '    raise RecursionError("probe")\n')
+                        '    raise RecursionError("probe")\n', file="agent_audit_classify.py")
         self.assert_decision(self.bash_pre(hp, "echo hi"), "deny", "unclassified_command")
         [record] = hp.records()
         self.assertEqual(record["uncertainty"], ["classifier_error"])
@@ -434,6 +434,155 @@ class HardeningProcess(ProcessCase):
         hp = self.hook()
         command = "sh -s $(true) cat <<'EOF'\ndocker restart x\nEOF"
         self.assert_decision(self.bash_pre(hp, command), "deny", "docker_lifecycle")
+
+
+class ShellParserProcess(ProcessCase):
+    """Spec audit-shell-lexer, Task 2 (P-SL1, P-SL2, P-SL4): the forms the parser reads, through the real process.
+    Blocked forms are built from pieces, so the live hook does not deny this file's own text."""
+
+    LIFECYCLE = "docker re" + "start x"
+    CHECKED_HASH_FLAGS = b"\x03\x00\x00\x00"  # PEP 552: hash-based and checked against the source
+    PLAIN = "pytest tests/test_a.py"
+
+    def warm(self, hp):
+        """Run once with bytecode on, so the modules are cached; returns the cache file of the classifier."""
+        stdin = payload("PreToolUse", "Bash", actor="backend-python", cwd=self.repo, tool_input={"command": self.PLAIN})
+        proc = hp.run(stdin, self.repo, bytecode=True)
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, "", ""))
+        [cached] = (hp.dir / "__pycache__").glob("agent_audit_classify.*.pyc")
+        return cached
+
+    def run_plain(self, hp):
+        proc = hp.run(payload("PreToolUse", "Bash", actor="backend-python", cwd=self.repo,
+                              tool_input={"command": self.PLAIN}), self.repo, bytecode=True)
+        self.assertEqual((proc.returncode, proc.stderr), (0, ""))
+        return proc
+
+    def bash_pre(self, hp, command, actor="backend-python"):
+        return self.output(self.run_hook(hp, payload("PreToolUse", "Bash", actor=actor, cwd=self.repo,
+                                                     tool_input={"command": command})))
+
+    def test_p_sl1_forms_that_were_not_seen_are_denied(self):
+        hp = self.hook()
+        for command in (f"true & {self.LIFECYCLE}", f"cat <<EOF\n$({self.LIFECYCLE})\nEOF",
+                        f'A="x y z w v" {self.LIFECYCLE.replace("x", "api")} # "', f"( {self.LIFECYCLE} )",
+                        f"x=$({self.LIFECYCLE})"):
+            for actor in ("backend-python", "main"):
+                with self.subTest(command=command, actor=actor):
+                    self.assert_decision(self.bash_pre(hp, command, actor), "deny", "docker_lifecycle")
+
+    def test_p_sl1_text_that_only_looks_like_a_command_is_silent(self):
+        hp = self.hook()
+        for command in (f"python3 - <<'EOF'\n{self.LIFECYCLE}\nEOF", f'echo "a\n{self.LIFECYCLE}"',
+                        f"cat > f <<'EOF'\n$({self.LIFECYCLE})\nEOF", "pytest tests/test_a.py"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash_pre(hp, command))
+
+    def test_p_sl2_a_text_that_does_not_close_is_denied_as_unclassified(self):
+        hp = self.hook()
+        self.assert_decision(self.bash_pre(hp, 'echo "a'), "deny", "unclassified_command")
+        [record] = hp.records()
+        self.assertEqual(record["uncertainty"], ["lex_error"])
+        self.assertEqual(record["categories"], ["unclassified"])
+
+    def test_p_sl3_code_built_from_a_variable_is_denied_as_unclassified(self):
+        hp = self.hook()
+        self.assert_decision(self.bash_pre(hp, 'bash -c "$X"'), "deny", "unclassified_command")
+        [record] = hp.records()
+        self.assertEqual(record["uncertainty"], ["dynamic_code"])
+        self.assertEqual(record["categories"], ["other", "unclassified"])
+
+    def test_p_sl3_code_in_an_argument_is_classified(self):
+        hp = self.hook()
+        for command in (f"bash -c '{self.LIFECYCLE}'", f"eval {self.LIFECYCLE}", f"nvim -c '!{self.LIFECYCLE}'"):
+            with self.subTest(command=command):
+                self.assert_decision(self.bash_pre(hp, command), "deny", "docker_lifecycle")
+
+    def test_p_sl4_the_modules_are_cached_as_bytecode_and_give_the_same_decision(self):
+        hp = self.hook()
+        cache = hp.dir / "__pycache__"
+        self.assertFalse(cache.exists())
+        stdin = payload("PreToolUse", "Bash", actor="backend-python", cwd=self.repo,
+                        tool_input={"command": f"true & {self.LIFECYCLE}"})
+        first = hp.run(stdin, self.repo, bytecode=True)
+        for module in ("agent_audit_shell", "agent_audit_classify"):
+            compiled = sorted(cache.glob(f"{module}.*.pyc"))
+            self.assertEqual(len(compiled), 1, compiled)  # the modules only: the hook is a script, never cached
+            self.assertEqual(compiled[0].read_bytes()[4:8], self.CHECKED_HASH_FLAGS, module)  # PEP 552, checked
+        self.assertEqual(list(cache.glob("agent-audit*.pyc")), [])
+        second = hp.run(stdin, self.repo, bytecode=True)
+        for proc in (first, second):
+            self.assertEqual((proc.returncode, proc.stderr), (0, ""))
+        self.assertEqual(first.stdout, second.stdout)
+        self.assert_decision(json.loads(second.stdout), "deny", "docker_lifecycle")
+        normal = hp.run(payload("PreToolUse", "Bash", actor="backend-python", cwd=self.repo,
+                                tool_input={"command": "pytest tests/test_a.py"}), self.repo, bytecode=True)
+        self.assertEqual((normal.returncode, normal.stdout, normal.stderr), (0, "", ""))
+
+    def test_p_sl4_a_stale_bytecode_is_recompiled_after_the_source_changes(self):
+        hp = self.hook()
+        stdin = payload("PreToolUse", "Bash", actor="backend-python", cwd=self.repo,
+                        tool_input={"command": "pytest tests/test_a.py"})
+        self.assertEqual(hp.run(stdin, self.repo, bytecode=True).stdout, "")
+        for name in ("agent_audit_shell.py", "agent_audit_classify.py"):
+            module = hp.dir / name
+            module.write_text(module.read_text(encoding="utf-8") + "\n" + "x" * 7 + " = 1\n", encoding="utf-8")  # size changes
+        proc = hp.run(stdin, self.repo, bytecode=True)
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, "", ""))
+        for module in ("agent_audit_shell", "agent_audit_classify"):  # the cache was rewritten, still checked-hash
+            [cached] = (hp.dir / "__pycache__").glob(f"{module}.*.pyc")
+            self.assertEqual(cached.read_bytes()[4:8], self.CHECKED_HASH_FLAGS)
+
+    def test_p_sl4_a_same_size_edit_with_the_same_mtime_is_not_served_from_the_cache(self):
+        """The case a timestamp `.pyc` gets wrong: the source changes but its size and mtime do not."""
+        hp = self.hook()
+        self.warm(hp)
+        source = hp.dir / "agent_audit_classify.py"
+        before = source.stat()
+        hp.patch_source("\nimport re\nfrom collections", "\nimport xx\nfrom collections", file="agent_audit_classify.py")
+        os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+        after = source.stat()
+        self.assertEqual((after.st_size, after.st_mtime_ns), (before.st_size, before.st_mtime_ns))
+        proc = self.run_plain(hp)  # the edited source does not import: the classifier is gone, not the old bytecode
+        self.assert_decision(json.loads(proc.stdout), "deny", "unclassified_command")
+        [first, *_] = hp.records()
+        self.assertEqual(first["uncertainty"], ["classifier_error"])
+
+    def test_p_sl4_a_planted_bytecode_is_not_used(self):
+        """A `.pyc` that claims the source's mtime and size, or carries a wrong hash, never runs."""
+        import marshal
+        from importlib.util import MAGIC_NUMBER
+        hp = self.hook()
+        cached = self.warm(hp)
+        stat_ = (hp.dir / "agent_audit_classify.py").stat()
+        planted = marshal.dumps(compile("raise ImportError('planted')", "planted", "exec"))
+        timestamp = MAGIC_NUMBER + b"\x00\x00\x00\x00" + (int(stat_.st_mtime) & 0xFFFFFFFF).to_bytes(4, "little") \
+            + (stat_.st_size & 0xFFFFFFFF).to_bytes(4, "little") + planted
+        wrong_hash = MAGIC_NUMBER + self.CHECKED_HASH_FLAGS + b"\x00" * 8 + planted
+        unchecked = MAGIC_NUMBER + b"\x01\x00\x00\x00" + b"\x00" * 8 + planted
+        for name, data in (("timestamp", timestamp), ("wrong hash", wrong_hash), ("unchecked hash", unchecked),
+                           ("garbage", b"not bytecode")):
+            with self.subTest(name):
+                cached.write_bytes(data)
+                proc = self.run_plain(hp)
+                self.assertEqual((proc.stdout, proc.stderr), ("", ""))  # the real classifier ran: the command is plain
+                self.assertEqual(hp.records(), [])
+                self.assertEqual(cached.read_bytes()[4:8], self.CHECKED_HASH_FLAGS)  # and the cache is repaired
+
+    def test_p_sl4_a_module_that_exits_at_import_denies_bash_and_the_hook_still_decides(self):
+        """`SystemExit` (a BaseException) raised by a tampered module is caught by the loader: fail closed."""
+        for file, anchor in (("agent_audit_shell.py", "MAX_NESTING = 32\n"), ("agent_audit_classify.py", "MAX_CODE_DEPTH = 3\n")):
+            for exc in ("SystemExit(3)", "KeyboardInterrupt()"):
+                with self.subTest(file=file, exc=exc):
+                    hp = self.hook()
+                    hp.patch_source(anchor, f"{anchor}raise {exc}\n", file=file)
+                    proc = self.run_plain(hp)
+                    self.assert_decision(json.loads(proc.stdout), "deny", "unclassified_command")
+                    [first, *_] = hp.records()
+                    self.assertEqual((first["uncertainty"], first["error"]), (["classifier_error"], "RuntimeError"))
+                    write = hp.run(payload("PreToolUse", "Write", actor="main", cwd=self.repo,
+                                           tool_input={"file_path": str(self.repo / "a.txt")}), self.repo)
+                    self.assertEqual((write.returncode, write.stdout, write.stderr), (0, "", ""))
 
 
 class WatchdogProcess(ProcessCase):
@@ -457,7 +606,7 @@ class WatchdogProcess(ProcessCase):
 
     def test_p_hh8_a_long_c_call_in_the_classifier_is_an_analysis_timeout(self):
         hp = self.hook()
-        hp.patch_source(self.SEGMENT_HEAD, "    sum(range(10**12))\n" + self.SEGMENT_HEAD)
+        hp.patch_source(self.SEGMENT_HEAD, "    sum(range(10**12))\n" + self.SEGMENT_HEAD, file="agent_audit_classify.py")
         out, elapsed = self.run_timed(hp, "PreToolUse", "echo hi", self.SHORT)
         self.assert_decision(out, "deny", "analysis_timeout")
         self.assertLess(elapsed, 2.0)
@@ -466,7 +615,8 @@ class WatchdogProcess(ProcessCase):
 
     def test_p_hh9_a_classifier_that_kills_the_process_is_an_analysis_crash(self):
         hp = self.hook()
-        hp.patch_source(self.SEGMENT_HEAD, "    os._exit(3)\n" + self.SEGMENT_HEAD)
+        hp.patch_source(self.SEGMENT_HEAD, "    import os\n    os._exit(3)\n" + self.SEGMENT_HEAD,
+                        file="agent_audit_classify.py")
         out, elapsed = self.run_timed(hp, "PreToolUse", "echo hi")
         self.assert_decision(out, "deny", "unclassified_command")
         self.assertLess(elapsed, 2.0)
@@ -501,8 +651,8 @@ class WatchdogProcess(ProcessCase):
     def test_wd8_whatever_the_child_writes_never_reaches_the_hook_output(self):
         hp = self.hook()
         hp.patch_source(self.SEGMENT_HEAD, (
-            '    print("noise")\n    try:\n        os.write(1, b"raw\\n")\n        os.write(2, b"raw\\n")\n'
-            "    except OSError:\n        pass\n") + self.SEGMENT_HEAD)
+            '    import os\n    print("noise")\n    try:\n        os.write(1, b"raw\\n")\n        os.write(2, b"raw\\n")\n'
+            "    except OSError:\n        pass\n") + self.SEGMENT_HEAD, file="agent_audit_classify.py")
         self.assertIsNone(self.run_timed(hp, "PreToolUse", "echo hi")[0])  # stdout empty and stderr empty
         out, _ = self.run_timed(hp, "PreToolUse", "docker compose restart api")
         self.assert_decision(out, "deny", "docker_lifecycle")  # exactly one JSON line, no noise around it

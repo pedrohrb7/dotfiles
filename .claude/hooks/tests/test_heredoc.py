@@ -6,9 +6,9 @@ All docker/git text below is string literals only; nothing is executed.
 import unittest
 from unittest import mock
 
-from ._support import audit
+from ._support import TempRepoCase, call_main, classifier, payload
 
-classify = audit.classify_command
+classify = classifier.classify_command
 
 LIFECYCLE = "docker_lifecycle"
 
@@ -175,7 +175,6 @@ class BodyKeptUnlessDataSink(unittest.TestCase):
             "dash": "dash <<EOF\ndocker compose up\nEOF",
             "ksh": "ksh <<EOF\ndocker compose up\nEOF",
             "env_prefix": "FOO=1 bash <<EOF\ndocker compose up\nEOF",
-            "python3": "python3 <<EOF\ndocker compose up\nEOF",
             "env_bash": "env bash <<EOF\ndocker compose up\nEOF",
             "timeout_bash": "timeout 5 bash <<EOF\ndocker compose up\nEOF",
             "nohup_bash": "nohup bash <<EOF\ndocker compose up\nEOF",
@@ -203,6 +202,17 @@ class BodyKeptUnlessDataSink(unittest.TestCase):
         _, flags = classify("ssh host <<EOF\ngit push origin main\nEOF")
         self.assertIn("git_push", flags)
 
+    def test_a_body_for_an_interpreter_of_another_language_is_not_shell(self):
+        """audit-shell-lexer HD4, X7 (decided by the user, Open question 3): a program of another language is not
+        read as shell. `python3 <<EOF` used to be in the table above; its body was a false positive."""
+        for receiver in ("python3", "python", "python3.12", "node", "ruby", "perl", "lua", "luajit", "php",
+                         "/usr/bin/python3", "sudo python3 -"):
+            for opener in ("<<EOF", "<<'EOF'"):
+                with self.subTest(receiver=receiver, opener=opener):
+                    categories, flags = classify(f"{receiver} {opener}\ndocker compose up\nEOF")
+                    self.assertEqual(flags, [])
+                    self.assertEqual(categories, ["other"])
+
 
 class FailSafeStripsNothing(unittest.TestCase):
     def test_risky_constructs_disable_stripping(self):
@@ -211,14 +221,24 @@ class FailSafeStripsNothing(unittest.TestCase):
             "ansi_c_quote": "echo $'a\\' <<EOF '\ndocker compose restart api",
             "legacy_arith": "echo $[1<<EOF]\ndocker compose restart api",
             "crlf": "cat <<EOF\r\nhi\r\nEOF\r\ndocker compose up",
+        }
+        for name, cmd in cases.items():
+            with self.subTest(case=name):
+                _, flags = classify(cmd)
+                self.assertIn(LIFECYCLE, flags)
+
+    def test_constructs_the_parser_models_no_longer_disable_stripping(self):
+        """audit-shell-lexer, section 5: these three kept their body only because the old scanner did not model
+        `${`, backticks and `\\r`. A quoted delimiter turns expansions off, and `\\r` is an ordinary character in
+        bash and zsh (the delimiter is `EOF` + `\\r`), so the body is data."""
+        cases = {
             "crlf_body": "cat <<EOF\r\ndocker compose up\r\nEOF\r\n",
             "brace_in_body": "cat <<'EOF'\n${HOME}\ndocker compose up\nEOF",
             "backtick_in_body": "cat <<'EOF'\n`x`\ndocker compose up\nEOF",
         }
         for name, cmd in cases.items():
             with self.subTest(case=name):
-                _, flags = classify(cmd)
-                self.assertIn(LIFECYCLE, flags)
+                self.assertEqual(classify(cmd), (["other"], []))
 
 
 class TerminatorSemantics(unittest.TestCase):
@@ -228,12 +248,26 @@ class TerminatorSemantics(unittest.TestCase):
         self.assertIn(LIFECYCLE, flags)
 
 
-class ScannerFallback(unittest.TestCase):
-    def test_scanner_exception_classifies_original_command(self):
+class ScannerFallback(TempRepoCase):
+    """audit-shell-lexer, tests that change: there is no scanner with a fallback any more; the parser reads the
+    heredocs, and a defect of the parser is level B (U4 of audit-hook-hardening): it propagates out of
+    `analyze_command` and the hook denies the command as `classifier_error`."""
+
+    def test_a_parser_exception_propagates(self):
         cmd = "cat <<EOF\ndocker compose up\nEOF"
-        with mock.patch.object(audit, "_scan_heredocs", side_effect=RuntimeError("boom")):
-            _, flags = classify(cmd)
-        self.assertIn(LIFECYCLE, flags)
+        with mock.patch.object(classifier.shell, "parse", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                classify(cmd)
+
+    def test_a_parser_exception_is_denied_by_the_hook(self):
+        cmd = "cat <<EOF\ndocker compose up\nEOF"
+        with mock.patch.object(classifier.shell, "parse", side_effect=RuntimeError("boom")):
+            res = call_main(payload("PreToolUse", "Bash", actor="backend-python", cwd=self.repo,
+                                    tool_input={"command": cmd}))
+        self.assertEqual(res.output["hookSpecificOutput"]["permissionDecision"], "deny")
+        [record] = res.records
+        self.assertEqual(record["uncertainty"], ["classifier_error"])
+        self.assertEqual(record["decision_category"], "unclassified_command")
 
 
 def _sub(prefix, suffix=""):
@@ -365,7 +399,11 @@ class HeredocCleanPrefix(unittest.TestCase):
                 self.assertClassified(_doc(prefix))
 
     def test_hs2_group_prefix_and_restored_segment_start(self):
-        self.assertClassified(_doc("(sh -s) cat <<EOF"))
+        # audit-shell-lexer, tests that change: `(sh -s) cat` is a syntax error in bash and in zsh (a word after a
+        # compound), so the whole command is level B instead of a body kept for a group prefix
+        result = classifier.analyze_command(_doc("(sh -s) cat <<EOF"))
+        self.assertEqual((result.categories, result.flags), (["unclassified"], ["unclassified_command"]))
+        self.assertEqual(result.uncertainty, ["lex_error"])
         cmd = ("git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)\" && cat <<X\n" + BODY + "\nX")
         categories, flags = classify(cmd)
         self.assertEqual(flags, ["git_commit"])
@@ -392,13 +430,22 @@ class HeredocCleanPrefix(unittest.TestCase):
         self.assertStripped(_sub("gh pr create --title t --body "))
         self.assertClassified("git commit -m \"$X$(cat <<'EOF'\n" + BODY + "\nEOF\n)\"")
 
-    def test_hs7_clean_sink_tokens(self):
-        clean = audit._clean_sink_tokens
+    def test_hs7_clean_sink_words(self):
+        """audit-shell-lexer, tests that change: `_clean_sink_tokens(text)` is `_clean_sink_words(site)`, over the
+        words of the parser (the same cases). A redirection is not a word, so `> $F` is not in the result; text
+        that does not parse has no site at all."""
+        def clean(text, **kwargs):
+            try:
+                script = classifier.shell.parse(text, classifier.shell.Budget(10**6))
+            except classifier.shell.ShellError:
+                return None
+            return classifier._clean_sink_words(next(classifier.shell.iter_sites(script)), **kwargs)
+
         self.assertIsNone(clean("cat 'x"))
         self.assertIsNone(clean("timeout zz cat"))
-        self.assertEqual(clean("FOO=1 cat > $F"), ["cat", ">", "$F"])
+        self.assertEqual(clean("FOO=1 cat > $F"), ["cat"])
         self.assertIsNone(clean("A=$B cat"))
-        self.assertIsNone(clean("git $X commit", any_dollar=True))
+        self.assertIsNone(clean("git $X commit", any_dynamic=True))
         self.assertEqual(clean("git $X commit"), ["git", "$X", "commit"])
 
 

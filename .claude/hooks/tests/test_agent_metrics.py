@@ -329,6 +329,26 @@ class UncertaintySection(MetricsCase):
             self.assertIn("`cap`", fp)
             self.assertNotIn("`plain`", fp)
 
+    def test_mr6_dynamic_command_and_old_reasons(self):
+        """audit-shell-lexer: `dynamic_command` is level A; the removed reasons stay level A for old records;
+        the new level B reasons count as false-positive candidates through unclassified_command."""
+        with self.subTest(case="MR6"):
+            events = [
+                self.bash("PreToolUse", cmd="dyn", uncertainty=["dynamic_command"], decision="ask", decision_category="git_push"),
+                self.bash("PreToolUse", cmd="old1", uncertainty=["shlex_fallback"], decision="block", decision_category="docker_lifecycle"),
+                self.bash("PreToolUse", cmd="old2", uncertainty=["loose_assignment_truncated"], decision="ask", decision_category="git_push"),
+                self.bash("PreToolUse", cmd="lex", uncertainty=["lex_error"], decision="block", decision_category="unclassified_command"),
+                self.bash("PreToolUse", cmd="plain", decision="block", decision_category="docker_lifecycle"),
+            ]
+            body = section(self.report(events), self.HEAD)
+            for reason in ("dynamic_command", "shlex_fallback", "loose_assignment_truncated", "lex_error"):
+                self.assertIn(f"| {reason} | 1 | ", body)
+            fp = body.split("**False-positive candidates**")[1].split("**False-negative")[0]
+            self.assertIn("(4)", fp)
+            self.assertNotIn("`plain`", fp)
+        self.assertEqual(metrics.LEVEL_A_REASONS, ("prefix_readings", "heredoc_unclean_prefix", "dynamic_command",
+                                                   "shlex_fallback", "loose_assignment_truncated"))
+
     def test_mr3_false_negative_candidates(self):
         with self.subTest(case="MR3"):
             events = [

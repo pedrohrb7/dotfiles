@@ -22,3 +22,13 @@ Confirmed bugs that need fixing, one file per bug.
 | [agent-audit tests: 14 fail when TMPDIR is under /tmp/claude-*](2026-11-12-audit-tests-fail-under-tmp-claude.md) | medium | Fixed |
 | [agent-audit: active_run crashes on a run state that is not a JSON object](2026-11-12-audit-active-run-non-object-state.md) | medium | Fixed |
 | [agent-audit: heredoc data-sink misjudged after a command substitution (sh body stripped)](2026-11-13-audit-heredoc-sink-runs-sh.md) | medium | Fixed |
+| [agent-audit: unquoted heredoc body with command substitution is stripped as data](2026-11-13-audit-heredoc-unquoted-substitution.md) | high | Fixed |
+| [agent-audit: a group or subshell reading a pipe is not flagged](2026-11-14-audit-pipe-into-group-not-flagged.md) | high | Open |
+| [agent-audit: git config keys that execute commands are not modeled (and cross-call aliases)](2026-11-14-audit-git-config-keys-run-commands.md) | high | Open |
+| [agent-audit: dc, GNU sed e and awk system() execute commands without classification](2026-11-14-audit-dc-sed-awk-execute-code.md) | medium | Open |
+| [agent-audit: env with a dynamic NAME stops the wrapper reading before GIT_CONFIG_PARAMETERS](2026-11-14-audit-env-dynamic-word-stops-wrapper.md) | low | Open |
+| [agent-audit: ${!x[@]} with a tainted x is classified dynamic_code (false positive)](2026-11-14-audit-indirect-subscript-false-positive.md) | low | Open |
+| [agent-audit: whole-script disqualifier sends a python or markdown heredoc body to the shell parser when the text has mkfifo](2026-11-14-audit-mkfifo-disqualifier-false-positive.md) | low | Open |
+| [agent-audit: canary spans inside a backtick with escapes are relative to the unescaped text](2026-11-14-audit-canary-span-backtick-escapes.md) | low | Open |
+| [agent-audit: heredoc with HTML body and a group-level redirect, or HEAD() { cat <<EOF }, reads as code (lex_error)](2026-11-14-audit-html-heredoc-group-redirect.md) | low | Open |
+| [hooks tests: SP8 linearity test compares CPU times with a 5x ratio (flake risk)](2026-11-14-audit-sp8-linearity-flake-risk.md) | low | Open |

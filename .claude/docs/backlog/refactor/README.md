@@ -27,16 +27,21 @@ Planned refactors that aren't urgent bugs but are worth doing deliberately, one 
 | [planner agent contradicts itself on where it may write (OPEN_QUESTIONS.md)](2026-11-13-planner-write-scope-contradiction.md) | Proposed |
 | [agent-workflow.md 13.1 says the hook is a no-op without an active run](2026-11-13-agent-workflow-13-1-outdated.md) | Proposed |
 | [agent-audit: no guard against interactive programs run through Bash](2026-11-13-audit-interactive-app-guard.md) | Proposed |
-| [agent-audit: strip_prefixes does not strip env, nice and nohup wrappers](2026-11-13-audit-strip-prefixes-wrappers.md) | Merged into audit-shell-lexer |
+| [agent-audit: strip_prefixes does not strip env, nice and nohup wrappers](2026-11-13-audit-strip-prefixes-wrappers.md) | Done (remaining wrappers in a new entry) |
 | [agent-audit: hook hardening (metrics file, run state size, timeouts)](2026-11-13-audit-hook-hardening.md) | Done |
-| [agent-audit: quote-blind SEGMENT_SPLIT splits inside quoted arguments](2026-11-13-audit-segment-split-quote-blind.md) | Merged into audit-shell-lexer |
-| [agent-audit: nvim shell-execution forms not classified](2026-11-13-audit-nvim-shell-exec-unclassified.md) | Merged into audit-shell-lexer |
+| [agent-audit: quote-blind SEGMENT_SPLIT splits inside quoted arguments](2026-11-13-audit-segment-split-quote-blind.md) | Done |
+| [agent-audit: nvim shell-execution forms not classified](2026-11-13-audit-nvim-shell-exec-unclassified.md) | Done (vim.cmd forms in a new entry) |
 | [agent-audit: timeout parsing limits (locale strtod, nested unknown durations)](2026-11-13-audit-timeout-parsing-limits.md) | Done |
 | [agent-audit: nvim nesting depth cap reuses the docker_lifecycle deny](2026-11-13-audit-nvim-depth-cap-category.md) | Done |
 | [agent-audit: nvim -l ... --busted (lazy.nvim minit) not recognized as a Lua test runner](2026-11-13-audit-nvim-busted-minit-runner.md) | Proposed |
 | [agent-audit: PACKAGE_HINT treats ./spec and ./tests as package paths](2026-11-13-audit-package-hint-dot-slash.md) | Proposed |
 | [tdd skill: step 2 allows not-implemented throws, step 4 requires assertion failures](2026-11-13-tdd-stub-throw-rule.md) | Proposed |
-| [hooks tests: claude-hooks suite exceeds the 5 s target (about 6 s for 462 tests, goal under 5 s)](2026-11-13-hooks-tests-suite-slow.md) | Proposed (partly done by audit-hook-hardening) |
-| [agent-audit: shell lexer and parser for command positions (fails closed)](2026-11-13-audit-shell-lexer.md) | Proposed |
-| [agent-audit: hook compiled on every call (launcher with cached bytecode)](2026-11-13-audit-hook-launcher-performance.md) | Proposed |
+| [hooks tests: claude-hooks suite exceeds the 5 s target (about 6 s for 462 tests, goal under 5 s)](2026-11-13-hooks-tests-suite-slow.md) | Proposed (to lower further; Task 7 budget revised to 12 s for 811 tests, measured 9.9-11 s) |
+| [agent-audit: shell lexer and parser for command positions (fails closed)](2026-11-13-audit-shell-lexer.md) | Done (uncommitted) |
+| [agent-audit: hook compiled on every call (launcher with cached bytecode)](2026-11-13-audit-hook-launcher-performance.md) | Done (overtaken by audit-shell-lexer part C, 2026-11-14) |
 | [agent-audit: watchdog robustness notes](2026-11-13-audit-watchdog-robustness-notes.md) | Proposed |
+| [agent-audit: wrappers and launchers outside the table are recorded only by the canary](2026-11-14-audit-wrappers-outside-table.md) | Proposed |
+| [agent-audit: exotic forms not modeled (trap DEBUG, zparseopts -A, same-text aliases)](2026-11-14-audit-exotic-forms-not-modeled.md) | Proposed |
+| [agent-audit: the git push check matches push as an argument; use the git subcommand](2026-11-14-audit-git-push-regex-argument.md) | Proposed |
+| [agent-audit: nvim vim.cmd / nvim_command executing ex commands with a bang are not modeled](2026-11-14-audit-nvim-vim-cmd-bang.md) | Proposed |
+| [agent-audit: _prefix_steps evaluated twice per site](2026-11-14-audit-prefix-steps-evaluated-twice.md) | Proposed |

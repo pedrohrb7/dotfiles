@@ -25,6 +25,9 @@ from . import _loader
 from ._loader import load_hook
 
 audit = load_hook("agent-audit.py", "agent_audit")
+# The command classifier is a module of its own, loaded by the hook (which registers it in `sys.modules`): this is the
+# instance the hook calls, so a `mock.patch.object(classifier, ...)` reaches the hook too. `classifier.shell` is the parser.
+classifier = load_hook("agent_audit_classify.py")
 metrics = load_hook("agent-metrics.py", "agent_metrics")
 
 HOOKS_DIR = _loader.HOOKS_DIR
@@ -261,22 +264,29 @@ class HookProcess:
         self.script = self.dir / "agent-audit.py"
         shutil.copy2(HOOKS_DIR / "agent-audit.py", self.script)
         shutil.copy2(HOOKS_DIR / "agent-metrics.py", self.dir / "agent-metrics.py")
+        for module in ("agent_audit_shell.py", "agent_audit_classify.py"):  # the hook loads them by path
+            shutil.copy2(HOOKS_DIR / module, self.dir / module)
         if isinstance(config, str):
             (self.dir / "agent-audit.json").write_text(config, encoding="utf-8")
         elif config is not None:
             (self.dir / "agent-audit.json").write_text(json.dumps(config), encoding="utf-8")
 
-    def patch_source(self, old: str, new: str) -> None:
-        """Replace a snippet of the private copy of the hook (never the versioned file).
+    def patch_source(self, old: str, new: str, file: str = "agent-audit.py") -> None:
+        """Replace a snippet of a file of the private copy of the hook (never the versioned file): the hook itself,
+        or a module it loads (`file="agent_audit_shell.py"`, `file="agent_audit_classify.py"`).
 
         Fails when `old` does not appear exactly once, so a refactor cannot turn the patch into a no-op."""
-        text = self.script.read_text(encoding="utf-8")
+        path = self.dir / file
+        text = path.read_text(encoding="utf-8")
         found = text.count(old)
         if found != 1:
-            raise AssertionError(f"patch_source: {old!r} appears {found} times in the hook copy, expected exactly 1")
-        self.script.write_text(text.replace(old, new), encoding="utf-8")
+            raise AssertionError(f"patch_source: {old!r} appears {found} times in {file} of the hook copy, expected exactly 1")
+        path.write_text(text.replace(old, new), encoding="utf-8")
 
-    def run(self, stdin: "dict | str", cwd, extra_env: "dict[str, str] | None" = None) -> CompletedProcess:
+    def run(self, stdin: "dict | str", cwd, extra_env: "dict[str, str] | None" = None,
+            bytecode: bool = False) -> CompletedProcess:
+        """Run the hook copy once. `bytecode=True` leaves out `-B`, so the interpreter writes and reads the
+        `__pycache__` of the module the hook loads (the live hook runs that way)."""
         data = stdin if isinstance(stdin, str) else json.dumps(stdin)
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -286,9 +296,10 @@ class HookProcess:
             "GIT_CONFIG_NOSYSTEM": "1",
         }
         env.update(extra_env or {})
+        flags = ["-I"] if bytecode else ["-I", "-B"]
         with _PROCESS_SLOTS:
             return subprocess.run(
-                [sys.executable, "-I", "-B", str(self.script)],
+                [sys.executable, *flags, str(self.script)],
                 input=data, capture_output=True, text=True, cwd=str(cwd), env=env, timeout=self.TIMEOUT,
             )
 
@@ -416,6 +427,31 @@ class ForkedSuite(unittest.TestSuite):
             finally:
                 result.stopTest(test)
         return result
+
+
+def package_suite(loader, package: str, package_file: str, pattern: str):
+    """The tests of every module of the package as one suite, for `load_tests` of the package `__init__`.
+
+    Each module is loaded through its own `load_tests`. The independent cases of the modules that return a
+    `ForkedSuite` (and have no fixtures) share one `ForkedSuite`, queued with the modules that start the most
+    hook processes first so a long test never runs alone at the end; the other modules run as usual, first."""
+    import fnmatch
+    names = sorted(f[:-3] for f in os.listdir(Path(package_file).parent) if f.endswith(".py") and fnmatch.fnmatch(f, pattern))
+    heavy = [n for n in _HEAVY_FIRST if n in names]
+    names = heavy + [n for n in names if n not in heavy]
+    plain, forked = unittest.TestSuite(), []
+    for name in names:
+        suite = loader.loadTestsFromName(f"{package}.{name}")
+        leaves = list(_leaves(suite))
+        if isinstance(suite, ForkedSuite) and leaves and not any(_has_fixtures(t) for t in leaves):
+            forked.extend(leaves)
+        else:
+            plain.addTest(suite)
+    return unittest.TestSuite([plain, ForkedSuite(forked)])
+
+
+# Modules whose cases start hook processes (the long ones), queued first by `package_suite`.
+_HEAVY_FIRST = ("test_hook_process", "test_watchdog", "test_shell_properties", "test_uncertainty", "test_hook_main")
 
 
 def _has_fixtures(test) -> bool:

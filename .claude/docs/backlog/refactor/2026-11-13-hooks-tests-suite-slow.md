@@ -38,3 +38,9 @@ Shorter timeouts can make timing tests flaky. Shared `HookProcess` setups can le
 ## Out of scope
 
 Changes to the hook itself (`agent-audit.py`).
+
+## Result of audit-shell-lexer (2026-11-14)
+Task 7 budget of 8.5 s not met: 811 tests take 9.9-11 s at load 1.5-2.9 (earlier runs 8.3-9.5 s for 655 tests at load 4-6). Estimate on an idle 4-core machine about 6.5-7 s at 655 tests. The under-5 s goal stays open. Source: [log](../../features/audit-shell-lexer/log.md).
+
+## Budget revised (2026-11-14)
+User decision (audit-shell-lexer): the Task 7 budget was revised to 12 s for 811 tests (measured 9.9-11.0 s), so it is met. This entry stays Proposed to lower the time further.

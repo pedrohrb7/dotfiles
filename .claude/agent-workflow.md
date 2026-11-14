@@ -801,21 +801,25 @@ Alvos de `approved_scope` que casam com a regra são descartados dos caminhos pe
 
 ### 13.6 Heredoc no Bash: corpo é dado só para sinks conhecidos
 
-O classificador do `hooks/agent-audit.py` (`strip_heredoc_bodies`) separa o comando em segmentos. Sem tratar heredoc, cada linha do corpo viraria um "comando" (um `docker compose up` dentro de um `git commit -F - <<EOF` seria `docker_lifecycle`). Mas o contrário é pior: tirar o corpo de um `bash <<EOF` esconderia código de verdade. Por isso a regra é **fail-closed**: o corpo só é removido (tratado como dado) para uma lista fechada de sinks; qualquer outro heredoc mantém o corpo, que é classificado como comandos (só a linha do terminador sai).
+*Adendo 2026-11-14 (feature `audit-shell-lexer`):* o `strip_heredoc_bodies` e o scanner de heredoc deixaram de existir. O `hooks/agent_audit_shell.py` lê o comando em uma árvore (heredocs inclusive, com a semântica do bash) e o `hooks/agent_audit_classify.py` decide o destino de cada corpo **pelo receptor**. A regra continua **fail-closed**: o corpo só é dado para uma lista fechada de receptores; qualquer outro é um script de shell, analisado como comandos um nível abaixo (`MAX_CODE_DEPTH` 3, depois `nested_shell_depth`). Tirar o corpo de um `bash <<EOF` esconderia código de verdade.
 
-**Sinks de dados (corpo removido):**
+**Receptores de dados (corpo removido):**
 
-| Sink | Condição |
+| Receptor | Condição |
 |---|---|
-| `cat` ou `tee` no nível raiz | sem pipe, sem `<(`/`>(` e sem `$(` na linha do abridor |
-| `git commit -F -` / `--file -` | sem `-c alias.*` nem `-c core.*` (executam código) |
-| `$(cat <<EOF ...)` como valor de `git commit -m` / `--message` | mesma restrição de `-c` |
-| `gh pr\|issue\|release create\|edit\|comment\|review` com `--body-file -` / `-F -` | |
+| `cat` ou `tee` no nível de cima | fora de pipeline; prefixo limpo (uma só leitura, sem expansão antes da cabeça) |
+| `cat` ou `tee` com redirecionamento de saída próprio (`>`, `>>`, `>\|`, `&>`, `&>>`) | único estágio de um pipeline inteiro dentro de corpo de função ou de grupo `{ }` (HD3 revisado) |
+| `git commit -F -` / `--file -` | `commit` só conta como subcomando depois das opções globais; sem `-c alias.*` nem `-c core.*` |
+| `$(cat <<EOF ...)` como valor de `git commit -m` / `--message` (também `--message="$(...)"`) | mesma restrição de `-c` |
+| `gh pr\|issue\|release ... --body-file -` / `-F -` | |
 | `$(cat <<EOF ...)` como valor de `--body` / `-b` / `--title` / `-t` desses comandos `gh` | |
+| `NAME=$(cat <<'EOF' ...)` | o corpo é dado e passa a ser o valor de `NAME` |
 
-Todo o resto (`bash`, `sh`, `python3`, `... | bash`, `eval`, `xargs`, `cat <<EOF | sh` etc.) tem o corpo classificado.
+**Receptores que não são shell (HD4):** `python`, `python3`, `node`, `ruby`, `perl`, `lua`, `luajit`, `php`, os lançadores `uv|poetry|pdm|hatch|pipenv|rye|conda|mamba|micromamba|pixi run` que resolvem para eles, e os clientes SQL e DSL `sqlite3`, `psql`, `mysql`, `mariadb`, `cypher-shell`. Só vale quando **toda** leitura do receptor é de outra linguagem. Nos clientes SQL, os escapes que executam programas (`.shell`, `.system`, `.once |`, `\!`, `\g |`, `\o |`, `\copy program`, `\e`, `\setenv`, `COPY ... PROGRAM`, `system`, `pager`, qualquer palavra `edit`) são nível B (`dynamic_code`), também nos argumentos `-c`/`-e`.
 
-**Marcadores de falha segura:** se o comando contém qualquer construção que o scanner não modela, **nada** é removido e o comando inteiro é classificado: `${`, `$'`, `$[`, crase, `\r`, `>(`, `<(`, `mkfifo`, `coproc`, redirecionamento de `exec`, definição de função `cat`/`tee`, redirecionamento para fd >= 3, e quebra de linha dentro de aspas enquanto há heredoc pendente. Um erro do scanner também devolve o comando original.
+**Sempre lido como comandos:** as expansões de um corpo com delimitador **sem aspas** (`$(...)`, crases, `${...}`), qualquer que seja o receptor (HD2: `cat <<EOF` com `$(docker restart x)` dentro executa o comando); heredoc num composto (`{ bash; } <<EOF`, `while read l; ...; done <<EOF`); e todos os corpos do texto quando há um desqualificador de script inteiro (`mkfifo`, `coproc`, `exec` só com redirecionamentos, função chamada `cat`/`tee`/`git`/`gh`, redirecionamento para fd >= 3). Prefixo não limpo com cabeça `cat`, `tee`, `git` ou `gh`: o corpo é mantido e o motivo é `heredoc_unclean_prefix` (nível A). Mais de 32 abridores (`MAX_HEREDOC_OPENERS`) num comando simples: nenhum corpo dele é dado. Erro de sintaxe num corpo lido como shell é nível B (`lex_error`). Funções ou rebind (`hash -p`, `enable -f`, `PATH`) com o nome de um receptor tiram a isenção.
+
+**Here-strings** seguem as mesmas regras de receptor, mais uma lista de leitores de dados (`jq`, `yq`, `grep`, `sed`, `awk`, `read`, ...; `sed -f -` e `awk -f -` continuam código). `bash <<< 'x'` classifica `x`. Um here-string num composto só é código quando há um leitor de código dentro.
 
 **Limite declarado:** um script gravado em arquivo por heredoc e executado depois (`cat > x.sh <<EOF ...; bash x.sh`) está fora do alcance do classificador: o corpo é dado no `cat`, e o `bash x.sh` não mostra o conteúdo. É o mesmo limite de `Write` seguido de execução.
 
@@ -839,11 +843,11 @@ A raiz que governa uma escrita é a raiz git do `cwd` da sessão (onde mora o ru
 
 *Adendo 2026-11-13 (feature `audit-hook-hardening`).* Quando o classificador não tem certeza do que um comando é, ele nunca escolhe a leitura mais branda. Dois níveis:
 
-- **Nível A (registrar e classificar):** toda leitura possível é classificada e vale a mais estrita (`command_readings`, que substituiu `strip_prefixes`: `timeout`, `mise exec` e o resto são passos de prefixo por posição). O registro ganha `uncertainty` (lista de motivos) e a flag de auditoria `parse_uncertain` (`audit`, não nega). Motivos: `prefix_readings`, `shlex_fallback` (só quando as duas leituras diferem no texto e no que classificam), `heredoc_unclean_prefix` (13.6), `loose_assignment_truncated` (atribuição que abre aspa sem fechar; só registro, porque falhar fechado negou 91 comandos reais no replay), `git_root_unknown` (a raiz git do alvo de uma escrita não foi determinada; ator de escopo fixo recebe `out_of_scope_write`, os demais só registram).
-- **Nível B (negar):** o comando não pode ser lido. Categoria `block` `unclassified_command`, para todo ator, com a mensagem de simplificar ou dividir o comando. Motivos: `readings_cap` (mais de 8 inícios de comando distintos numa peça), `nested_shell_depth` (texto de shell do nvim além de 3 níveis), `classifier_error` (o classificador lançou; o registro guarda `error` com o nome da exceção, nunca a mensagem) e `analysis_crash` (o filho do watchdog morreu ou mandou resposta inválida, 13.1).
+- **Nível A (registrar e classificar):** toda leitura possível é classificada e vale a mais estrita (`command_readings`, que substituiu `strip_prefixes`: `timeout`, `mise exec` e os demais wrappers são passos de prefixo por posição). O registro ganha `uncertainty` (lista de motivos) e a flag de auditoria `parse_uncertain` (`audit`, não nega). Motivos: `prefix_readings` (mais de uma leitura distinta, inclusive wrapper com flag desconhecida, lido com e sem valor), `heredoc_unclean_prefix` (13.6), `dynamic_command` (nome de programa vindo de expansão sem valor conhecido, em que o único desconhecido é um `$(...)` ou crase; vem junto do canário) e `git_root_unknown` (a raiz git do alvo de uma escrita não foi determinada; ator de escopo fixo recebe `out_of_scope_write`, os demais só registram). `shlex_fallback` e `loose_assignment_truncated` não ocorrem mais (o parser substituiu o `shlex`); o `agent-metrics.py` ainda os lista para registros antigos.
+- **Nível B (negar):** o comando não pode ser lido nem resolvido. Categoria `block` `unclassified_command`, para todo ator, com a mensagem de simplificar ou dividir o comando. Não existe leitura tolerante de texto que não fecha ou que sai da gramática. Motivos: `lex_error` (texto que não fecha ou fora do subconjunto, no comando, numa string de código ou num corpo de heredoc lido como shell), `nesting_depth` (mais de `MAX_NESTING` = 32 construções aninhadas), `analysis_budget` (orçamento de caracteres, textos ou combinações de valores esgotado, ou mais de 16 argumentos de código num comando), `dynamic_code` (código de shell que o hook não vê: string de código de variável desconhecida, `eval` ou `source` de expansão, palavra que avalia o próprio texto, escape de cliente SQL, chamada de função repassadora não resolvida, palavra dinâmica na região do verbo de `git`/`docker`), `piped_shell` (`curl x | bash`), `nvim_shell_exec` (função de shell do nvim com comando não literal), `readings_cap` (mais de 8 inícios de comando distintos numa peça, ou mais de 8 leituras das opções do docker), `nested_shell_depth` (texto de código além de 3 níveis), `classifier_error` (o classificador ou o parser não carregou ou lançou, inclusive `SystemExit` no import; o registro guarda `error` com o nome da exceção, nunca a mensagem) e `analysis_crash` (o filho do watchdog morreu ou mandou resposta inválida, 13.1).
 - **Canário:** `deny_token_unmatched` (só registro) marca um token de container ou git fora de posição de comando seguido de verbo de lifecycle, push ou commit sem flag correspondente. Não nega; mostra a próxima forma que escapa.
 
-Registro: `uncertainty`, `error` e `run_tags` (`"timeout"` quando a marcação do run perdeu o prazo; o registro é gravado mesmo assim, com `in_run: false`). Atribuições `NOME=valor` e `NOME+=valor` antes do comando são puladas, com valor entre aspas. Lacunas conhecidas, para a spec `audit-shell-lexer`: expansões sem aspas com espaço no valor (`A=$(echo a b)`), separador entre aspas no valor (`A="x;y" ...`), `&`, subshells, `if`/`for`, `$(...)`, crases, `bash -c`, `eval`, `sudo -u`, `nohup`, `xargs`, `watch`.
+Registro: `uncertainty`, `error` e `run_tags` (`"timeout"` quando a marcação do run perdeu o prazo; o registro é gravado mesmo assim, com `in_run: false`). *Adendo 2026-11-14 (feature `audit-shell-lexer`):* as lacunas listadas aqui antes (atribuição com valor com espaço ou separador, `&`, subshells, `if`/`for`, `$(...)`, crases, `bash -c`, `eval`, `sudo -u`, `nohup`, `xargs`, `watch`) fecharam: o parser lê todas essas posições de comando, os wrappers e os argumentos de código são tabelados, e valores atribuídos no próprio texto resolvem nomes de programa e strings de código. O que resta fora do alcance (aliases e funções do shell do usuário, código em arquivos, `doas` e outros wrappers, chaves de configuração do git que executam comandos, um grupo que lê um pipe) está no README ("Known limits") e no backlog. O módulo ausente ou quebrado nega o Bash por `classifier_error`; os módulos são carregados por caminho, de bytecode com hash conferido.
 
 **Válvula de emergência:** se uma regra bloquear trabalho normal antes da correção, `"mode": "audit"` no `agent-audit.json` (só registra; a suite acusa no `test_config_contract.py`, de propósito) ou reverter a task.
 
@@ -891,6 +895,17 @@ O mesmo hook da seção 13 grava um JSONL por sessão (por exemplo em `~/.claude
 4. Falso negativo: uma forma que escapou; vira entrada para a spec do lexer.
 5. Metas: zero negação de trabalho normal; `analysis_timeout`, `analysis_crash` e `classifier_error` em zero.
 6. Válvula de emergência: ver 13.8.
+
+*Adendo 2026-11-14 (feature `audit-shell-lexer`): replay e ajuste.* Antes do merge, a sessão principal reexecuta todos os comandos Bash das transcrições locais (`~/.claude/projects/**/*.jsonl`) e das métricas (`~/.claude/metrics/*.jsonl`) na cópia do hook de `main` e na nova (só leitura, scripts no scratchpad; a decisão vem de `decide` com o `agent-audit.json` real, para a sessão principal e para um implementer). Cada diferença de decisão recebe uma classe:
+
+| Classe | Predicado | Esperado |
+|---|---|---|
+| E1 forma nova reconhecida | a negação ou pergunta nova vem de uma leitura em posição de comando que o hook antigo não via | cada caso listado e revisado: verdadeiro positivo |
+| E2 falso positivo removido | o flag antigo vinha de texto entre aspas, de corpo com aspas no delimitador ou de corpo para outra linguagem | lista; revisão só por amostra |
+| E3 nível B novo | motivo `lex_error`, `dynamic_code`, `piped_shell`, `nvim_shell_exec`, `nesting_depth` ou `analysis_budget` | cada caso listado; meta: só sondas e sintaxe que o shell também rejeita |
+| E4 outros | nenhum dos acima | **0**; qualquer caso é defeito |
+
+O relatório traz também a contagem por motivo antes e depois e a latência de `analyze_command` (mediana, p99, máximo) e do processo do hook. Depois do merge o procedimento acima continua, com três regras: (1) candidato a falso positivo com motivo de nível B é trabalho legítimo? A correção é uma regra de gramática ou de wrapper precisa (teste primeiro, entrada pelo `backlog-keeper`), nunca uma leitura tolerante nem subir um teto às cegas (`MAX_NESTING`, `MAX_CODE_DEPTH`, `MAX_LEX_CHARS`, `MAX_VALUE_CANDIDATES`, `MAX_READINGS` são fixados por teste); (2) cada `deny_token_unmatched` ou `dynamic_command` com comando bloqueado é uma forma que escapou: wrapper novo na tabela, ou promoção de `dynamic_command` a nível B se a forma se repetir (decisão a rever depois de uma semana de métricas); (3) toda negação nova ganha um teste com o comando real, sem dados pessoais.
 
 A métrica "pedidos de escopo por run" também avalia o `specker`: se as tasks sempre precisam de arquivos extras, o campo `Files` da spec está sendo escrito estreito demais.
 

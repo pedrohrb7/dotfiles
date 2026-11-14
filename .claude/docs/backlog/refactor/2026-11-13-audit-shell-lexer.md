@@ -1,6 +1,7 @@
 # agent-audit: shell lexer and parser for command positions (fails closed)
 
-- **Status:** Proposed
+- **Status:** Done (implemented by the spec, uncommitted; gate 811 tests green, 2026-11-14)
+- **Spec:** [audit-shell-lexer](../../features/audit-shell-lexer/spec.md)
 - **Opened:** 2026-11-13
 - **Scope:** `.claude/hooks/agent-audit.py` (segment splitting, `strip_prefixes`, command classification)
 - **Source:** specker, feature audit-hook-hardening (2026-11-13). Severity: high. User decision 2026-11-13: next spec, right after audit-hook-hardening and before the docs-root declaration spec.
@@ -52,3 +53,6 @@ Not recorded.
 ## Out of scope
 
 Not recorded.
+
+## Result (2026-11-14)
+Implemented by [audit-shell-lexer spec](../../features/audit-shell-lexer/spec.md): all review-fix rounds done, final gate 811 tests green (see the [log](../../features/audit-shell-lexer/log.md)). The parser lives in `.claude/hooks/agent_audit_shell.py` and the classifier in `.claude/hooks/agent_audit_classify.py`. Gaps found during the reviews are separate entries (Index, 2026-11-14). The change is uncommitted and has no PR yet.

@@ -15,7 +15,7 @@ import time
 import unittest
 from unittest import mock
 
-from ._support import ForkedSuite, HookProcess, TempRepoCase, audit, call_main, payload, write_run_state
+from ._support import ForkedSuite, HookProcess, TempRepoCase, audit, call_main, classifier, payload, write_run_state
 
 DOCKER_UP = "docker compose up"
 SHORT = 0.05  # analysis limit of the deadline cases: the analysis never ends there, so a short limit cannot flake
@@ -53,10 +53,13 @@ class WatchdogCase(TempRepoCase):
             with self.assertRaises(ChildProcessError, msg=f"child {pid} was not reaped"):
                 os.waitpid(pid, os.WNOHANG)
 
-    def patch(self, name, value):
-        patcher = mock.patch.object(audit, name, value)
+    def patch(self, name, value, module=audit):
+        patcher = mock.patch.object(module, name, value)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def patch_classifier(self, name, value):
+        self.patch(name, value, classifier)
 
     def no_fork(self):
         self.patch("_fork_available", lambda: False)
@@ -106,7 +109,7 @@ class DeadlineAndKill(WatchdogCase):
     def run_with(self, analysis, event):
         spy = self.spy_fork()
         self.patch("ANALYSIS_TIMEOUT_S", SHORT)
-        self.patch("analyze_command", analysis)
+        self.patch_classifier("analyze_command", analysis)
         with mock.patch.object(audit.os, "killpg", wraps=os.killpg) as kill:  # the child's whole process group
             start = time.monotonic()
             res = self.call(event)
@@ -164,7 +167,7 @@ class CrashAndError(WatchdogCase):
                           ("SIGKILL", lambda: os.kill(os.getpid(), signal.SIGKILL))):
             with self.subTest(how=name):
                 spy = self.spy_fork()
-                with mock.patch.object(audit, "analyze_command", lambda command, _depth=0: die()):
+                with mock.patch.object(classifier, "analyze_command", lambda command, _depth=0: die()):
                     start = time.monotonic()
                     res = self.call()
                 self.assertLess(time.monotonic() - start, 2.0)
@@ -172,7 +175,7 @@ class CrashAndError(WatchdogCase):
                 self.assert_all_reaped(spy)
 
     def test_wd4_the_crash_is_recorded_on_post_without_output(self):
-        with mock.patch.object(audit, "analyze_command", lambda command, _depth=0: os._exit(3)):
+        with mock.patch.object(classifier, "analyze_command", lambda command, _depth=0: os._exit(3)):
             res = self.call("PostToolUse")
         self.assertIsNone(res.output)
         self.assertEqual(res.records[0]["uncertainty"], ["analysis_crash"])
@@ -186,7 +189,7 @@ class CrashAndError(WatchdogCase):
                 if path == "in-process":
                     self.no_fork()
                 spy = self.spy_fork()
-                with mock.patch.object(audit, "analyze_command", boom):
+                with mock.patch.object(classifier, "analyze_command", boom):
                     res = self.call()
                 self.assertEqual(len(spy.pids), 1 if path == "fork" else 0)
                 self.assert_unclassified(res, "classifier_error", "RecursionError")
@@ -332,7 +335,7 @@ class Fallback(WatchdogCase):
         def slow(command, _depth=0):
             time.sleep(30)
         self.patch("ANALYSIS_TIMEOUT_S", SHORT)
-        self.patch("analyze_command", slow)
+        self.patch_classifier("analyze_command", slow)
         start = time.monotonic()
         results = self.run_both()
         self.assertLess(time.monotonic() - start, 5.0)
@@ -363,7 +366,7 @@ class ChildLifetime(WatchdogCase):
         self.call("PostToolUse", "pytest tests/test_a.py")
         self.call("PreToolUse", DOCKER_UP)
         self.call("PreToolUse", "echo hi")
-        with mock.patch.object(audit, "analyze_command", lambda command, _depth=0: os._exit(3)):
+        with mock.patch.object(classifier, "analyze_command", lambda command, _depth=0: os._exit(3)):
             self.call("PreToolUse")
         self.assertEqual(len(spy.pids), 4)
         self.assert_all_reaped(spy)
@@ -375,8 +378,8 @@ class ChildLifetime(WatchdogCase):
 
         def probe(command, _depth=0):
             seen.append(signal.getitimer(signal.ITIMER_REAL)[0])  # in the child: lost with it, so ship it as the cmd
-            return audit.Analysis(["other"], [f"remaining={seen[-1]:.1f}"], [])
-        with mock.patch.object(audit, "analyze_command", probe):
+            return classifier.Analysis(["other"], [f"remaining={seen[-1]:.1f}"], [])
+        with mock.patch.object(classifier, "analyze_command", probe):
             res = self.call("PostToolUse", "echo hi")
         [flag] = res.records[0]["flags"]
         remaining = float(flag.split("=")[1])

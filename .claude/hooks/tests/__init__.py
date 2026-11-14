@@ -28,3 +28,10 @@ for _var in (
 # same for the hook copy). `git init` needs no identity; no test commits.
 os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
 os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
+
+
+def load_tests(loader, standard_tests, pattern):
+    """Discovery hook of the package: one `ForkedSuite` for the whole suite instead of one per module (see
+    `_support.package_suite`), so the workers never idle at the end of a module."""
+    from ._support import package_suite
+    return package_suite(loader, __name__, __file__, pattern or "test*.py")

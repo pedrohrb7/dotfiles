@@ -40,8 +40,8 @@ FLAG_LABELS = {
     "external_request": "requests to non-local hosts (target 0)",
     "command_too_long": "Bash commands over 16384 chars, denied before classification - write large content with the Write tool (target 0)",
     "analysis_timeout": "tool calls the hook could not analyze within its wall-clock limit, denied on PreToolUse - simplify or split the command (target 0)",
-    "unclassified_command": "commands the hook could not classify with certainty, denied (readings cap, nested shell depth, analysis error or crash) - see the uncertainty field (target 0)",
-    "parse_uncertain": "commands classified under parse uncertainty (several readings, shlex fallback, unclean heredoc prefix, deny token outside a classified command) - review in Parser uncertainty",
+    "unclassified_command": "commands the hook could not classify with certainty, denied (syntax, dynamic code, readings cap, nesting, budget, analysis error or crash) - see the uncertainty field (target 0)",
+    "parse_uncertain": "commands classified under parse uncertainty (several readings, dynamic program name, unclean heredoc prefix, deny token outside a command position) - review in Parser uncertainty",
 }
 
 
@@ -49,7 +49,8 @@ SCRATCH_LABELS = ("match", "no-match", "unavailable")
 
 # Uncertainty reasons whose denial may come from an alternative reading or a kept heredoc body (level A), as
 # opposed to the level B reasons, which always end in an unclassified_command denial.
-LEVEL_A_REASONS = ("prefix_readings", "shlex_fallback", "heredoc_unclean_prefix", "loose_assignment_truncated")
+# `shlex_fallback` and `loose_assignment_truncated` are no longer emitted; they stay for old records.
+LEVEL_A_REASONS = ("prefix_readings", "heredoc_unclean_prefix", "dynamic_command", "shlex_fallback", "loose_assignment_truncated")
 HEALTH_LABELS = ("analysis_timeout", "analysis_crash", "classifier_error")
 
 

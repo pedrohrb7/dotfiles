@@ -1,6 +1,7 @@
 # agent-audit: strip_prefixes does not strip env, nice and nohup wrappers
 
-- **Status:** Merged into [audit-shell-lexer](2026-11-13-audit-shell-lexer.md)
+- **Status:** Done (via [audit-shell-lexer](2026-11-13-audit-shell-lexer.md), uncommitted); remaining wrappers in a separate entry
+- **Spec:** [audit-shell-lexer](../../features/audit-shell-lexer/spec.md)
 - **Opened:** 2026-11-13
 - **Scope:** `.claude/hooks/agent-audit.py` `strip_prefixes` (around line 223)
 - **Source:** agent run: specker, feature lua-agent (spec `../../features/lua-agent/spec.md`)
@@ -26,3 +27,6 @@ Wrongly consuming a wrapper's flags and misreading the command.
 ## Out of scope
 
 Other wrappers beyond `env`, `nice`, `nohup` and `timeout`.
+
+## Result (2026-11-14)
+Covered by Task 3 of the [audit-shell-lexer spec](../../features/audit-shell-lexer/spec.md) ([log](../../features/audit-shell-lexer/log.md)): `env`, `nice`, `nohup`, `sudo` flags, `time`, `stdbuf`, `ionice`, `xargs`, `watch`, `command`, `exec`, `builtin`, `repeat N`, `timeout`, path-prefixed programs (`/usr/bin/docker`, `~/.local/bin/mise`, `./bin/docker`), and the `uv`/`poetry`/`pdm`/`hatch`/`pipenv`/`rye`/`conda run` launchers. Not covered, kept open: wrappers outside the table (`doas`, `pixi exec`, `strace`, ...), see [wrappers outside the table](2026-11-14-audit-wrappers-outside-table.md).
