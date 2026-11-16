@@ -764,6 +764,25 @@ class Walk(unittest.TestCase):
         self.assertEqual(list(shell.iter_sites(script)), [])
 
 
+class PipedStdin(unittest.TestCase):
+    """`Site.piped`: a command in a compound body fed by a pipe stage reads that pipe on stdin."""
+
+    def piped_of(self, text, head="bash"):
+        found = [s for s in sites(text) if s.cmd.words and s.cmd.words[0].text == head]
+        self.assertEqual(len(found), 1, text)
+        return getattr(found[0], "piped", None)
+
+    def test_a_command_in_a_group_after_a_pipe_is_piped(self):
+        for text in ("echo x | { bash; }", "echo x | ( bash )", "echo x | { bash; } < f"):
+            with self.subTest(text=text):
+                self.assertIs(self.piped_of(text), True)
+
+    def test_a_command_without_inherited_stdin_is_not_piped(self):
+        for text in ("f() { bash; }", "coproc { bash; }", "{ bash; }"):
+            with self.subTest(text=text):
+                self.assertIs(self.piped_of(text), False)
+
+
 def first_words(text):
     return parse(text).pipelines[0].commands[0].words
 

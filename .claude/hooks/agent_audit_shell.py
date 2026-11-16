@@ -272,11 +272,12 @@ class Site(_Node):
     """One simple command and where it sits. cmd: the Simple; top_level: a direct element of the walked script's
     lists (no compound, subshell or substitution); stages / stage: stages of its pipeline and its index (0 =
     first); substitution / sub_word: the command whose word holds the substitution it is in, and that word;
-    in_compound."""
+    in_compound; piped: its stdin is inherited from a pipe stage that holds it (a group, subshell or other
+    compound body, or a substitution, in a stage after the first), unless a redirection replaced it on the way."""
 
-    __slots__ = ("cmd", "top_level", "stages", "stage", "substitution", "sub_word", "in_compound")
+    __slots__ = ("cmd", "top_level", "stages", "stage", "substitution", "sub_word", "in_compound", "piped")
 
-    def __init__(self, cmd, top_level, stages, stage, substitution, sub_word, in_compound):
+    def __init__(self, cmd, top_level, stages, stage, substitution, sub_word, in_compound, piped=False):
         self.cmd = cmd
         self.top_level = top_level
         self.stages = stages
@@ -284,6 +285,7 @@ class Site(_Node):
         self.substitution = substitution
         self.sub_word = sub_word
         self.in_compound = in_compound
+        self.piped = piped
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1440,35 +1442,87 @@ def parse(text: str, budget: Budget, *, base: int = 0) -> Script:
 # ---------------------------------------------------------------------------------------------------------------
 
 
-def _walk_redirects(redirects, owner: "Site | None", in_compound: bool):
+_STDIN_REPLACERS = frozenset({"<<", "<<-", "<<<"})
+_NO_STDIN_KINDS = frozenset({"function", "coproc"})
+
+
+def _fd_number(redirect, default: int) -> "int | None":
+    if redirect.fd is None:
+        return default
+    return int(redirect.fd) if redirect.fd.isdigit() else None
+
+
+def _fd_states(redirects, piped: bool) -> dict:
+    """Per descriptor, whether it is the pipe (`piped`) after `redirects`, applied left to right. Only descriptor 0
+    and the ones a redirection names are in the result; any other descriptor is the pipe when `piped`. A heredoc or
+    a here-string makes its descriptor not the pipe. A file (`<`, `<>`, to any target: it can name the pipe) and
+    `<&-` keep the incoming state, and `N<&M` copies the state of M, so the last of them wins."""
+    fds = {0: piped}
     for r in redirects:
+        if r.heredoc is not None or r.op in _STDIN_REPLACERS:
+            fd, state = _fd_number(r, 0), False
+        elif r.op in ("<&", ">&") and r.target is not None:
+            fd = _fd_number(r, 0 if r.op == "<&" else 1)
+            text = r.target.text
+            state = fds.get(int(text), piped) if text.isdigit() else piped
+        elif r.op in ("<", "<>") and r.target is not None:
+            fd, state = _fd_number(r, 0), piped
+        else:
+            continue
+        if fd is not None:
+            fds[fd] = state
+    return fds
+
+
+def stdin_piped(redirects, piped: bool) -> bool:
+    """Whether standard input is still the pipe (`piped`) after `redirects`. Under a pipe only a heredoc or a
+    here-string replaces it (the last fd 0 redirection wins): a file may be the pipe itself (`/dev/stdin`,
+    `/dev/fd/0`, a descriptor copy), so `<` and `<>` never do. `0<&N` copies a descriptor made by `N<&0`."""
+    return _fd_states(redirects, piped)[0]
+
+
+def fd_piped(redirects, piped: bool) -> bool:
+    """Whether any descriptor the redirections track is the pipe: what a compound body may read."""
+    return any(_fd_states(redirects, piped).values())
+
+
+def _walk_redirects(redirects, owner: "Site | None", in_compound: bool, fed: bool = False):
+    """`fed`: the command's incoming stdin is a pipe. A target sees only the redirections to its left; a here-string
+    and a heredoc body are expanded before any of them."""
+    for i, r in enumerate(redirects):
+        state = fed if (r.heredoc is not None or r.op == "<<<") else stdin_piped(redirects[:i], fed)
         if r.target is not None:
             for script in r.target.scripts():
-                yield from _walk(script, False, in_compound, owner, r.target)
+                yield from _walk(script, False, in_compound, owner, r.target, state)
         if r.heredoc is not None:
             for part in r.heredoc.expansions:
                 for script in part_scripts(part):
-                    yield from _walk(script, False, in_compound, owner, None)
+                    yield from _walk(script, False, in_compound, owner, None, fed)
 
 
-def _walk(script: Script, top: bool, in_compound: bool, parent: "Site | None", sub_word: "Word | None"):
+def _walk(script: Script, top: bool, in_compound: bool, parent: "Site | None", sub_word: "Word | None",
+          piped: bool = False):
+    """`piped`: the script's standard input is the pipe of a stage that holds it. The first stage of a pipeline
+    keeps what the script has; a later stage is fed by the stage before it."""
     for pipeline in script.pipelines:
         stages = len(pipeline.commands)
         for index, cmd in enumerate(pipeline.commands):
+            fed = piped or index > 0
             if isinstance(cmd, Simple):
-                site = Site(cmd, top, stages, index, parent, sub_word, in_compound)
+                site = Site(cmd, top, stages, index, parent, sub_word, in_compound, piped)
                 yield site
                 for word in (*cmd.assignments, *cmd.words):
                     for nested in word.scripts():
-                        yield from _walk(nested, False, in_compound, site, word)
-                yield from _walk_redirects(cmd.redirects, site, in_compound)
+                        yield from _walk(nested, False, in_compound, site, word, fed)
+                yield from _walk_redirects(cmd.redirects, site, in_compound, fed)
             else:
+                inner = cmd.kind not in _NO_STDIN_KINDS and fd_piped(cmd.redirects, fed)
                 for word in cmd.words:
                     for nested in word.scripts():
-                        yield from _walk(nested, False, True, parent, word)
+                        yield from _walk(nested, False, True, parent, word, inner)
                 for body in cmd.bodies:
-                    yield from _walk(body, False, True, parent, sub_word)
-                yield from _walk_redirects(cmd.redirects, parent, True)
+                    yield from _walk(body, False, True, parent, sub_word, inner)
+                yield from _walk_redirects(cmd.redirects, parent, True, fed)
 
 
 def iter_compounds(script: Script):

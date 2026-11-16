@@ -135,3 +135,13 @@ Bug `2026-11-14-audit-git-commit-subcommand-regression` (backlog). A2 had narrow
 **Files:** `.claude/hooks/agent_audit_classify.py` (`_GIT_COMMIT_SUBCOMMANDS`, `_GIT_COMMIT_FORMS`, `_creates_git_commits`, `_is_long`, `_git_exec_code`, `_CANARY_GIT_FLAGS`); tests in `test_classify.py`, `test_heredoc.py`, `test_uncertainty.py`.
 
 **Gate:** the suite now has 834 tests (12.4 s in the docs pass). Spec: see "Adendo 2026-11-16".
+
+## Addendum 2026-11-16 (2) - piped_shell inside groups, compounds and substitutions under a pipe
+
+Bug `2026-11-14-audit-pipe-into-group-not-flagged` (backlog). X4 only flagged a shell that was itself a non-first pipeline stage, so `echo x | { bash; }`, `| ( bash )`, `| while read l; do bash; done`, `| { source /dev/stdin; }` and `| echo $(bash)` passed.
+
+**User decisions (2026-11-16):** a shell reading a pipe from inside a group, subshell or compound body, and a command substitution under a piped stage (also in redirect targets, here-strings and heredoc bodies, which bash expands before applying redirects), are `piped_shell` (`unclassified_command`), like `... | bash`. Stdin redirects are read left to right per fd; under a pipe only a heredoc or a here-string replaces it, and a file redirect (`<`/`<>`, any target) never does (fail closed: `/dev/./stdin`, `/proc/*/fd/0`, `/dev/fd/N`, symlinks). Unknown fds inherit the piped state, `N<&M` copies, `<&-` keeps the pipe, a compound body is piped if any of its fds holds the pipe, function and coproc bodies do not inherit. Accepted false positives: `cmd | bash < script.sh`, `cmd | while read l; do sh; done < list`.
+
+**Files:** `.claude/hooks/agent_audit_shell.py` (`Site.piped`, `_fd_states`, `stdin_piped`, `fd_piped`, `_walk`, `_walk_redirects`), `.claude/hooks/agent_audit_classify.py` (`_stdin_code`); tests in `test_command_positions.py` and `test_shell_lexer.py`.
+
+**Gate:** the suite now has 846 tests (about 11-12 s). Spec: see "Adendo 2026-11-16 (2)".

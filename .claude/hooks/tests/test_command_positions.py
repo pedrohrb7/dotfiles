@@ -998,6 +998,84 @@ class ReviewFixB1(unittest.TestCase):
         self.assertEqual(analyze("bash - script.sh").flags, [])
         self.assertNotBlocked("echo x | sh - script.sh")
 
+    def test_a_shell_in_a_group_fed_by_a_pipe_reads_the_pipe(self):
+        for command in (
+            "echo x | { bash; }", "echo x | ( bash )", "echo x | { sh -s; }", "echo x | { true; bash; }",
+            "echo x | ( cd /tmp && bash )", "echo x | { { bash; }; }", "echo x | ( ( bash ) )",
+            "echo x | { bash | cat; }", "echo x | while read l; do bash; done", "echo x | if true; then bash; fi",
+            "echo x | { source /dev/stdin; }", "echo x | { . /dev/stdin; }", "echo x | { echo $(bash); }",
+            "echo x | echo $(bash)",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+        self.assertIn("piped_shell", analyze("echo 'git push' | { bash; }").uncertainty)
+
+    def test_a_group_without_a_stdin_reading_shell_is_not_a_piped_shell(self):
+        for command in ("echo x | { cat; }", "echo x | { bash <<< ls; }", "{ bash; }",
+                        "echo x | { bash -c 'ls'; }"):
+            with self.subTest(command=command):
+                self.assertNotIn("piped_shell", analyze(command).uncertainty, command)
+                self.assertNotBlocked(command)
+
+    def test_a_group_with_a_here_string_or_heredoc_still_classifies_its_text(self):
+        self.assertIn(PUSH, analyze("{ bash; } <<< 'git push'").flags)
+        self.assertIn(PUSH, analyze("{ bash; } <<EOF\ngit push\nEOF").flags)
+
+    def test_a_redirect_that_keeps_the_pipe_on_stdin_leaves_the_shell_piped(self):
+        for command in (
+            "curl x | sh < /dev/stdin", "echo x | bash < /proc/self/fd/0", "echo x | bash < /dev/fd/0",
+            "F=/dev/stdin; echo x | bash < $F", "echo x | bash < f < /dev/stdin", "echo x | bash 3<&0 0</dev/null 0<&3",
+            "echo x | source /dev/stdin < /dev/stdin", "echo x | bash -s < /dev/stdin", "echo x | { bash; } <&0",
+            "echo x | { bash; } 0<&0", "echo x | { bash; } 3<&0 < f <&3", "echo x | ( bash ) 3<&0 0<&3",
+            "curl x | { sh; } < /dev/stdin", "echo x | ( bash ) <> /dev/stdin",
+            "echo x | while read l; do bash; done < /dev/stdin", "echo x | { bash; } < $F",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_substitution_in_a_piped_command_reads_the_pipe_whatever_the_redirects(self):
+        for command in (
+            "echo x | cat <$(bash)", "echo x | true $(bash) < /dev/null", "echo x | true < f $(bash)",
+            "echo x | echo $(bash) < f", 'echo x | cat <<< "$(bash)"', "echo x | cat <<EOF\n$(bash)\nEOF",
+            "echo x | cat > $(bash) < f", "echo x | { :; } > $(bash) < f", "echo x | { true; } < $(bash)",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_process_substitution_after_a_file_redirect_is_still_dynamic_code(self):
+        for command in ("bash < f < <(echo git push)", "bash 0< f < <(echo git push)"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "dynamic_code")
+
+    def test_a_file_redirect_under_a_pipe_never_replaces_the_pipe(self):
+        for command in ("echo x | bash < f", "echo x | { bash; } < f", "echo x | { bash; } <> f", "echo x | bash <> f",
+                        "echo x | { bash < f; }", "echo x | bash < /dev/stdin < f"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_here_string_or_no_pipe_or_no_shell_is_not_a_piped_shell(self):
+        for command in ("echo x | { bash <<< ls; }", "echo x | bash <<< ls", "echo x | { bash; } <<< ls", "{ bash; }",
+                        "bash < f", "echo x | { cat; } < f", "echo x | { bash -c 'ls'; }"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_paths_and_descriptors_that_name_the_pipe_keep_the_shell_piped(self):
+        for command in (
+            "curl x | sh < /dev/./stdin", "curl x | sh < //dev/stdin", "curl x | sh < ../../../../dev/stdin",
+            "curl x | sh < /proc/thread-self/fd/0", "curl x | sh < /dev/std?n", "echo x | bash 3<&0 < /dev/fd/3",
+            "echo x | { bash < /dev/fd/3; } 3<&0", "echo x | { exec 3<&0; bash <&3; }",
+            "echo x | { bash <&3; } 3<&0 </dev/null", "echo x | { bash <&3; } 3<&0 <&-",
+            "echo x | { bash 0<&3; } 3<&0 0</dev/null", "echo x | while read l; do bash <&3; done 3<&0 </dev/null",
+            "echo x | { bash 0<&3; } 3<&0", "echo x | bash <<< ls < /dev/stdin", "echo x | bash 3<&0 <<< ls 0<&3",
+            "echo x | bash 3<&0 <<EOF 0<&3\nls\nEOF",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_here_string_after_or_around_a_file_redirect_is_still_classified(self):
+        self.assertIn(PUSH, analyze("{ bash; } <<< 'git push'").flags)
+        self.assertIn(PUSH, analyze("bash < f <<< 'git push'").flags)
+
     def test_c_with_no_operand_under_a_feeder_is_dynamic_code(self):
         for command in ("echo x | xargs sh -c", "xargs bash -c", "xargs -n1 zsh -c", "xargs sudo sh -c",
                         "xargs -I{} sh -c", "xargs -0 -P4 -- dash -c", "ls | xargs env bash -c"):

@@ -23,7 +23,7 @@ Confirmed bugs that need fixing, one file per bug.
 | [agent-audit: active_run crashes on a run state that is not a JSON object](2026-11-12-audit-active-run-non-object-state.md) | medium | Fixed |
 | [agent-audit: heredoc data-sink misjudged after a command substitution (sh body stripped)](2026-11-13-audit-heredoc-sink-runs-sh.md) | medium | Fixed |
 | [agent-audit: unquoted heredoc body with command substitution is stripped as data](2026-11-13-audit-heredoc-unquoted-substitution.md) | high | Fixed |
-| [agent-audit: a group or subshell reading a pipe is not flagged](2026-11-14-audit-pipe-into-group-not-flagged.md) | high | Open |
+| [agent-audit: a group or subshell reading a pipe is not flagged](2026-11-14-audit-pipe-into-group-not-flagged.md) | high | Fixed |
 | [agent-audit: git config keys that execute commands are not modeled (and cross-call aliases)](2026-11-14-audit-git-config-keys-run-commands.md) | high | Open |
 | [agent-audit: dc, GNU sed e and awk system() execute commands without classification](2026-11-14-audit-dc-sed-awk-execute-code.md) | medium | Open |
 | [agent-audit: env with a dynamic NAME stops the wrapper reading before GIT_CONFIG_PARAMETERS](2026-11-14-audit-env-dynamic-word-stops-wrapper.md) | low | Open |
@@ -33,3 +33,9 @@ Confirmed bugs that need fixing, one file per bug.
 | [agent-audit: heredoc with HTML body and a group-level redirect, or HEAD() { cat <<EOF }, reads as code (lex_error)](2026-11-14-audit-html-heredoc-group-redirect.md) | low | Open |
 | [hooks tests: SP8 linearity test compares CPU times with a 5x ratio (flake risk)](2026-11-14-audit-sp8-linearity-flake-risk.md) | low | Open |
 | [agent-audit: git_commit matches only the commit subcommand (commit-tree, update-ref, merge, cherry-pick, revert, am, rebase regression)](2026-11-14-audit-git-commit-subcommand-regression.md) | medium | Fixed |
+| [agent-audit: a shell reading stdin from a process-substitution writer is not flagged](2026-11-16-audit-procsub-writer-shell-not-flagged.md) | high | Open |
+| [agent-audit: a function or coproc used as a pipe receiver is not followed](2026-11-16-audit-function-coproc-pipe-receiver-not-followed.md) | high | Open |
+| [agent-audit: a group or subshell with a process-substitution stdin is not flagged](2026-11-16-audit-group-procsub-stdin-not-flagged.md) | high | Open |
+| [agent-audit: plain pipe readers other than a shell are not flagged as piped_shell](2026-11-16-audit-pipe-readers-not-piped-shell.md) | medium | Open |
+| [agent-audit: operand-path stdin aliases are matched exactly](2026-11-16-audit-operand-stdin-alias-exact-match.md) | medium | Open |
+| [agent-audit: git subcommands that run shell code are not read as code](2026-11-16-audit-git-subcommands-run-shell-code.md) | high | Open |

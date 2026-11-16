@@ -1377,3 +1377,20 @@ Lacunas que o log registra como não modeladas ou fora do escopo desta rodada. V
 - As isenções de heredoc como dado (`git commit -F -`, `$(cat <<EOF)` em `-m`) continuam só para `git commit`: em `revert` e `cherry-pick`, `-m` é o número da linha principal, não mensagem.
 
 **Efeito nos itens anteriores.** O texto de A2 e da Task 3 sobre "só `commit`" vale para a classificação do `commit` e para as isenções de heredoc; o resto fica superado por esta regra. A Pergunta 7 (função única de subcomando) segue como aplicada: `_is_git_commit` serve às isenções, `_creates_git_commits` à classificação.
+
+## Adendo 2026-11-16 (2) - `piped_shell` dentro de grupo, subshell, composto e substituição sob um estágio com pipe
+
+**Motivo.** Bug `2026-11-14-audit-pipe-into-group-not-flagged` (backlog). X4 só olhava o estágio de pipeline que não é o primeiro; `echo x | { bash; }`, `| ( bash )`, `| while read l; do bash; done`, `| { source /dev/stdin; }` e `| echo $(bash)` passavam, porque o shell de dentro herda o stdin do pipe sem ser ele mesmo um estágio.
+
+**Regra nova** (estende X4; `agent_audit_shell.py`: `Site.piped`, `_fd_states`, `stdin_piped`, `fd_piped`, `_walk`, `_walk_redirects`; `agent_audit_classify.py`: `_stdin_code`). Decisões do usuário (2026-11-16):
+
+- Um leitor de shell sem `-c` e sem arquivo de script cujo stdin ainda é o pipe é nível B, `piped_shell`. Vale para o estágio que não é o primeiro e para todo comando dentro de grupo, subshell ou corpo composto (`while`, `for`, `if`, ...) alimentado por um estágio, e para a substituição de comando sob um estágio com pipe (`| echo $(bash)`), também em alvos de redirecionamento, here-strings e corpos de heredoc (o bash os expande antes de aplicar os redirecionamentos).
+- `Site.piped`: o stdin do comando é herdado do pipe de um estágio que o segura, salvo redirecionamento que o tenha trocado no caminho. O primeiro estágio mantém o que o script tem; um estágio seguinte é alimentado pelo anterior.
+- Os redirecionamentos de stdin são lidos da esquerda para a direita, por descritor (`_fd_states`). Sob um pipe, só heredoc (`<<`, `<<-`) e here-string (`<<<`) o substituem, e o último redirecionamento do fd 0 vale. Um redirecionamento de arquivo (`<`, `<>`, para qualquer alvo) nunca o substitui: o alvo pode ser o próprio pipe (`/dev/./stdin`, `/proc/*/fd/0`, `/dev/fd/N`, links simbólicos), então falha fechado. Descritores desconhecidos herdam o estado do pipe; `N<&M` copia o estado de M; `<&-` mantém o pipe.
+- Um corpo composto é alimentado se qualquer um dos seus fds segura o pipe (`fd_piped`). Corpos de função e de `coproc` não herdam. O alvo de um redirecionamento vê só os redirecionamentos à sua esquerda; here-string e corpo de heredoc são expandidos antes de todos.
+- `_stdin_code` junta os dois resultados: a string de código de uma here-string ou o `dynamic_code` de um `<(...)` continuam reportados, e `piped_shell` é acrescentado quando o stdin ainda é o pipe (por exemplo `bash < <(x)` sob pipe, ou `<(...)` depois de um `< arquivo`).
+- Falsos positivos aceitos: `cmd | bash < script.sh` e `cmd | while read l; do sh; done < list`.
+
+**Não muda:** os níveis A e B, o conjunto de motivos (U1-U4), a classificação sem pipe e `agent-audit.json`.
+
+**Testes:** `test_command_positions.py` e `test_shell_lexer.py`. A suite tem 846 tests.

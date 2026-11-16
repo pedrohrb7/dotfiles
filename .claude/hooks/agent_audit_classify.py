@@ -2884,17 +2884,26 @@ def _shell_operands(tokens: list[str], i: int) -> tuple[str, int]:
 
 def _stdin_code(site) -> list[CodeArg]:
     """A shell that reads its program from stdin: the here-string is the code (X1); a heredoc is read by the
-    heredoc rules; a process substitution is code of unknown reach (X5); the stage of a pipeline that is not the
-    first reads what the others write (X4)."""
+    heredoc rules; a process substitution is code of unknown reach (X5), also after an earlier `< file`; and when
+    standard input is still a pipe (X4) the program is unknown, `piped_shell`: the stage of a pipeline that is not
+    the first, or a command inside a compound or substitution fed by one (`Site.piped`). The redirections are read
+    left to right (`shell.stdin_piped`): under a pipe only a heredoc or a here-string replaces it, the last fd 0 one
+    winning, and a file (`<`, `<>`, any target), `<&0`, a copy of the pipe or `<&-` keep it. The code found in a
+    here-string or process substitution is reported as well."""
+    out: list[CodeArg] = []
     for redirect in site.cmd.redirects:
         if redirect.op == "<<<" and redirect.target is not None:
-            return [CodeArg(redirect.target.text, None)]
+            out = [CodeArg(redirect.target.text, None)]
+            break
         if redirect.op == "<" and redirect.target is not None \
                 and any(part.kind == "procsub_in" for part in redirect.target.parts):
-            return [CodeArg(None, "dynamic_code")]
+            out = [CodeArg(None, "dynamic_code")]
+            break
         if redirect.heredoc is not None:
-            return []
-    return [CodeArg(None, "piped_shell")] if site.stage > 0 else []
+            break
+    if shell.stdin_piped(site.cmd.redirects, site.stage > 0 or site.piped):
+        out.append(CodeArg(None, "piped_shell"))
+    return out
 
 
 def _first_operand_code(site, tokens: list[str], i: int, words: list) -> list[CodeArg]:

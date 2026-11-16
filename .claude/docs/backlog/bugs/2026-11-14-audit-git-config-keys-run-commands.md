@@ -46,3 +46,7 @@ Suggested fix: when include/`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` are set, the
 Source: agent run: fix of audit-git-commit-subcommand-regression, reviewers.
 
 Config-driven ref writes are not modeled: `git fetch origin` with a `remote.*.fetch` refspec targeting refs/heads (writes local refs without a visible refspec), and `-c sequence.editor=<cmd>` on rebase (runs a command).
+
+## Seen again (2026-11-16, second)
+
+Source: automated security review of commit 7a4e1e5. The config-driven fetch ref writes (`-c remote.*.fetch`, `remote.*.url`, `GIT_CONFIG_*`) were reported again; same root cause, nothing new.
