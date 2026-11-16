@@ -1,0 +1,142 @@
+// MonsGeek/Akko HID Communication
+// Shared types for device communication
+
+use monsgeek_transport::protocol::Profile;
+
+/// Vendor event types from HID input reports
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VendorEventType {
+    /// Key depth/magnetism data (byte[0] = 0x1B)
+    KeyDepth,
+    /// Magnetism reporting started (0x0F, 0x01, 0x00)
+    MagnetismStart,
+    /// Magnetism reporting stopped (0x0F, 0x00, 0x00)
+    MagnetismStop,
+    /// Profile changed (byte[0] = 0x01)
+    ProfileChange,
+    /// LED effect changed (byte[0] = 0x04-0x07)
+    LedChange,
+    /// Magnetism mode changed (byte[0] = 0x1D)
+    MagnetismModeChange,
+    /// Battery/wireless status from dongle (byte[0] = 0x88)
+    BatteryStatus,
+    /// Unknown event type
+    Unknown,
+}
+
+/// Battery/power status from wireless dongle
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BatteryInfo {
+    /// Battery level 0-100 (255 = unknown/wired)
+    pub level: u8,
+    /// Device is online/connected
+    pub online: bool,
+    /// Device is charging
+    pub charging: bool,
+    /// Device is idle (no recent key activity)
+    pub idle: bool,
+}
+
+impl BatteryInfo {
+    /// Parse battery info from dongle feature report response
+    ///
+    /// Confirmed byte layout from Windows iot_driver.exe decompilation:
+    /// The driver uses protobuf Status24 { battery: u32, is_online: bool }
+    ///
+    /// HID response format from 2.4GHz dongle (VID:3151 PID:5038):
+    /// - byte[0] = 0x00 (Report ID)
+    /// - byte[1] = battery level (0-100) - CONFIRMED via USB capture
+    /// - byte[2] = 0x00 (unknown)
+    /// - byte[3] = idle flag (1 = idle/sleeping, 0 = active/recently pressed)
+    /// - byte[4] = online flag (1 = connected)
+    /// - byte[5] = 0x01 (unknown flag, always 0x01 in captures)
+    /// - byte[6] = 0x01 (unknown flag, always 0x01 in captures)
+    /// - byte[7] = 0x00 (unknown)
+    ///
+    /// Note: Charging status is NOT available via this protocol.
+    /// USB packet analysis confirmed bytes 0-7 are identical whether charger
+    /// is plugged in or not - only battery percentage changes. The firmware
+    /// has charging detection internally (led_state_flags bit 4) but this
+    /// is not exposed via USB HID.
+    pub fn from_feature_report(data: &[u8]) -> Option<Self> {
+        if data.len() < 5 {
+            return None;
+        }
+
+        // Byte offsets confirmed via Windows driver decompilation
+        let level = data[1];
+        let online = data[4] != 0;
+        // byte[3] = idle flag (1 = idle, 0 = active)
+        let idle = data.len() > 3 && data[3] != 0;
+        // Note: byte[5] is NOT charging status (user confirmed KB wasn't charging when byte[5]=1)
+        // Charging status is not available from dongle protocol
+        let charging = false;
+
+        // Sanity check - battery level should be 0-100
+        if level > 100 {
+            return None;
+        }
+
+        Some(Self {
+            level,
+            online,
+            charging,
+            idle,
+        })
+    }
+
+    /// Check if this is valid battery data (not wired/unknown)
+    pub fn is_valid(&self) -> bool {
+        self.level <= 100
+    }
+}
+
+/// Per-key trigger settings
+#[derive(Debug, Clone, Default)]
+pub struct TriggerSettings {
+    /// Press travel (actuation point) per key, in raw u16 firmware units
+    pub press_travel: Vec<u16>,
+    /// Lift travel (release point) per key
+    pub lift_travel: Vec<u16>,
+    /// Rapid Trigger press sensitivity per key
+    pub rt_press: Vec<u16>,
+    /// Rapid Trigger lift sensitivity per key
+    pub rt_lift: Vec<u16>,
+    /// Key mode per key (0=Normal, 2=DKS, 3=MT, 4=TglHold, 5=TglDots, 7=Snap, +128=RT)
+    pub key_modes: Vec<u8>,
+    /// Bottom deadzone per key (travel below which key won't deactivate)
+    pub bottom_deadzone: Vec<u16>,
+    /// Top deadzone per key (travel above which key won't activate)
+    pub top_deadzone: Vec<u16>,
+}
+
+/// Key mode values for per-key settings
+/// Firmware settings read from keyboard (LED, profile, debounce, etc.)
+#[derive(Debug, Clone, Default)]
+pub struct FirmwareSettings {
+    pub device_id: u32,
+    pub version: u16,
+    pub profile: Profile,
+    pub debounce: u8,
+    pub polling_rate: u16,
+    pub led_mode: u8,
+    pub led_brightness: u8,
+    pub led_speed: u8,
+    pub led_r: u8,
+    pub led_g: u8,
+    pub led_b: u8,
+    pub led_dazzle: bool,
+    // Secondary LED (side lights)
+    pub side_mode: u8,
+    pub side_brightness: u8,
+    pub side_speed: u8,
+    pub side_r: u8,
+    pub side_g: u8,
+    pub side_b: u8,
+    pub side_dazzle: bool,
+    // Other settings
+    pub fn_layer: u8,
+    pub wasd_swap: bool,
+    pub precision: u8,
+    pub sleep_seconds: u16,
+}

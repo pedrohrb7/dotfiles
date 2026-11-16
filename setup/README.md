@@ -82,6 +82,133 @@ e da Microsoft pelas extensões). As configurações e extensões ficam em
 As dependências (`nss`, `gtk+3`, `alsa-lib`, `libsecret`, `libxkbfile`,
 `xdg-utils`) já vêm com o sistema base deste setup.
 
+## MonsGeek Driver v4 (teclado)
+
+O driver v4 oficial da MonsGeek (app Electron para Windows) tem mais opções de
+configuração do que o driver web. `setup/monsgeek-driver.sh` o instala num
+Electron nativo para Linux, sem Wine, em `~/.local/share/monsgeek-driver-v4`, e
+cria a entrada "MonsGeek Driver v4" no menu (`monsgeek-driver-v4.desktop`).
+
+O setup tem duas etapas, nesta ordem: o servidor nativo (`iot_driver`) e depois
+o app v4.
+
+### 1. Servidor (`iot_driver`)
+
+O app só conversa com o teclado pelo `iot_driver serve`, em `127.0.0.1:3814`. O
+código fica em `~/dotfiles/monsgeek-akko-linux/` (ver a nota ao fim desta
+seção).
+
+1. Dependências de build: as de Void estão na seção "Host Dependencies" de
+   [monsgeek-akko-linux/README.md](../monsgeek-akko-linux/README.md) (a linha
+   `xbps-install`), mais o Rust via `rustup`.
+2. Instalar:
+
+```sh
+~/dotfiles/monsgeek-akko-linux/scripts/install-user.sh
+```
+
+O script compila `iot_driver` (`cargo build --release --bin iot_driver`) e
+instala `~/.local/bin/iot_driver`, o launcher/CLI `monsgeek` e o banco de
+dispositivos em `$XDG_DATA_HOME/akko`. Também deixa o servidor subindo sozinho:
+no Void, o serviço runit `monsgeek-iot-driver` (roda como o seu usuário, sobe no
+boot, pede `sudo` uma vez). E instala a regra udev `99-monsgeek.rules` com
+`sudo`, se faltar ou estiver desatualizada.
+
+Conferir que está rodando:
+
+```sh
+sudo sv status monsgeek-iot-driver            # run: ...
+ss -ltn | grep 3814                           # algo escutando em 127.0.0.1:3814
+cat ~/.local/state/akko/current               # log (svlogd)
+```
+
+Controle: `sudo sv up|down|status monsgeek-iot-driver`.
+
+### 2. App v4
+
+Pré-requisitos:
+
+- O servidor da etapa 1 rodando.
+- O instalador `.exe` do driver v4 para Windows, baixado à mão no site da
+  MonsGeek (`MonsGeek_V4_Driver_*.exe`). É proprietário e fica fora do git.
+- Os comandos `7z`, `curl`, `jq`, `sha256sum`, `unzip` e `truncate`.
+
+```sh
+~/dotfiles/setup/monsgeek-driver.sh -n                   # mostra o que faria
+~/dotfiles/setup/monsgeek-driver.sh                      # instala ou atualiza
+~/dotfiles/setup/monsgeek-driver.sh ~/caminho/driver.exe # instalador específico
+```
+
+Sem argumento, usa o `MonsGeek_V4_Driver_*.exe` mais novo de `~/Downloads`. Para
+atualizar o app, baixe o instalador novo e rode o script de novo (com o app
+fechado). Para abrir, use "MonsGeek Driver v4" no menu/rofi ou
+`~/.local/share/monsgeek-driver-v4/monsgeek-driver-v4`.
+
+Como funciona:
+
+1. Extrai o instalador NSIS (`$PLUGINSDIR/app-64.7z`, ou `app-32.7z`) e lê a
+   versão do Electron embutida no exe do Windows (hoje app 500.2.13, Electron
+   22.3.27).
+2. Baixa o mesmo Electron para Linux do release oficial no GitHub e confere o
+   sha256 do `SHASUMS256.txt`.
+3. Renomeia o binário para `monsgeek-driver-v4`: com o nome `electron`, o
+   `app.isPackaged` fica falso e o app carregaria `localhost:8080` (servidor de
+   dev) em vez da interface.
+4. Instala `setup/monsgeek/linux-main.js` como `main` do `package.json`. Ele
+   adapta três suposições do Windows e depois carrega o `main.js` original:
+   - user agent de Windows x64: a interface só reconhece mac/windows e, em
+     Linux, fica presa na tela de carregamento;
+   - `shell.openPath` de `iot_driver*.exe` responde sucesso sem executar nada:
+     a interface copia e lança o `iot_driver.exe` embutido antes de conectar, e
+     o `iot_driver` nativo já atende a 3814 (o `resources/app/iot_driver.exe` é
+     um arquivo vazio, só para a cópia não falhar);
+   - permissões de WebHID restritas ao VID `0x3151` (MonsGeek), como reserva.
+
+A troca é feita de uma vez (monta em `.new` e renomeia), então uma falha no meio
+não deixa a instalação pela metade.
+
+Problemas conhecidos:
+
+- Preso em "设备搜索中" (procurando dispositivos): nada escuta em
+  `127.0.0.1:3814`. O script avisa quando isso acontece. Subir o serviço:
+  `sudo sv up monsgeek-iot-driver`.
+- A interface abre em chinês simplificado; o seletor de idioma fica no topo,
+  ao lado de "中文简体".
+- Ao iniciar, o app manda um `setLightType` para o teclado (comportamento dele).
+- Não atualize o firmware do teclado por este app: não foi validado no Linux.
+- Rodar o `.exe` no Wine (11.21) foi tentado e não funciona: o Wine enxerga o
+  teclado pelo hidraw, mas o renderer do Electron morre em silêncio (janela
+  branca, depois preta), mesmo com `--disable-gpu` e sem transparência.
+
+### Sobre o `monsgeek-akko-linux/`
+
+É uma cópia, sem histórico git, do fork de
+[echtzeit-solutions/monsgeek-akko-linux](https://github.com/echtzeit-solutions/monsgeek-akko-linux)
+com alterações locais. Não há subtree nem remote: trazer atualizações do
+upstream é um merge manual. O `.gitignore` interno tem exceções (`!`) para os 6
+arquivos de firmware gerados que o upstream versiona.
+
+### Teclado (FUN60 PRO)
+
+O teclado é um MonsGeek FUN60 PRO (60%, sem setas; USB `3151:5029`). As setas
+ficam na camada Fn: Fn+W/A/S/D = Cima/Esquerda/Baixo/Direita. Se o firmware
+perder esse mapeamento (já aconteceu: Fn+WASD mandava as letras, e a camada Fn
+do perfil 0 voltou ao padrão de fábrica), restaure pela CLI:
+
+```sh
+monsgeek remap Fn+W Up
+monsgeek remap Fn+A Left
+monsgeek remap Fn+S Down
+monsgeek remap Fn+D Right
+monsgeek keymatrix -k w,a,s,d   # conferir
+monsgeek reset-key Fn+W         # desfazer (idem para A, S, D)
+```
+
+O Fn é tratado dentro do teclado e nunca chega ao Linux, então isso não se
+resolve com xmodmap/keyd. A placa também tem a opção "WASD Swap" (mesmo toggle
+do Fn+W na própria placa): `monsgeek options` mostra o estado e
+`monsgeek set-options --wasd-swap true|false` muda.
+
 ## O que se adapta sozinho em cada sessão
 
 | Onde                                   | Como                                                              |

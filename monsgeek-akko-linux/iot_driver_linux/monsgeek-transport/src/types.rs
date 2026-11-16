@@ -1,0 +1,295 @@
+//! Common types for transport layer
+
+/// Transport type identifier
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TransportType {
+    /// Direct USB HID connection
+    HidWired,
+    /// 2.4GHz wireless via USB dongle
+    HidDongle,
+    /// Bluetooth Low Energy GATT
+    Bluetooth,
+    /// WebRTC data channel (remote)
+    WebRtc,
+}
+
+impl TransportType {
+    /// Check if this transport is wireless
+    pub fn is_wireless(&self) -> bool {
+        matches!(self, Self::HidDongle | Self::Bluetooth | Self::WebRtc)
+    }
+}
+
+/// Device identification information
+#[derive(Debug, Clone)]
+pub struct TransportDeviceInfo {
+    /// USB Vendor ID
+    pub vid: u16,
+    /// USB Product ID
+    pub pid: u16,
+    /// Whether this is a wireless dongle
+    pub is_dongle: bool,
+    /// Transport type
+    pub transport_type: TransportType,
+    /// Device path or identifier (transport-specific)
+    pub device_path: String,
+    /// Serial number if available
+    pub serial: Option<String>,
+    /// Product name if available
+    pub product_name: Option<String>,
+}
+
+/// Checksum configuration for commands
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChecksumType {
+    /// Sum bytes 1-7, store 255-(sum&0xFF) at byte 8 (most commands)
+    #[default]
+    Bit7,
+    /// Sum bytes 1-8, store 255-(sum&0xFF) at byte 9 (LED commands)
+    Bit8,
+    /// No checksum
+    None,
+}
+
+/// Timestamped vendor event wrapper
+///
+/// Provides a consistent timestamp format for events from any source:
+/// - Runtime HID events: seconds since transport opened
+/// - PCAP replay: seconds since start of capture
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimestampedEvent {
+    /// Timestamp in seconds (relative to start)
+    pub timestamp: f64,
+    /// The actual event
+    pub event: VendorEvent,
+}
+
+impl TimestampedEvent {
+    /// Create a new timestamped event
+    pub fn new(timestamp: f64, event: VendorEvent) -> Self {
+        Self { timestamp, event }
+    }
+
+    /// Create an event with timestamp 0.0 (for when timing doesn't matter)
+    pub fn now(event: VendorEvent) -> Self {
+        Self {
+            timestamp: 0.0,
+            event,
+        }
+    }
+}
+
+/// Vendor events from input reports (EP2 notifications)
+#[derive(Debug, Clone, PartialEq)]
+pub enum VendorEvent {
+    /// Key depth/magnetism data (0x1B)
+    KeyDepth {
+        /// Key matrix index
+        key_index: u8,
+        /// Raw depth value from hall effect sensor
+        depth_raw: u16,
+    },
+    /// Magnetism reporting started (0x0F with start flag)
+    MagnetismStart,
+    /// Magnetism reporting stopped (0x0F with stop flag)
+    MagnetismStop,
+
+    // === Profile & Settings Notifications ===
+    /// Keyboard wake from sleep (0x00 - all zeros payload, or power state 0x00)
+    Wake,
+    /// Keyboard entering idle sleep (power state 0x01)
+    Sleep,
+    /// Keyboard entering deep sleep (power state 0x02)
+    DeepSleep,
+    /// Profile changed via Fn+F9..F12 (0x01)
+    ProfileChange {
+        /// New profile number (0-3)
+        profile: u8,
+    },
+    /// Settings acknowledgment (0x0F)
+    SettingsAck {
+        /// true = settings change started, false = completed
+        started: bool,
+    },
+
+    // === LED Settings Notifications ===
+    /// LED effect mode changed via Fn+Home/PgUp/End/PgDn (0x04)
+    LedEffectMode {
+        /// Effect ID (1-20)
+        effect_id: u8,
+    },
+    /// LED effect speed changed via Fn+←/→ (0x05)
+    LedEffectSpeed {
+        /// Speed level (0-4)
+        speed: u8,
+    },
+    /// Brightness level changed via Fn+↑/↓ (0x06)
+    BrightnessLevel {
+        /// Brightness level (0-4)
+        level: u8,
+    },
+    /// LED color changed via Fn+\ (0x07)
+    LedColor {
+        /// Color index (0-7)
+        color: u8,
+    },
+
+    // === Keyboard Function Notifications (0x03) ===
+    /// Win lock toggled via Fn+L_Win (action 0x01)
+    WinLockToggle {
+        /// true = locked, false = unlocked
+        locked: bool,
+    },
+    /// WASD/Arrow swap toggled via Fn+W (action 0x03)
+    WasdSwapToggle {
+        /// true = swapped, false = normal
+        swapped: bool,
+    },
+    /// Backlight toggle via Fn+L (action 0x09)
+    BacklightToggle,
+    /// Fn layer toggled via Fn+Alt (action 0x08)
+    FnLayerToggle {
+        /// Fn layer index (0 = default, 1 = alternate)
+        layer: u8,
+    },
+    /// Dial mode toggle via dial button (action 0x11)
+    DialModeToggle,
+    /// Unknown keyboard function notification
+    UnknownKbFunc {
+        /// Category byte
+        category: u8,
+        /// Action byte
+        action: u8,
+    },
+
+    // === Battery & Connection ===
+    /// Battery status update (from dongle, 0x88)
+    BatteryStatus {
+        /// Battery level 0-100
+        level: u8,
+        /// Device is charging
+        charging: bool,
+        /// Device is online/connected
+        online: bool,
+    },
+
+    // === HID Input Reports ===
+    /// Mouse report (Report ID 0x02) - keyboard's built-in mouse function
+    ///
+    /// Used for gaming macros, dial mouse mode, or other pointing features.
+    /// Format: [02, buttons, 00, X_lo, X_hi, Y_lo, Y_hi, wheel_lo, wheel_hi]
+    MouseReport {
+        /// Button state bitmap (bit 0 = left, bit 1 = right, bit 2 = middle)
+        buttons: u8,
+        /// X movement (signed, negative = left)
+        x: i16,
+        /// Y movement (signed, negative = up)
+        y: i16,
+        /// Wheel movement (signed, negative = scroll up)
+        wheel: i16,
+    },
+
+    /// Unknown event type (raw bytes for debugging)
+    Unknown(Vec<u8>),
+}
+
+impl TransportDeviceInfo {
+    /// Check if connected via 2.4GHz dongle
+    pub fn is_dongle(&self) -> bool {
+        self.transport_type == TransportType::HidDongle
+    }
+
+    /// Check if connected via wireless transport (dongle, Bluetooth, etc.)
+    pub fn is_wireless(&self) -> bool {
+        self.transport_type.is_wireless()
+    }
+}
+
+/// Dongle status from GET_DONGLE_STATUS (0xF7)
+///
+/// Lightweight view of the dongle's current state, used by the flow-control
+/// polling loop to decide when to read the actual keyboard response.
+#[derive(Debug, Clone)]
+pub struct DongleStatus {
+    /// Whether the dongle has a cached keyboard response ready to read
+    pub has_response: bool,
+    /// RF link idle (true) or waiting for keyboard (false)
+    pub rf_ready: bool,
+    /// Keyboard battery level (0-100%)
+    pub battery_level: u8,
+    /// Keyboard is charging
+    pub charging: bool,
+}
+
+/// Dongle info from GET_DONGLE_INFO (0xF0)
+///
+/// Response layout: {0xF0, protocol_version, max_packet_size, 0,0,0,0, firmware_version}
+#[derive(Debug, Clone)]
+pub struct DongleInfo {
+    /// Protocol version (always 1)
+    pub protocol_version: u8,
+    /// Max packet size (always 8)
+    pub max_packet_size: u8,
+    /// Dongle firmware version
+    pub firmware_version: u8,
+}
+
+/// RF info from GET_RF_INFO (0xFB)
+///
+/// Response layout: {rf_addr[0..4], fw_ver_minor, fw_ver_major, 0, 0}
+#[derive(Debug, Clone)]
+pub struct RfInfo {
+    /// 4-byte RF address
+    pub rf_address: [u8; 4],
+    /// Firmware version minor
+    pub firmware_version_minor: u8,
+    /// Firmware version major
+    pub firmware_version_major: u8,
+}
+
+/// Discovered device that can be opened
+#[derive(Debug, Clone)]
+pub struct DiscoveredDevice {
+    /// Device information
+    pub info: TransportDeviceInfo,
+}
+
+/// Human-readable device label for multi-device selection
+#[derive(Debug, Clone)]
+pub struct DeviceLabel {
+    /// Sequential index in the device list
+    pub index: usize,
+    /// Model name (from DB lookup or USB product string)
+    pub model_name: String,
+    /// Transport type short name: "usb", "dongle", "bt"
+    pub transport_name: &'static str,
+    /// Firmware device ID if probed
+    pub device_id: Option<u32>,
+    /// Firmware version if probed
+    pub version: Option<u16>,
+    /// HID device path
+    pub hid_path: String,
+}
+
+impl std::fmt::Display for DeviceLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "#{:<2} {:<20} {:<8}",
+            self.index, self.model_name, self.transport_name
+        )?;
+        if let (Some(id), Some(ver)) = (self.device_id, self.version) {
+            write!(f, " [{id} v{}.{:02}]", ver / 100, ver % 100)?;
+        }
+        Ok(())
+    }
+}
+
+/// Discovery events for hot-plug support
+#[derive(Debug, Clone)]
+pub enum DiscoveryEvent {
+    /// A device was added
+    DeviceAdded(DiscoveredDevice),
+    /// A device was removed
+    DeviceRemoved(TransportDeviceInfo),
+}

@@ -1,0 +1,529 @@
+//! MonsGeek Keyboard Driver CLI
+//!
+//! A command-line interface for controlling MonsGeek keyboards.
+
+use clap::Parser;
+use hidapi::HidApi;
+use tonic::transport::Server;
+use tower_http::cors::{Any, CorsLayer};
+use tracing::info;
+
+// CLI definitions
+mod cli;
+use cli::{Cli, Commands, DongleCommands, EffectCommands, FirmwareCommands};
+
+// Command handlers (split from main.rs)
+mod commands;
+use commands::CmdCtx;
+
+// gRPC server module
+mod grpc;
+use grpc::{DriverGrpcServer, DriverService, dj_dev};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+
+    // Handle --file flag for pcap replay mode (no device needed)
+    if let Some(ref pcap_file) = cli.pcap_file {
+        return iot_driver::pcap_analyzer::run_pcap_analysis(
+            pcap_file,
+            iot_driver::pcap_analyzer::OutputFormat::Text,
+            cli.filter.as_deref(),
+            false, // verbose
+            false, // debug
+            cli.hex,
+            cli.all,
+        );
+    }
+
+    // Create command context from CLI flags
+    let printer_config = commands::create_printer_config(
+        cli.monitor,
+        cli.hex,
+        cli.all,
+        cli.filter.as_deref(),
+        cli.record.as_deref(),
+    )?;
+    let ctx = CmdCtx::new(printer_config.clone(), cli.device, cli.profile);
+
+    match cli.command {
+        None => {
+            // Default: show device info
+            commands::query::info(&ctx)?;
+        }
+
+        // === Query Commands ===
+        Some(Commands::Info) => {
+            commands::query::info(&ctx)?;
+        }
+        Some(Commands::Profile) => {
+            commands::query::profile(&ctx)?;
+        }
+        Some(Commands::Led) => {
+            commands::with_keyboard(&ctx, commands::query::led)?;
+        }
+        Some(Commands::Debounce) => {
+            commands::query::debounce(&ctx)?;
+        }
+        Some(Commands::Rate) => {
+            commands::with_keyboard(&ctx, commands::query::rate)?;
+        }
+        Some(Commands::Options) => {
+            commands::with_keyboard(&ctx, commands::query::options)?;
+        }
+        Some(Commands::Features) => {
+            commands::query::features(&ctx)?;
+        }
+        Some(Commands::Sleep) => {
+            commands::with_keyboard(&ctx, commands::query::sleep)?;
+        }
+        Some(Commands::All) => {
+            commands::query::all(&ctx)?;
+        }
+        Some(Commands::Battery {
+            quiet,
+            hex,
+            watch,
+            vendor,
+        }) => {
+            let hidapi = HidApi::new()?;
+            commands::query::battery(&hidapi, quiet, hex, watch, vendor)?;
+        }
+
+        // === Set Commands ===
+        Some(Commands::SetProfile { profile }) => {
+            commands::with_keyboard(&ctx, |kb| commands::set::set_profile(kb, profile))?;
+        }
+        Some(Commands::SetDebounce { ms }) => {
+            commands::with_keyboard(&ctx, |kb| commands::set::set_debounce(kb, ms))?;
+        }
+        Some(Commands::SetRate { rate }) => {
+            commands::with_keyboard(&ctx, |kb| commands::set::set_rate(kb, &rate))?;
+        }
+        Some(Commands::SetLed {
+            mode,
+            brightness,
+            speed,
+            r,
+            g,
+            b,
+        }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::set::set_led(kb, &mode, brightness, speed, r, g, b)
+            })?;
+        }
+        Some(Commands::SetSleep {
+            idle,
+            deep,
+            idle_bt,
+            idle_24g,
+            deep_bt,
+            deep_24g,
+            uniform,
+        }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::set::set_sleep(
+                    kb, idle, deep, idle_bt, idle_24g, deep_bt, deep_24g, uniform,
+                )
+            })?;
+        }
+        Some(Commands::SetOptions {
+            os,
+            fn_layer,
+            anti_mistouch,
+            rt_stability,
+            wasd_swap,
+        }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::set::set_options(
+                    kb,
+                    os.map(cli::OsModeArg::as_u8),
+                    fn_layer,
+                    anti_mistouch,
+                    rt_stability,
+                    wasd_swap,
+                )
+            })?;
+        }
+        Some(Commands::Reset) => {
+            commands::with_keyboard(&ctx, commands::set::reset)?;
+        }
+        Some(Commands::SetColorAll { r, g, b, led_layer }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::set::set_color_all(kb, r, g, b, led_layer)
+            })?;
+        }
+
+        // === Trigger Commands ===
+        Some(Commands::Calibrate) => {
+            commands::with_keyboard_on_profile(&ctx, commands::triggers::calibrate)?;
+        }
+        Some(Commands::Triggers) => {
+            commands::with_keyboard_on_profile(&ctx, commands::triggers::triggers)?;
+        }
+        Some(Commands::SetActuation { mm }) => {
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_actuation(kb, mm)
+            })?;
+        }
+        Some(Commands::SetRt { value }) => {
+            commands::with_keyboard_on_profile(&ctx, |kb| commands::triggers::set_rt(kb, &value))?;
+        }
+        Some(Commands::SetRelease { mm }) => {
+            commands::with_keyboard_on_profile(&ctx, |kb| commands::triggers::set_release(kb, mm))?;
+        }
+        Some(Commands::SetBottomDeadzone { mm }) => {
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_bottom_deadzone(kb, mm)
+            })?;
+        }
+        Some(Commands::SetTopDeadzone { mm }) => {
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_top_deadzone(kb, mm)
+            })?;
+        }
+        Some(Commands::SetKeyTrigger {
+            key,
+            actuation,
+            release,
+            mode,
+            rt,
+        }) => {
+            let mode = mode.map(Into::into);
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_key_trigger(kb, key, actuation, release, mode, rt)
+            })?;
+        }
+        Some(Commands::SetModeAll { mode, rt }) => {
+            let mode = mode.into();
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_mode_all(kb, mode, rt)
+            })?;
+        }
+        Some(Commands::SetSnaptap { key, with, clear }) => {
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_snaptap(kb, key, with, clear)
+            })?;
+        }
+        Some(Commands::SetModtapTime { key, ms }) => {
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_modtap_time(kb, key, ms)
+            })?;
+        }
+        Some(Commands::Dks {
+            key,
+            travel_mm,
+            modes,
+            slots,
+            rt,
+        }) => {
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::dks(kb, key, travel_mm, modes, slots, rt)
+            })?;
+        }
+        Some(Commands::DksRoundtrip { key, op }) => {
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::dks_roundtrip(kb, key, &op)
+            })?;
+        }
+
+        // === Keymap Commands ===
+        Some(Commands::Remap { from, to, layer }) => {
+            commands::with_keyboard(&ctx, |kb| commands::keymap::remap(kb, &from, &to, layer))?;
+        }
+        Some(Commands::ResetKey { key, layer }) => {
+            commands::with_keyboard(&ctx, |kb| commands::keymap::reset_key(kb, &key, layer))?;
+        }
+        Some(Commands::Swap {
+            key1,
+            key2,
+            profile,
+        }) => {
+            commands::with_keyboard(&ctx, |kb| commands::keymap::swap(kb, &key1, &key2, profile))?;
+        }
+        Some(Commands::Keymatrix {
+            layer,
+            unset,
+            keys,
+            sys,
+            raw,
+        }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::keymap::keymatrix(kb, &layer, unset, &keys, sys, raw)
+            })?;
+        }
+
+        // === Macro Commands ===
+        Some(Commands::Macro { key }) => {
+            commands::with_keyboard(&ctx, |kb| commands::macros::get_macro(kb, &key))?;
+        }
+        Some(Commands::SetMacro {
+            key,
+            text,
+            delay,
+            repeat,
+            seq,
+        }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::macros::set_macro(kb, &key, &text, delay, repeat, seq)
+            })?;
+        }
+        Some(Commands::ClearMacro { key }) => {
+            commands::with_keyboard(&ctx, |kb| commands::macros::clear_macro(kb, &key))?;
+        }
+        Some(Commands::AssignMacro {
+            key,
+            macro_index,
+            r#fn,
+        }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::macros::assign_macro(kb, &key, &macro_index, r#fn)
+            })?;
+        }
+
+        // === Animation Commands ===
+        Some(Commands::Userpic {
+            file,
+            slot,
+            output,
+            nearest,
+        }) => {
+            commands::userpic::userpic(&ctx, file, slot, output, nearest)?;
+        }
+        Some(Commands::StreamTest { fps, power_budget }) => {
+            commands::led_stream::stream_test(&ctx, fps, power_budget)?;
+        }
+        Some(Commands::Stream {
+            file,
+            fps,
+            r#loop,
+            power_budget,
+        }) => {
+            commands::led_stream::stream_gif(&ctx, &file, fps, r#loop, power_budget)?;
+        }
+        Some(Commands::Mode { mode, userpic_slot }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::animations::mode(kb, &mode, userpic_slot)
+            })?;
+        }
+        Some(Commands::Modes) => {
+            commands::animations::modes()?;
+        }
+
+        // === Audio/Reactive Commands ===
+        Some(Commands::Audio {
+            mode,
+            style,
+            sensitivity,
+            rate,
+            device,
+        }) => {
+            commands::reactive::audio(&ctx, mode.led_mode(), style, sensitivity, rate, device)?;
+        }
+        Some(Commands::AudioTest) => {
+            commands::reactive::audio_test()?;
+        }
+        Some(Commands::AudioLevels { device }) => {
+            commands::reactive::audio_levels(device)?;
+        }
+        #[cfg(feature = "screen-capture")]
+        Some(Commands::Screen { fps }) => {
+            commands::reactive::screen(&ctx, fps).await?;
+        }
+
+        // === Dongle Commands ===
+        Some(Commands::Dongle(dongle_cmd)) => match dongle_cmd {
+            DongleCommands::Info => {
+                commands::dongle::info(&ctx)?;
+            }
+            DongleCommands::Status => {
+                commands::dongle::status(&ctx)?;
+            }
+        },
+
+        // === Debug Commands ===
+        Some(Commands::Depth { raw, zero, verbose }) => {
+            commands::with_keyboard(&ctx, |kb| commands::debug::depth(kb, raw, zero, verbose))?;
+        }
+        Some(Commands::TestTransport) => {
+            commands::debug::test_transport(&ctx)?;
+        }
+
+        // === Firmware Commands ===
+        Some(Commands::Firmware(fw_cmd)) => match fw_cmd {
+            FirmwareCommands::Validate { file } => {
+                commands::firmware::validate(&file)?;
+            }
+            FirmwareCommands::DryRun { file, verbose } => {
+                commands::firmware::dry_run(&ctx, &file, verbose)?;
+            }
+            FirmwareCommands::Check { device_id } => {
+                commands::firmware::check(&ctx, device_id)?;
+            }
+            FirmwareCommands::Download { device_id, output } => {
+                commands::firmware::download(&ctx, device_id, &output)?;
+            }
+            FirmwareCommands::Flash {
+                file,
+                device,
+                dongle,
+                yes,
+            } => {
+                // firmware flash has its own --device flag; prefer it over global --device
+                let device_path = device.as_deref().or(ctx.device_selector());
+                commands::firmware::flash(&file, device_path, dongle, yes)?;
+            }
+        },
+
+        // === Utility Commands ===
+        Some(Commands::List) => {
+            commands::utility::list()?;
+        }
+        Some(Commands::Probe { output }) => {
+            commands::probe::run(&ctx, output.as_deref())?;
+        }
+        Some(Commands::Raw { cmd: cmd_str }) => {
+            commands::utility::raw(&cmd_str, &ctx)?;
+        }
+        Some(Commands::Serve) => {
+            run_server(printer_config).await?;
+        }
+        Some(Commands::Tui) => {
+            commands::utility::tui(ctx.device).await?;
+        }
+        Some(Commands::Joystick { config, headless }) => {
+            commands::utility::joystick(config, headless)?;
+        }
+
+        // === Effect Commands ===
+        Some(Commands::Effect(fx_cmd)) => match fx_cmd {
+            EffectCommands::List => {
+                commands::effect::list()?;
+            }
+            EffectCommands::Show { name } => {
+                commands::effect::show(&name)?;
+            }
+            EffectCommands::Preview {
+                name,
+                keys,
+                vars,
+                fps,
+            } => {
+                commands::effect::preview(&name, &keys, &vars, fps)?;
+            }
+            EffectCommands::Play { name, keys, vars } => {
+                commands::effect::play(&ctx, &name, &keys, &vars)?;
+            }
+        },
+
+        // === Notification Commands ===
+        #[cfg(feature = "notify")]
+        Some(Commands::NotifyDaemon { verbose }) => {
+            commands::notify::daemon(&ctx, verbose).await?;
+        }
+        #[cfg(feature = "notify")]
+        Some(Commands::Notify {
+            key,
+            effect,
+            vars,
+            priority,
+            ttl,
+            source,
+        }) => {
+            commands::notify::notify(&key, &effect, &vars, priority, ttl, &source).await?;
+        }
+        #[cfg(feature = "notify")]
+        Some(Commands::NotifyAck {
+            id,
+            key,
+            source,
+            all,
+        }) => {
+            commands::notify::ack(id, key.as_deref(), source.as_deref(), all).await?;
+        }
+        #[cfg(feature = "notify")]
+        Some(Commands::NotifyList) => {
+            commands::notify::list().await?;
+        }
+        #[cfg(feature = "notify")]
+        Some(Commands::NotifyClear) => {
+            commands::notify::clear().await?;
+        }
+        Some(Commands::AnimStatus) => {
+            commands::with_keyboard(&ctx, |kb| {
+                match iot_driver::anim::query_status(kb) {
+                    Ok(snap) => println!("{snap}"),
+                    Err(e) => eprintln!("Error: {e}"),
+                }
+                Ok(())
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_server(
+    printer_config: Option<monsgeek_transport::PrinterConfig>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("iot_driver=debug".parse().unwrap()),
+        )
+        // Colour only on a terminal: autostart and the installer send this to a
+        // log file, where escape codes are noise.
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
+        .init();
+
+    let addr = "127.0.0.1:3814".parse()?;
+
+    info!("Starting IOT Driver Linux on {}", addr);
+    if printer_config.is_some() {
+        info!("Monitor mode enabled - printing all commands/responses");
+    }
+    println!("addr :: {addr}");
+
+    let service = DriverService::with_printer_config(printer_config)
+        .map_err(|e| format!("Failed to initialize HID API: {e}"))?;
+
+    // Start hot-plug monitoring for device connect/disconnect
+    service.start_hotplug_monitor();
+
+    // Scan for devices on startup
+    let devices = service.scan_devices().await;
+    info!("Found {} devices on startup", devices.len());
+    for dev in &devices {
+        if let Some(dj_dev::OneofDev::Dev(d)) = &dev.oneof_dev {
+            info!(
+                "  - VID={:04x} PID={:04x} ID={} path={}",
+                d.vid, d.pid, d.id, d.path
+            );
+        }
+    }
+
+    // CORS layer for browser access
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_headers(Any)
+        .allow_methods(Any)
+        .expose_headers(Any);
+
+    // Wrap service with gRPC-Web support for browser clients
+    let grpc_service = tonic_web::enable(DriverGrpcServer::new(service));
+
+    info!("Server ready with gRPC-Web support");
+
+    Server::builder()
+        .accept_http1(true)
+        .tcp_nodelay(true)
+        .initial_stream_window_size(4096)
+        .initial_connection_window_size(4096)
+        .layer(cors)
+        .add_service(grpc_service)
+        .serve(addr)
+        .await?;
+
+    Ok(())
+}

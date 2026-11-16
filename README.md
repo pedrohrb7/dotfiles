@@ -21,6 +21,12 @@ sozinho a cada sessão. Ver [setup/README.md](setup/README.md).
 O VSCode oficial vai para `/opt/vscode` com `setup/vscode.sh` (instala e
 atualiza). Ver [setup/README.md](setup/README.md#vscode).
 
+O driver v4 oficial do teclado MonsGeek roda num Electron nativo (sem Wine), em
+duas etapas: primeiro o servidor nativo, com
+`monsgeek-akko-linux/scripts/install-user.sh`, e depois o app, com
+`setup/monsgeek-driver.sh` (a partir do instalador `.exe` baixado à mão). Ver
+[setup/README.md](setup/README.md#monsgeek-driver-v4-teclado).
+
 ## SSH agent
 
 O `.zshrc` sobe um único `ssh-agent` num socket fixo

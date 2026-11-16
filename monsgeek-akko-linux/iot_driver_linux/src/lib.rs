@@ -1,0 +1,44 @@
+// MonsGeek M1 V5 HE Linux Driver - Shared Library
+// Protocol definitions, device registry, and HID communication
+
+pub mod anim;
+pub mod audio_reactive;
+pub mod bpf_loader;
+pub mod device_loader;
+pub mod devices;
+pub mod effect;
+pub mod firmware;
+pub mod firmware_api;
+pub mod flash;
+pub mod hal;
+pub mod hid;
+pub mod key_action;
+pub mod keyclass;
+pub mod keymap;
+pub mod keymatrix_view;
+pub mod led_stream;
+pub mod macro_seq;
+pub mod pcap_analyzer;
+pub mod power_supply;
+pub mod profile;
+pub mod protocol;
+pub mod pulse;
+pub mod screen_calib;
+#[cfg(feature = "screen-capture")]
+pub mod screen_capture;
+pub mod settings;
+pub mod tui;
+
+pub use bpf_loader::{AkkoBpfLoader, BpfStatus, KernelBatteryInfo};
+pub use device_loader::{DeviceDatabase, JsonDeviceDefinition};
+pub use devices::is_supported;
+pub use hal::{DeviceRegistry, HidInterface, InterfaceType, device_registry};
+pub use hid::{BatteryInfo, FirmwareSettings, TriggerSettings, VendorEventType};
+pub use power_supply::{
+    BatteryState, PowerSupply, PowerSupplyManager, PowerSupplyStatus, TestPowerIntegration,
+};
+pub use profile::{DeviceProfile, DeviceProfileExt, ProfileRegistry, profile_registry};
+pub mod notify;
+
+pub use protocol::cmd;
+pub use protocol::music_viz;

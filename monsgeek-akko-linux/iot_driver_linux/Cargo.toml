@@ -1,0 +1,134 @@
+[workspace]
+members = [".", "monsgeek-transport", "monsgeek-keyboard", "monsgeek-joystick"]
+
+[package]
+name = "iot_driver"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0"
+description = "Linux driver for MonsGeek/Akko magnetic Hall Effect keyboards"
+repository = "https://github.com/echtzeit-solutions/monsgeek-akko-linux"
+keywords = ["keyboard", "hid", "monsgeek", "akko", "rongyuan", "hall-effect", "magnetic"]
+categories = ["hardware-support"]
+
+[dependencies]
+# gRPC
+tonic = "0.12"
+tonic-web = "0.12"
+prost = "0.13"
+tower-http = { version = "0.6", features = ["cors"] }
+http = "1.0"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+# HID access
+hidapi = "2.6"
+
+# Hot-plug detection (Linux udev)
+tokio-udev = "0.9"
+libc = "0.2"
+
+# Async utilities
+futures = "0.3"
+async-stream = "0.3"
+pin-project-lite = "0.2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Database (optional, for compatibility)
+sled = "0.34"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# TUI
+ratatui = { version = "0.30", features = ["crossterm_0_28"] }
+crossterm = { version = "0.28", features = ["event-stream"] }
+throbber-widgets-tui = "0.10"
+tui-scrollview = "0.6"
+tui-logger = { version = "0.18", features = ["crossterm"] }
+log = "0.4"
+
+# Audio reactive mode — native PulseAudio capture (works on PipeWire via
+# pipewire-pulse). Requires the libpulse client dev package at build time
+# (e.g. `libpulse-dev` on Debian/Ubuntu).
+libpulse-binding = "2.30"
+libpulse-simple-binding = "2.29"
+spectrum-analyzer = "1.4"
+
+# Screen color reactive mode (PipeWire screencast)
+ashpd = { version = "0.10", optional = true }
+pipewire = { version = "0.9", optional = true }
+
+# Signal handling
+ctrlc = "3.4"
+
+# CLI parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Note: crossterm is used for colored output (see TUI section)
+
+# BPF loading (for battery integration)
+aya = { version = "0.13", optional = true }
+
+# GIF/Image processing
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+gif = "0.13"
+
+# D-Bus IPC (for notify daemon)
+zbus = { version = "5", default-features = false, features = ["tokio"], optional = true }
+
+# Effect engine (keyframe animations + TOML config)
+keyframe = "1.1"
+toml = "0.8"
+
+# PCAP analysis
+pcap-parser = "0.16"
+
+# New transport abstraction layer
+monsgeek-transport = { path = "monsgeek-transport" }
+monsgeek-keyboard = { path = "monsgeek-keyboard" }
+
+# Firmware download/update
+reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+[features]
+default = ["firmware-api", "notify", "screen-capture"]
+firmware-api = ["dep:reqwest", "firmware-api-async"]
+firmware-api-async = ["dep:reqwest"]
+bpf = ["dep:aya"]
+notify = ["dep:zbus"]
+screen-capture = ["dep:ashpd", "dep:pipewire"]
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[[bin]]
+name = "iot_driver"
+path = "src/main.rs"
+
+# TUI is now integrated into iot_driver via 'iot_driver tui' command
+# [[bin]]
+# name = "monsgeek-tui"
+# path = "src/tui.rs"
+
+[[example]]
+name = "dongle_throughput_test"
+
+[[example]]
+name = "read_dongle"
+
+[[example]]
+name = "screencast_reentry_test"
+required-features = ["screen-capture"]
+
+[[example]]
+name = "calib_curve_render"

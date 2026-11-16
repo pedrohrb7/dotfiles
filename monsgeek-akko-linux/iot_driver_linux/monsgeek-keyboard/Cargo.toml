@@ -1,0 +1,16 @@
+[package]
+name = "monsgeek-keyboard"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0"
+description = "High-level keyboard interface for MonsGeek/Akko keyboards"
+
+[dependencies]
+monsgeek-transport = { path = "../monsgeek-transport" }
+thiserror = "2.0"
+tokio = { version = "1", features = ["sync"] }
+tracing = "0.1"
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

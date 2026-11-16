@@ -1,0 +1,13 @@
+//! MonsGeek Magnetic Key-to-Joystick Mapper
+//!
+//! Translates magnetic Hall Effect key readings into virtual joystick axes,
+//! with a TUI for configuration and live visualization.
+
+pub mod config;
+pub mod joystick;
+pub mod mapper;
+pub mod tui;
+
+pub use config::{AxisCalibration, AxisConfig, AxisId, AxisMappingMode, JoystickConfig};
+pub use joystick::{AXIS_MAX, AXIS_MIN, JoystickError, VirtualJoystick};
+pub use mapper::AxisMapper;

@@ -1,0 +1,113 @@
+# Build artifacts
+target/
+*.exe
+
+# Local cargo config (dev patches)
+.cargo/
+
+# Node modules
+node_modules/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Large extracted JS files (can be regenerated)
+akko_cloud.js
+akko_cloud_beautified.js
+akko_cloud_app.js
+akko_cloud_clean.js
+akko_cloud_data_extracted.js
+akko_cloud_final.js
+akko_cloud_i18n.js
+akko_cloud_min.js
+akko_cloud_refactored.js
+akko_cloud_slim.js
+akko_only.js
+device_classes.js
+webapp_main.js
+
+# Extracted directories (can be regenerated)
+extracted/
+extracted_js/
+driver_extract/vendors/
+webapp_source/node_modules/
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temp files
+*.log
+*.tmp
+/tmp/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Wine prefix
+wine_iot/
+
+# Playwright
+.playwright-mcp/
+
+# Claude artifacts (keep .claude/plans for reference)
+.claude/projects/
+CLAUDE.local.md
+
+# Large data files that can be regenerated
+large_data.json
+outline.json
+modules.json
+
+# Firmware patch build artifacts
+firmwares/*/patch/*.o
+firmwares/*/patch/hook.bin
+firmwares/*/patch/hook.elf
+firmwares/*/patch/hooks_gen.S
+firmwares/*/patch/__pycache__/
+firmwares/*/firmware_patched.bin
+
+# Generated from Ghidra exports (regenerate via generate_patch_files.py)
+firmwares/*/patch/fw_*.h
+firmwares/*/patch/fw_symbols.ld
+
+# The upstream repo tracks these generated files despite the rules above (they were
+# force-added); keep them tracked here too, since this copy lives inside ~/dotfiles.
+!firmwares/2949-v408/firmware_patched.bin
+!firmwares/2949-v408/patch/fw_v407.h
+!firmwares/2949-v408/patch/fw_v408.h
+!firmwares/2949-v408/patch/fw_symbols.ld
+!firmwares/DONGLE_RY6108_RF_KB_V903/patch/fw_dongle.h
+!firmwares/DONGLE_RY6108_RF_KB_V903/patch/fw_symbols.ld
+
+# Ghidra project transient files (lock + temp postscript scratch); the DB shards
+# under *.rep/ are intentionally tracked, but these are per-session junk.
+firmwares/*/ghidra_*.lock
+firmwares/*/*.rep/**/tmp*.ps
+firmwares/*/patch/symbols.json
+firmwares/*/patch/callgraph.*
+
+# Ghidra temp/lock files
+*.rep/**/*.ps
+*.rep/**/*.lock
+*.rep/**/changeA.grf
+*.rep/**/changeB.grf
+*.rep/**/snapshotA.grf
+*.rep/**/snapshotB.grf
+
+# Misc temp
+aux
+ps
+
+# Large installer (can be downloaded)
+Akko_Cloud_v4_setup_370.2.17_WIN20251225.zip
+
+# Strings dump (large, can be regenerated)
+iot_driver_strings.txt
+iot_driver_devices.txt

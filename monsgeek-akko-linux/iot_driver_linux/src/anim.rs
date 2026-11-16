@@ -1,0 +1,270 @@
+//! On-device animation engine abstraction.
+//!
+//! Provides a high-level interface over the firmware's 0xEA animation commands.
+//! Used by CLI (`anim-status`), TUI (periodic status display), and the
+//! notification daemon (programming effects).
+
+use std::fmt;
+use std::sync::Arc;
+
+use monsgeek_keyboard::{AnimDefStatus, AnimStatus, KeyboardInterface};
+use monsgeek_transport::protocol::{DefId, LedPos, StripIdx};
+
+use crate::effect::{CompiledAnim, ResolvedEffect};
+
+/// Firmware animation tick rate in Hz (~100 Hz blend rate).
+pub const TICK_RATE_HZ: f64 = 100.0;
+/// Milliseconds per firmware animation tick.
+pub const MS_PER_TICK: f64 = 1000.0 / TICK_RATE_HZ;
+
+/// Cached info about what was programmed into a firmware def slot.
+#[derive(Debug, Clone)]
+pub struct SlotEntry {
+    /// Effect template name (e.g. "breathe", "flash").
+    pub effect_name: String,
+    /// The resolved effect, ready to evaluate for sparkline rendering.
+    pub resolved: crate::effect::ResolvedEffect,
+    /// The compiled wire format — used for identity matching (same effect+vars = same compiled).
+    pub compiled: CompiledAnim,
+}
+
+/// Per-slot metadata shared between daemon/TUI preview and the renderer.
+#[derive(Debug, Clone, Default)]
+pub struct SlotInfo {
+    slots: [Option<SlotEntry>; 8],
+}
+
+impl SlotInfo {
+    pub fn set(&mut self, def_id: DefId, entry: SlotEntry) {
+        self.slots[usize::from(def_id.get())] = Some(entry);
+    }
+
+    pub fn clear(&mut self, def_id: DefId) {
+        self.slots[usize::from(def_id.get())] = None;
+    }
+
+    pub fn clear_all(&mut self) {
+        self.slots = Default::default();
+    }
+
+    pub fn get(&self, def_id: DefId) -> Option<&SlotEntry> {
+        self.slots[usize::from(def_id.get())].as_ref()
+    }
+}
+
+/// The slot reserved for one-off previews — the TUI's on-device effect preview
+/// and the daemon's start-up sweep. It is the top slot so that the daemon's
+/// allocator, which fills from 0, reaches it last and a preview is the first
+/// thing evicted rather than a live notification.
+pub const PREVIEW_SLOT: DefId = DefId::LAST;
+
+/// Thread-safe shared slot info.
+pub type SharedSlotInfo = Arc<std::sync::Mutex<SlotInfo>>;
+
+/// High-level animation engine handle.
+///
+/// Wraps the keyboard interface with convenience methods for programming
+/// and querying animations. Shared across CLI, TUI, and daemon.
+///
+/// Accepts either `Arc<KeyboardInterface>` (for TUI/daemon) or constructs
+/// from a reference (for CLI one-shot commands).
+#[derive(Clone)]
+pub struct AnimEngine {
+    kb: Arc<KeyboardInterface>,
+}
+
+/// Key assignment: strip index + phase offset.
+#[derive(Debug, Clone, Copy)]
+pub struct KeyAssignment {
+    pub strip_idx: StripIdx,
+    pub phase_offset: u8,
+}
+
+/// Snapshot of the firmware animation engine state.
+#[derive(Debug, Clone)]
+pub struct EngineSnapshot {
+    pub raw: AnimStatus,
+    /// Per-def key assignments (def_id → list). Populated by `query_full()`.
+    pub keys: std::collections::HashMap<DefId, Vec<KeyAssignment>>,
+}
+
+impl EngineSnapshot {
+    /// Frame count (monotonic, wraps at u32::MAX). Useful for synchronization.
+    pub fn frame_count(&self) -> u32 {
+        self.raw.frame_count
+    }
+
+    /// Number of active animation definitions.
+    pub fn active_count(&self) -> u8 {
+        self.raw.active_count
+    }
+
+    /// Whether the LED overlay is currently active.
+    pub fn overlay_active(&self) -> bool {
+        self.raw.overlay_active
+    }
+
+    /// Active animation definition slots.
+    pub fn defs(&self) -> &[AnimDefStatus] {
+        &self.raw.defs
+    }
+}
+
+impl fmt::Display for EngineSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} active", self.raw.active_count)?;
+        for d in &self.raw.defs {
+            let mode = match (d.is_one_shot(), d.is_rainbow()) {
+                (true, true) => "one-shot+rainbow",
+                (true, false) => "one-shot",
+                (false, true) => "rainbow",
+                (false, false) => "loop",
+            };
+            write!(
+                f,
+                "\n  def[{}]: {}KF pri={} {}keys {}",
+                d.id, d.num_kf, d.priority, d.key_count, mode,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// A programmed animation on the device, tracking the slot it occupies.
+#[derive(Debug, Clone)]
+pub struct ProgrammedAnim {
+    pub def_id: DefId,
+    pub compiled: CompiledAnim,
+    pub key_count: usize,
+}
+
+impl AnimEngine {
+    pub fn new(kb: Arc<KeyboardInterface>) -> Self {
+        Self { kb }
+    }
+
+    /// Access the underlying keyboard interface.
+    pub fn kb(&self) -> &KeyboardInterface {
+        &self.kb
+    }
+
+    /// Check if the firmware supports the animation engine.
+    pub fn is_available(&self) -> bool {
+        self.kb
+            .get_patch_info()
+            .ok()
+            .flatten()
+            .is_some_and(|p| p.has_anim_engine())
+    }
+
+    /// Get the Arc-wrapped keyboard interface (for spawning async tasks).
+    pub fn kb_arc(&self) -> Arc<KeyboardInterface> {
+        Arc::clone(&self.kb)
+    }
+
+    /// Query the current animation engine state (status only, no key lists).
+    pub fn query(&self) -> Result<EngineSnapshot, String> {
+        self.kb
+            .anim_query()
+            .map_err(|e| format!("anim_query: {e}"))?
+            .map(|raw| EngineSnapshot {
+                raw,
+                keys: std::collections::HashMap::new(),
+            })
+            .ok_or_else(|| "animation engine not available".to_string())
+    }
+
+    /// Query status + key assignments for all active defs.
+    ///
+    /// Does N+1 USB round-trips (status + one per active def with keys).
+    /// Spaces queries 10ms apart to avoid flooding the firmware.
+    pub fn query_full(&self) -> Result<EngineSnapshot, String> {
+        let mut snap = self.query()?;
+        for d in &snap.raw.defs {
+            if d.key_count > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                if let Ok(pairs) = self.kb.anim_query_keys(d.id) {
+                    snap.keys.insert(
+                        d.id,
+                        pairs
+                            .into_iter()
+                            .map(|(s, p)| KeyAssignment {
+                                strip_idx: s,
+                                phase_offset: p,
+                            })
+                            .collect(),
+                    );
+                }
+            }
+        }
+        Ok(snap)
+    }
+
+    /// Program an effect into a specific definition slot.
+    ///
+    /// Returns the compiled animation for reference.
+    pub fn program(
+        &self,
+        def_id: DefId,
+        effect: &ResolvedEffect,
+        priority: i8,
+        one_shot: bool,
+        keys: &[(LedPos, u8)],
+    ) -> Result<ProgrammedAnim, String> {
+        let compiled = effect
+            .compile_for_firmware(priority, one_shot)
+            .ok_or("effect has no keyframes")?;
+
+        self.kb
+            .anim_define(
+                def_id,
+                compiled.flags,
+                compiled.priority,
+                compiled.duration_ticks,
+                &compiled.keyframes,
+            )
+            .map_err(|e| format!("anim_define: {e}"))?;
+
+        self.kb
+            .anim_assign(def_id, keys)
+            .map_err(|e| format!("anim_assign: {e}"))?;
+
+        Ok(ProgrammedAnim {
+            def_id,
+            compiled,
+            key_count: keys.len(),
+        })
+    }
+
+    /// Cancel a specific animation slot.
+    pub fn cancel(&self, def_id: DefId) -> Result<(), String> {
+        self.kb
+            .anim_cancel(def_id)
+            .map_err(|e| format!("anim_cancel: {e}"))
+    }
+
+    /// Clear all animations and overlay.
+    pub fn clear(&self) -> Result<(), String> {
+        self.kb.anim_clear().map_err(|e| format!("anim_clear: {e}"))
+    }
+}
+
+/// Query animation status directly from a keyboard reference (for CLI one-shots).
+pub fn query_status(kb: &KeyboardInterface) -> Result<EngineSnapshot, String> {
+    kb.anim_query()
+        .map_err(|e| format!("anim_query: {e}"))?
+        .map(|raw| EngineSnapshot {
+            raw,
+            keys: std::collections::HashMap::new(),
+        })
+        .ok_or_else(|| "animation engine not available".to_string())
+}
+
+/// Convert a stagger delay in ms to a firmware phase_offset value.
+///
+/// Each phase_offset unit = 8 ticks at the firmware blend rate.
+/// At ~120Hz: 1 unit ≈ 66.7ms.
+pub fn ms_to_phase_offset(ms: f64) -> u8 {
+    let ticks = ms / MS_PER_TICK;
+    (ticks / 8.0).round().clamp(0.0, 255.0) as u8
+}

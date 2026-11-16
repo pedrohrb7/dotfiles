@@ -1,0 +1,289 @@
+Consumer Reports Dead on 2.4 GHz Dongle (Speed Gate)
+=====================================================
+
+Firmware versions tested:
+  Keyboard: v407 (device ID 2949, AT32F405 8KMKB)
+  Dongle:   v903 (RY6108-RF-KB, AT32F405 8K-DGKB)
+
+Other versions not tested but likely share the same code.
+
+
+Overview
+--------
+
+Consumer control reports (volume knob, media keys, brightness) do not
+work when the keyboard is connected via the 2.4 GHz dongle. The stock
+consumer data path is actually correct — the only bug is a USB speed
+gate in the dongle's rf_tx_handler that blocks all EP2 IN transfers
+when the dongle enumerates at High Speed.
+
+Previous analysis (now corrected) identified two separate bugs in
+keycode_dispatch and rf_tx_handler routing. Those were based on
+mislabeled Ghidra symbols and an incorrect understanding of the
+pending_reports_bitmap → sub-type mapping. The stock keyboard firmware
+routes consumer data correctly through the sub=3 path.
+
+
+Correct Data Path (stock firmware)
+----------------------------------
+
+  1. Encoder turn / consumer key → keycode_dispatch case 3
+       → writes usage to g_dongle_consumer_buf (0x20000027)
+       → sets bit 0x04 in pending_reports_bitmap (0x20000018)
+
+  2. build_dongle_reports (inner loop)
+       → bit 0x04 → sub=3
+       → reads g_dongle_consumer_buf[1..2] (usage_lo, usage_hi)
+       → RF packet: {0x81, len=3, sub=3, usage_lo, usage_hi, checksum}
+
+  3. Dongle rf_packet_dispatch
+       → sub=3 → consumer_ready=1, consumer_data = {usage_lo, usage_hi}
+
+  4. Dongle rf_tx_handler
+       → consumer_ready → sends on EP2 (0x82) with report_id=3
+       → *** BLOCKED by speed gate ***
+
+Correct pending_reports_bitmap → sub-type mapping:
+
+    Bit 0x01 → sub=0  (mouse)
+    Bit 0x04 → sub=3  (consumer)    ← encoder/media keys
+    Bit 0x08 → sub=4  (dial)
+    Bit 0x10 → sub=5  (extra data)
+    Bit 0x20 → sub=1  (keyboard 6KRO)
+    Bit 0x40 → sub=2  (NKRO)
+    (Bit 0x02 unused/reserved)
+
+Correct SRAM buffer mapping:
+
+    0x20000024  g_dongle_dial_buf      (3B, sub=4)
+    0x20000027  g_dongle_consumer_buf  (3B, sub=3)
+    0x2000004C  g_dongle_kbd_buf       (8B, sub=1, 6KRO keyboard)
+    0x20000054  g_dongle_mouse_buf     (8B, sub=0)
+
+
+The Bug: EP2 Speed Gate in rf_tx_handler
+-----------------------------------------
+
+Affected function: rf_tx_handler (dongle firmware, 0x08006A2C)
+
+At 0x08006A34, the dongle firmware has:
+
+    08006A34:  ldr   r0, [r4, #0x804]  ; r0 = usb_speed
+    08006A38:  cmp   r0, #3            ; Full Speed?
+    08006A3A:  bne   0x08006B34        ; skip ALL EP2 sends if not FS
+
+The RY6108 dongle enumerates at USB High Speed (speed=0). Full Speed
+is speed=3. This gate blocks ALL EP2 IN transfers — consumer, mouse,
+NKRO, system control, vendor extra — everything except the 6KRO
+keyboard path on EP1 (which has its own send code outside this gate).
+
+This means:
+  - Consumer keys: dead (EP2, report_id=3)
+  - Mouse: dead (EP2, report_id=6)
+  - NKRO: dead (EP2, report_id=1)
+  - System control: dead (EP2, report_id=2)
+  - 6KRO keyboard: works (EP1, no report ID, separate code path)
+
+The dongle appears to function for basic typing because the 6KRO
+keyboard path (sub=1 → EP1) bypasses this speed gate entirely.
+
+
+Reproduction
+------------
+
+1. Connect keyboard to host via 2.4 GHz dongle
+2. Assign a consumer key (e.g. Volume Down = usage 0x00EA) to the
+   rotary encoder or any key position
+3. Press the key / turn the encoder
+4. Expected: Volume decreases (consumer control event on EP2, Report ID 3)
+5. Actual: Nothing happens (EP2 send blocked by speed gate)
+
+Switching to USB (wired) or Bluetooth and repeating shows consumer keys
+working correctly, since those paths bypass the dongle entirely.
+
+
+Fix
+---
+
+NOP the speed gate at 0x08006A34 (4 bytes):
+
+    Original: 03 28 7c d1    (CMP r0,#3 + BNE)
+    Patched:  00 bf 00 bf    (2× NOP)
+
+This allows all EP2 IN transfers to proceed regardless of USB speed.
+No keyboard-side changes needed — the stock consumer routing is correct.
+
+Note: This fix was already included in our dongle battery HID patch
+(hooks.py BinaryPatch at 0x08006A34) since battery Input reports also
+use EP2. With this NOP, consumer, mouse, NKRO, and all other EP2
+report types work over the dongle.
+
+
+Previous Analysis (Corrected)
+-----------------------------
+
+The original bug report described two bugs:
+
+  A. "Keyboard keycode_dispatch writes consumer data with wrong bitmap
+     bit (0x04/mouse instead of 0x20/consumer)"
+     WRONG: keycode_dispatch writes directly to g_dongle_consumer_buf
+     (0x20000027) and sets bit 0x04 which correctly maps to sub=3
+     (consumer). The confusion arose from mislabeled Ghidra symbols:
+     ptr_hid_6kro_plus3 was actually the consumer buffer pointer, and
+     the bitmap→sub mapping was inverted in the original analysis.
+
+  B. "Dongle rf_tx_handler sends consumer on EP1 instead of EP2"
+     WRONG: rf_tx_handler's consumer path (consumer_ready) already
+     uses EP2 (0x82) with report_id=3. The code at 0x08006A5C and
+     0x08006A98 that was proposed for patching is in the kbd_6kro
+     path (sub=1), not the consumer path. Patching those would have
+     broken keyboard input.
+
+  A1/A2. "hid_report_check_send blocks interfere with consumer data"
+     WRONG: The three blocks in hid_report_check_send handle mouse
+     (0x20000054), keyboard (0x2000004C), and consumer (0x20000027)
+     buffers respectively. They were mislabeled as consumer, NKRO,
+     and 6KRO. Stock behavior is correct.
+
+The mislabeling stemmed from Ghidra's auto-generated names and
+incorrect manual labeling during initial reverse engineering. Corrected
+labels have been applied to the Ghidra project (see RenameDataLabels.py).
+
+
+Summary
+-------
+
+| # | Location | Bug | Effect |
+|---|----------|-----|--------|
+| 1 | Dongle rf_tx_handler 0x08006A34 | USB speed gate: CMP r0,#3 + BNE skips EP2 sends at High Speed | All EP2 reports dead (consumer, mouse, NKRO, system control) |
+
+Single bug, single fix (4-byte NOP). The stock keyboard firmware's
+consumer routing is correct and needs no modification.
+
+
+=========================================================================
+
+
+消费者控制报告在 2.4 GHz 接收器上不工作（速度门控）
+====================================================
+
+测试固件版本：
+  键盘：v407（设备 ID 2949，AT32F405 8KMKB）
+  接收器：v903（RY6108-RF-KB，AT32F405 8K-DGKB）
+
+其他版本未测试，但可能存在相同问题。
+
+
+概述
+----
+
+当键盘通过 2.4 GHz 接收器连接时，消费者控制报告（音量旋钮、媒体键、
+亮度键）不工作。原有消费者数据路径实际上是正确的——唯一的缺陷是接收器
+rf_tx_handler 中的 USB 速度门控，当接收器以高速模式枚举时会阻止所有
+EP2 IN 传输。
+
+此前的分析（现已修正）曾识别出 keycode_dispatch 和 rf_tx_handler 路由
+中的两个独立缺陷。这些分析基于错误标注的 Ghidra 符号和对
+pending_reports_bitmap → 子类型映射的错误理解。原有键盘固件通过 sub=3
+路径正确路由消费者数据。
+
+
+正确的数据路径（原有固件）
+--------------------------
+
+  1. 旋钮转动 / 消费者按键 → keycode_dispatch case 3
+       → 写入 usage 到 g_dongle_consumer_buf（0x20000027）
+       → 在 pending_reports_bitmap（0x20000018）中设置位 0x04
+
+  2. build_dongle_reports（内循环）
+       → 位 0x04 → sub=3
+       → 读取 g_dongle_consumer_buf[1..2]（usage_lo, usage_hi）
+       → RF 数据包：{0x81, len=3, sub=3, usage_lo, usage_hi, checksum}
+
+  3. 接收器 rf_packet_dispatch
+       → sub=3 → consumer_ready=1, consumer_data = {usage_lo, usage_hi}
+
+  4. 接收器 rf_tx_handler
+       → consumer_ready → 通过 EP2（0x82）发送，report_id=3
+       → *** 被速度门控阻止 ***
+
+
+缺陷：rf_tx_handler 中的 EP2 速度门控
+--------------------------------------
+
+受影响函数：rf_tx_handler（接收器固件，0x08006A2C）
+
+在 0x08006A34 处，接收器固件有：
+
+    08006A34:  ldr   r0, [r4, #0x804]  ; r0 = usb_speed
+    08006A38:  cmp   r0, #3            ; 全速？
+    08006A3A:  bne   0x08006B34        ; 非全速时跳过所有 EP2 发送
+
+RY6108 接收器以 USB 高速模式枚举（speed=0）。全速为 speed=3。此门控
+阻止所有 EP2 IN 传输——消费者、鼠标、NKRO、系统控制、厂商扩展——
+除了 EP1 上的 6KRO 键盘路径（有自己的发送代码，不经过此门控）。
+
+结果：
+  - 消费者按键：不工作（EP2, report_id=3）
+  - 鼠标：不工作（EP2, report_id=6）
+  - NKRO：不工作（EP2, report_id=1）
+  - 系统控制：不工作（EP2, report_id=2）
+  - 6KRO 键盘：正常（EP1，无 Report ID，独立代码路径）
+
+接收器在基本打字功能上看起来正常，因为 6KRO 键盘路径（sub=1 → EP1）
+完全绕过此速度门控。
+
+
+复现步骤
+--------
+
+1. 通过 2.4 GHz 接收器连接键盘到主机
+2. 将消费者按键（例如音量减小 = usage 0x00EA）分配到旋钮或任意键位
+3. 按下按键 / 转动旋钮
+4. 预期：音量降低（EP2 上的消费者控制事件，Report ID 3）
+5. 实际：无反应（EP2 发送被速度门控阻止）
+
+切换到 USB（有线）或蓝牙模式重复上述步骤，消费者按键正常工作，因为
+这些路径完全绕过接收器。
+
+
+修复方案
+--------
+
+NOP 掉 0x08006A34 处的速度门控（4 字节）：
+
+    原始：03 28 7c d1    （CMP r0,#3 + BNE）
+    修补：00 bf 00 bf    （2× NOP）
+
+这允许所有 EP2 IN 传输在任何 USB 速度下正常进行。键盘端无需修改——
+原有消费者路由是正确的。
+
+注：此修复已包含在接收器电池 HID 补丁中（hooks.py 在 0x08006A34 的
+BinaryPatch），因为电池 Input 报告也使用 EP2。启用此 NOP 后，消费者、
+鼠标、NKRO 及所有其他 EP2 报告类型均可通过接收器正常工作。
+
+
+此前分析（已修正）
+------------------
+
+原始缺陷报告描述了两个缺陷：
+
+  A. "键盘 keycode_dispatch 用错误的位图位写入消费者数据"
+     错误：keycode_dispatch 直接写入 g_dongle_consumer_buf（0x20000027）
+     并设置位 0x04，正确映射到 sub=3（消费者）。
+
+  B. "接收器 rf_tx_handler 将消费者发送到 EP1 而非 EP2"
+     错误：rf_tx_handler 的消费者路径已使用 EP2（0x82）和 report_id=3。
+
+混淆源于 Ghidra 自动生成的名称和初始逆向工程中的错误标注。已在 Ghidra
+项目中应用修正后的标签。
+
+
+总结
+----
+
+| # | 位置 | 缺陷 | 影响 |
+|---|------|------|------|
+| 1 | 接收器 rf_tx_handler 0x08006A34 | USB 速度门控：CMP r0,#3 + BNE 在高速模式下跳过 EP2 发送 | 所有 EP2 报告不工作 |
+
+单一缺陷，单一修复（4 字节 NOP）。原有键盘固件的消费者路由正确，无需修改。
