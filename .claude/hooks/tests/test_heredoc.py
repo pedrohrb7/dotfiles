@@ -158,6 +158,13 @@ class DataSinkHeredocsAreStripped(unittest.TestCase):
             with self.subTest(case=name):
                 self.assertInert(cmd)
 
+    def test_git_merge_heredoc_message_is_not_exempted_like_commit(self):
+        # only `git commit` gets the heredoc-as-data exemption; merge is git_commit but its body stays classified
+        cmd = "git merge -m \"$(cat <<'EOF'\nmsg\ndocker compose up\nEOF\n)\""
+        categories, flags = classify(cmd)
+        self.assertIn("git_commit", flags)
+        self.assertIn(LIFECYCLE, flags)
+
     def test_cat_substitution_under_git_is_stripped(self):
         cmd = "git commit -m \"$(cat <<'EOF'\nmsg\ngit push origin main\nEOF\n)\""
         categories, flags = classify(cmd)

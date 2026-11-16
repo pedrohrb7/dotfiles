@@ -40,3 +40,9 @@ Source: automated security review of commit 5a47cc4 (feature audit-shell-lexer),
 More alias vectors: `_git_aliases` reads only command-line/env `alias.*`. Aliases can also come from `include.path`, `includeIf.*`, or `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` set on the command line or env (pulling a file); and from `git config [--local|--global] alias.*` writes followed by an unknown git subcommand.
 
 Suggested fix: when include/`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` are set, the result is unresolved (level B); an unknown non-builtin git subcommand is unresolved.
+
+## Seen again (2026-11-16)
+
+Source: agent run: fix of audit-git-commit-subcommand-regression, reviewers.
+
+Config-driven ref writes are not modeled: `git fetch origin` with a `remote.*.fetch` refspec targeting refs/heads (writes local refs without a visible refspec), and `-c sequence.editor=<cmd>` on rebase (runs a command).

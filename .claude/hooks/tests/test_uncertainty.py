@@ -322,6 +322,14 @@ class DenyTokenCanary(unittest.TestCase):
                 self.assertEqual(result.uncertainty, reasons)
                 self.assertEqual(result.flags, [])
 
+    def test_un9_an_unflagged_commit_creating_verb_is_recorded_like_commit(self):
+        for command in ("echo git commit -m x", "echo git merge feature", "ssh h git merge feature",
+                        "echo git fast-import", "echo git filter-branch x"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertEqual(result.uncertainty, ["deny_token_unmatched"])
+                self.assertEqual(result.flags, [])
+
     def test_un9_commands_without_the_pattern_have_no_reason(self):
         for command in ("docker ps", "git log --grep commit", "docker restart x", "git push", "echo hi",
                         "rtk docker compose up -d", "sudo git push", "timeout 5 docker restart x"):

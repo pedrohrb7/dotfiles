@@ -809,7 +809,7 @@ Alvos de `approved_scope` que casam com a regra são descartados dos caminhos pe
 |---|---|
 | `cat` ou `tee` no nível de cima | fora de pipeline; prefixo limpo (uma só leitura, sem expansão antes da cabeça) |
 | `cat` ou `tee` com redirecionamento de saída próprio (`>`, `>>`, `>\|`, `&>`, `&>>`) | único estágio de um pipeline inteiro dentro de corpo de função ou de grupo `{ }` (HD3 revisado) |
-| `git commit -F -` / `--file -` | `commit` só conta como subcomando depois das opções globais; sem `-c alias.*` nem `-c core.*` |
+| `git commit -F -` / `--file -` | `commit` só conta como subcomando depois das opções globais; sem `-c alias.*` nem `-c core.*`. *Adendo 2026-11-16:* só `git commit` é isento; a flag `git_commit` cobre todo comando git que cria ou move commits (ver spec `audit-shell-lexer`, "Adendo 2026-11-16") |
 | `$(cat <<EOF ...)` como valor de `git commit -m` / `--message` (também `--message="$(...)"`) | mesma restrição de `-c` |
 | `gh pr\|issue\|release ... --body-file -` / `-F -` | |
 | `$(cat <<EOF ...)` como valor de `--body` / `-b` / `--title` / `-t` desses comandos `gh` | |

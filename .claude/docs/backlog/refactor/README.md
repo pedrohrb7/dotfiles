@@ -37,7 +37,7 @@ Planned refactors that aren't urgent bugs but are worth doing deliberately, one 
 | [agent-audit: PACKAGE_HINT treats ./spec and ./tests as package paths](2026-11-13-audit-package-hint-dot-slash.md) | Proposed |
 | [tdd skill: step 2 allows not-implemented throws, step 4 requires assertion failures](2026-11-13-tdd-stub-throw-rule.md) | Proposed |
 | [hooks tests: claude-hooks suite exceeds the 5 s target (about 6 s for 462 tests, goal under 5 s)](2026-11-13-hooks-tests-suite-slow.md) | Proposed (to lower further; Task 7 budget revised to 12 s for 811 tests, measured 9.9-11 s) |
-| [agent-audit: shell lexer and parser for command positions (fails closed)](2026-11-13-audit-shell-lexer.md) | Done (uncommitted) |
+| [agent-audit: shell lexer and parser for command positions (fails closed)](2026-11-13-audit-shell-lexer.md) | Done |
 | [agent-audit: hook compiled on every call (launcher with cached bytecode)](2026-11-13-audit-hook-launcher-performance.md) | Done (overtaken by audit-shell-lexer part C, 2026-11-14) |
 | [agent-audit: watchdog robustness notes](2026-11-13-audit-watchdog-robustness-notes.md) | Proposed |
 | [agent-audit: wrappers and launchers outside the table are recorded only by the canary](2026-11-14-audit-wrappers-outside-table.md) | Proposed |

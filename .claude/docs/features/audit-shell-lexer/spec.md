@@ -773,7 +773,7 @@ Tabelas `(id, texto, esperado)`, uma subTest por linha; o esperado é a lista de
 - **Stack:** backend-python
 - **Files:** `.claude/hooks/agent-audit.py`, `.claude/hooks/tests/test_command_positions.py`, `.claude/hooks/tests/test_uncertainty.py`, `.claude/hooks/tests/test_classify.py`
 - **Depends on:** Task 2
-- **Done when:** `_prefix_steps` lê a tabela da seção 4.2 (N3-N5), `KNOWN_HEADS` calculado e N2 aplicado; CP8-CP11 e o `test_a_path_prefixed_program_is_recognized` alterado passam; UN1-UN5 sem mudança; suite verde *Adendo 2026-11-14:* vale também: `git-commit`/`git_commit` só com `commit` como subcomando, depois das opções globais do git (A2); GC1 passa, inclusive `git config --get commit.gpgsign` sozinho e dentro de `$(...)` sem `git_commit`; as demais linhas das tabelas de `test_classify.py` sem mudança; ver [Adendo 2026-11-14](#adendo-2026-11-14---decisões-do-usuário-na-task-2)
+- **Done when:** `_prefix_steps` lê a tabela da seção 4.2 (N3-N5), `KNOWN_HEADS` calculado e N2 aplicado; CP8-CP11 e o `test_a_path_prefixed_program_is_recognized` alterado passam; UN1-UN5 sem mudança; suite verde *Adendo 2026-11-14:* vale também: `git-commit`/`git_commit` só com `commit` como subcomando, depois das opções globais do git (A2); GC1 passa, inclusive `git config --get commit.gpgsign` sozinho e dentro de `$(...)` sem `git_commit`; as demais linhas das tabelas de `test_classify.py` sem mudança; ver [Adendo 2026-11-14](#adendo-2026-11-14---decisões-do-usuário-na-task-2) *Adendo 2026-11-16:* o escopo de `git_commit` deixou de ser só `commit`; ver [Adendo 2026-11-16](#adendo-2026-11-16---git_commit-cobre-todo-comando-git-que-cria-ou-move-commits)
 - **Status:** done
 
 ### Task 4 - Argumentos que executam código e recursão
@@ -892,7 +892,7 @@ Subshells `( )`, substituições, pipelines e os outros compostos (`if`, `for`, 
 
 **Motivo.** A regex `^git (\S+ )*commit\b` de `_classify_segment` casa `commit` em qualquer palavra depois de `git`, inclusive `git config --get commit.gpgsign`. Antes o hook não via esse comando dentro de `$(...)`; com o parser (S5) vê, e o replay mostrou perguntas `git_commit` falsas (classe E1).
 
-**Regra nova** (Task 3): `git-commit`/`git_commit` só quando o subcomando é `commit`. Depois de `git` (cabeça normalizada da leitura), as opções globais do [git(1)](https://git-scm.com/docs/git) são puladas e a primeira palavra restante é o subcomando; `commit` em argumento ou valor (`git config --get commit.gpgsign`, `git log --grep commit`, `git show commit`) não conta. A regex sai de `_classify_segment` e dá lugar a uma função sobre as palavras da leitura.
+**Regra nova** (Task 3): `git-commit`/`git_commit` só quando o subcomando é `commit`. Depois de `git` (cabeça normalizada da leitura), as opções globais do [git(1)](https://git-scm.com/docs/git) são puladas e a primeira palavra restante é o subcomando; `commit` em argumento ou valor (`git config --get commit.gpgsign`, `git log --grep commit`, `git show commit`) não conta. A regex sai de `_classify_segment` e dá lugar a uma função sobre as palavras da leitura. *Adendo 2026-11-16: o escopo de `git_commit` foi ampliado para todo comando git que cria ou move commits; ver [Adendo 2026-11-16](#adendo-2026-11-16---git_commit-cobre-todo-comando-git-que-cria-ou-move-commits). `commit` deixa de ser o único subcomando.*
 
 | Opção global | Forma pulada |
 |---|---|
@@ -1345,3 +1345,35 @@ Lacunas que o log registra como não modeladas ou fora do escopo desta rodada. V
 - `pixi exec` (verificação estreita) e `doas` como wrapper (fora da tabela de wrappers, decisão 5; parte E);
 - aliases com o mesmo texto do comando, não verificados sob o `eval` do zsh do Claude Code (verificação estreita);
 - `env $N=x GIT_CONFIG_PARAMETERS=... git p`: a leitura do wrapper para na palavra dinâmica, só nível A (parte E).
+
+## Adendo 2026-11-16 - `git_commit` cobre todo comando git que cria ou move commits
+
+**Motivo.** A2 limitou `git_commit` ao subcomando `commit`. Bug `2026-11-14-audit-git-commit-subcommand-regression` (backlog): a regex antiga casava `commit` em qualquer palavra e por isso pegava, por acidente, `merge`, `cherry-pick`, `rebase` e outros que criam commits; a regra de A2 os deixou passar sem pergunta. Decisão do usuário (2026-11-16): a flag `git_commit` (ação `ask`) vale para todo comando git que cria ou move commits, não só `commit`.
+
+**Regra nova** (`agent_audit_classify.py`: `_GIT_COMMIT_SUBCOMMANDS`, `_GIT_COMMIT_FORMS`, `_creates_git_commits`; substitui "só `commit`" de A2, e a tabela de opções globais de A2 continua valendo):
+
+- Subcomandos inteiros (`_GIT_COMMIT_SUBCOMMANDS`): `commit`, `commit-tree`, `merge`, `cherry-pick`, `revert`, `am`, `rebase`, `update-ref`, `pull`, `fast-import`, `filter-branch`.
+- Por forma (`_GIT_COMMIT_FORMS`, o subcomando só conta com a forma indicada):
+
+| Subcomando | Conta quando |
+|---|---|
+| `subtree` | qualquer forma, menos sem argumentos, `-h` e `--help` |
+| `notes` | `add`, `edit`, `append`, `copy`, `merge` |
+| `replace` | não é listagem |
+| `symbolic-ref` | escrita |
+| `hash-object` | `-w` |
+| `stash` | `create`, `store` |
+| `reset` | opção de modo (`--hard`, `--soft`, `--mixed`, ...), ou revisão que não é `HEAD` fora da forma `<rev> -- caminhos`; `git reset f.txt` é ambíguo (revisão ou caminho) e falha fechado |
+| `branch` | `-f`, `--force`, `-M`, `-C` |
+| `checkout` | `-B` |
+| `switch` | `-C`, `--force-create` |
+| `worktree` | `add -B` |
+| `fetch` | refspec com destino local, ou `--stdin` / `--refmap` |
+
+- Opções longas casam pelos prefixos únicos do git (`_is_long`), falhando fechado: `--forc` conta como `--force`.
+- `git rebase -x`/`--exec`: o valor é lido como código de shell (`_git_exec_code`), como os outros argumentos que executam código.
+- `git_push` deixa de ser mascarado por `git_commit`, exceto em `commit` simples, cuja mensagem de `-m` a regex de push leria errado (`git commit -m "a; git push"` continua só `git_commit`, CP4).
+- O canário registra os verbos de commit do conjunto de subcomandos mais `fast-import` e `filter-branch` (`_CANARY_GIT_FLAGS`).
+- As isenções de heredoc como dado (`git commit -F -`, `$(cat <<EOF)` em `-m`) continuam só para `git commit`: em `revert` e `cherry-pick`, `-m` é o número da linha principal, não mensagem.
+
+**Efeito nos itens anteriores.** O texto de A2 e da Task 3 sobre "só `commit`" vale para a classificação do `commit` e para as isenções de heredoc; o resto fica superado por esta regra. A Pergunta 7 (função única de subcomando) segue como aplicada: `_is_git_commit` serve às isenções, `_creates_git_commits` à classificação.

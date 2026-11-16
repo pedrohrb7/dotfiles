@@ -727,11 +727,12 @@ def _git_walk(args: list[str]) -> "tuple[list[int], list[tuple[int, bool, bool]]
     return verbs, configs
 
 
-def _git_has_subcommand(args: list[str], name: str) -> bool:
-    """True when `name` can be the git subcommand of `args` (the words after `git`): one reading of the global
-    options (`_git_walk`) with `name` as the subcommand is enough. `commit` as the value of `--grep` or as a
-    config key is not the subcommand."""
-    return any(args[i] == name for i in _git_walk(args)[0])
+def _git_has_subcommand(args: list[str], name: "str | frozenset[str]") -> bool:
+    """True when `name` (one subcommand, or a set of them) can be the git subcommand of `args` (the words after
+    `git`): one reading of the global options (`_git_walk`) with it as the subcommand is enough. `commit` as the
+    value of `--grep` or as a config key is not the subcommand."""
+    names = frozenset({name}) if isinstance(name, str) else name
+    return any(args[i] in names for i in _git_walk(args)[0])
 
 
 _GIT_ALIAS_DEPTH = 5
@@ -1002,6 +1003,161 @@ def _is_git_commit(tokens: list[str]) -> bool:
     """`tokens` (a reading, from its head) is a `git commit`: `commit` is the subcommand."""
     args = _git_args(tokens)
     return args is not None and _git_has_subcommand(args, "commit")
+
+
+# Git subcommands that create or move commits: all of them are `git_commit` (the user's authorization).
+_GIT_COMMIT_SUBCOMMANDS = frozenset(
+    {"commit", "commit-tree", "merge", "cherry-pick", "revert", "am", "rebase", "update-ref", "pull"})
+
+
+def _is_long(tok: str, name: str, exact: frozenset = frozenset()) -> bool:
+    """`tok` is the long option `--name` the way git's parse-options reads it: the name, or any prefix of it of two
+    letters or more (`--forc`), with or without `=value`. Fail closed: the prefix counts even when git would find
+    it ambiguous, except a word that is exactly another option of the subcommand (`exact`: `--format` for `branch`)."""
+    if not tok.startswith("--") or tok == "--":
+        return False
+    part = tok[2:].partition("=")[0]
+    return len(part) >= 2 and name.startswith(part) and part not in exact
+
+
+def _positionals(rest: list[str], short_values: frozenset = frozenset(), long_values: tuple = ()) -> list[str]:
+    """The words of `rest` that are neither options nor the value of one (`short_values`: `-P`; `long_values`: the
+    names of the long options that take the next word as value, in any prefix form); `--` ends the options."""
+    out: list[str] = []
+    skip = False
+    for k, tok in enumerate(rest):
+        if skip:
+            skip = False
+        elif tok == "--":
+            out.extend(rest[k + 1:])
+            break
+        elif tok in short_values or (
+                "=" not in tok and any(_is_long(tok, name) for name in long_values)):
+            skip = True
+        elif not tok.startswith("-"):
+            out.append(tok)
+    return out
+
+
+def _short_in(rest: list[str], letters: str) -> bool:
+    """Some short option cluster of `rest` (`-f`, `-fd`: one dash, no `--`) holds one of `letters`. A bundle counts
+    as each of its letters (fail closed); the options before `--` only."""
+    for tok in rest:
+        if tok == "--":
+            break
+        if tok.startswith("-") and not tok.startswith("--") and any(c in letters for c in tok[1:]):
+            return True
+    return False
+
+
+def _long_in(rest: list[str], *names: str, exact: frozenset = frozenset()) -> bool:
+    """Some long option of `rest` (before `--`) is one of `names` (`_is_long`)."""
+    for tok in rest:
+        if tok == "--":
+            break
+        if any(_is_long(tok, name, exact) for name in names):
+            return True
+    return False
+
+
+_RESET_MODES = ("hard", "soft", "keep", "merge", "mixed")
+
+
+def _reset_moves(rest: list[str]) -> bool:
+    """`reset` moves the branch: a mode flag, or a revision. Not the path forms: `<rev> -- paths`, and a first
+    positional that is exactly `HEAD` (`git reset HEAD f.txt` unstages). `git reset f.txt` is ambiguous and counts."""
+    if _long_in(rest, *_RESET_MODES):
+        return True
+    if "--" in rest and rest[rest.index("--") + 1:]:
+        return False
+    before = rest[:rest.index("--")] if "--" in rest else rest
+    words = _positionals(before, long_values=("pathspec-from-file",))
+    return bool(words) and words[0] != "HEAD"
+
+
+def _replace_writes(rest: list[str]) -> bool:
+    """`replace` writes a ref except in its list forms (bare, `-l`, `--list`)."""
+    return bool(rest) and not (_short_in(rest, "l") or _long_in(rest, "list"))
+
+
+def _symbolic_ref_writes(rest: list[str]) -> bool:
+    """`symbolic-ref` writes with two positionals (name and target) or `-d`/`--delete`; one name is a read."""
+    return _short_in(rest, "d") or _long_in(rest, "delete") or len(_positionals(rest, frozenset({"-m"}))) >= 2
+
+
+def _first_positional_in(verbs: frozenset, short_values: frozenset = frozenset(), long_values: tuple = ()):
+    def check(rest: list[str]) -> bool:
+        words = _positionals(rest, short_values, long_values)
+        return bool(words) and words[0] in verbs
+    return check
+
+
+def _worktree_forces_branch(rest: list[str]) -> bool:
+    """`worktree add -B <branch>` resets the branch (`-B`, also bundled or with the name attached: `-Bbr`)."""
+    words = _positionals(rest)
+    return bool(words) and words[0] == "add" and _short_in(rest, "B")
+
+
+def _refmap_dst(spec: str) -> bool:
+    """A refspec `src:dst` (a leading `+` forces it) with a destination: it writes the local ref `dst`."""
+    return bool(spec.lstrip("+").partition(":")[2])
+
+
+def _fetch_writes_a_ref(rest: list[str]) -> bool:
+    """`fetch` writes a local ref: a refspec `<src>:<dst>` after the repo, `--stdin` (the refspecs come from the
+    input), or a `--refmap` with a destination (`=value` or the next word); `src:` with no destination does not."""
+    if _long_in(rest, "stdin"):
+        return True
+    for k, tok in enumerate(rest):
+        if tok == "--":
+            break
+        if _is_long(tok, "refmap"):
+            value = tok.partition("=")[2] if "=" in tok else rest[k + 1] if k + 1 < len(rest) else ""
+            if _refmap_dst(value):
+                return True
+    return any(_refmap_dst(word) for word in _positionals(rest, long_values=("refmap",))[1:])
+
+
+def _subtree_acts(rest: list[str]) -> bool:
+    """Every `subtree` form with arguments may commit or move refs (`add`, `merge`, `pull`, `split`, `push`, with
+    their options in any order): only the bare command and the help forms do not."""
+    return any(word not in ("-h", "--help") for word in rest)
+
+
+# Subcommands that create or move commits or refs only in some forms: subcommand -> predicate over the words after
+# it. Short options are read as bundles (`-fM` has `f` and `M`), long options as any prefix (`_is_long`).
+_GIT_COMMIT_FORMS = {
+    "fast-import": lambda rest: True,
+    "filter-branch": lambda rest: True,
+    "subtree": _subtree_acts,
+    "notes": _first_positional_in(frozenset({"add", "edit", "append", "copy", "merge"}), long_values=("ref",)),
+    "replace": _replace_writes,
+    "symbolic-ref": _symbolic_ref_writes,
+    "hash-object": lambda rest: _short_in(rest, "w"),
+    "stash": _first_positional_in(frozenset({"create", "store"})),
+    "reset": _reset_moves,
+    "branch": lambda rest: _short_in(rest, "fMC") or _long_in(rest, "force", exact=frozenset({"format", "list"})),
+    "checkout": lambda rest: _short_in(rest, "B"),
+    "switch": lambda rest: _short_in(rest, "C") or _long_in(rest, "force-create", exact=frozenset({"force"})),
+    "worktree": _worktree_forces_branch,
+    "fetch": _fetch_writes_a_ref,
+}
+
+
+def _creates_git_commits(tokens: list[str]) -> bool:
+    """`tokens` (a reading, from its head) is a `git` command that creates or moves commits or refs: a subcommand of
+    `_GIT_COMMIT_SUBCOMMANDS`, or a form of `_GIT_COMMIT_FORMS`, after git's global options (every reading of
+    them). Only for the classification: the heredoc exemptions below stay on `_is_git_commit` (`git commit` flags)."""
+    args = _git_args(tokens)
+    if args is None:
+        return False
+    for i in _git_walk(args)[0]:
+        if args[i] in _GIT_COMMIT_SUBCOMMANDS:
+            return True
+        check = _GIT_COMMIT_FORMS.get(args[i])
+        if check is not None and check(args[i + 1:]):
+            return True
+    return False
 
 
 _STDIN_FILE_FLAGS = {"git": [["-F", "-"], ["--file", "-"], ["--file=-"]], "gh": [["--body-file", "-"], ["-F", "-"], ["--body-file=-"]]}
@@ -2579,7 +2735,8 @@ class Analysis(namedtuple("Analysis", "categories flags uncertainty")):
 # Docker and git forms the canary (U7) looks for outside the command head.
 _CANARY_SPLIT = re.compile(r"[\s'\"`(){};&|=$]+")
 _DOCKER_VERBS = frozenset({"up", "down", "start", "stop", "restart", "rm", "kill", "pull", "create", "run", "exec"})
-_CANARY_GIT_FLAGS = (("push", "git_push"), ("commit", "git_commit"))
+_CANARY_GIT_FLAGS = (("push", "git_push"),) + tuple(
+    (verb, "git_commit") for verb in sorted(_GIT_COMMIT_SUBCOMMANDS | {"fast-import", "filter-branch"}))
 _CANARY_FEEDERS = frozenset({"xargs", "parallel", "-exec", "-execdir", "-ok", "-okdir"})
 
 
@@ -2912,6 +3069,30 @@ def _xargs_replace(flags: list[str]) -> frozenset:
     return frozenset(r for r in out if r)
 
 
+def _git_exec_code(args: list[str]) -> list[str]:
+    """The shell code `git rebase` runs for `-x`/`--exec` in `args` (the words after `git`), for every reading of the
+    global options: the next word or the attached value of `--exec` (any prefix: `--ex=CODE`) and of a short cluster
+    holding `x` (`-xCODE`, `-ix CODE`: the rest of the cluster after the `x`, else the next word)."""
+    out: list[str] = []
+    for i in _git_walk(args)[0]:
+        if args[i] != "rebase":
+            continue
+        rest = args[i + 1:]
+        for k, tok in enumerate(rest):
+            if tok == "--":
+                break
+            following = rest[k + 1] if k + 1 < len(rest) else None
+            if _is_long(tok, "exec"):
+                value = tok.partition("=")[2] if "=" in tok else following
+            elif tok.startswith("-") and not tok.startswith("--") and "x" in tok[1:]:
+                value = tok[1:].partition("x")[2] or following
+            else:
+                continue
+            if value is not None:
+                out.append(value)
+    return out
+
+
 def _position_code(site, tokens: list[str], p: int, name: str, starts: list[int], words: list,
                    fed: bool = False) -> list[CodeArg]:
     """The code arguments of the program named `name` at `tokens[p]`; `starts` are the positions where its
@@ -2943,6 +3124,8 @@ def _position_code(site, tokens: list[str], p: int, name: str, starts: list[int]
         for s in starts:
             if s < n and _flag_cluster(tokens[p + 1:s], "si"):
                 out.append(CodeArg(" ".join(tokens[s:]), None))
+    elif name == "git":  # `rebase -x CODE`, `--exec CODE`, `--exec=CODE`: git runs CODE with the shell
+        out.extend(CodeArg(code, None) for code in _git_exec_code(tokens[p + 1:]))
     elif name == "watch":  # without -x / --exec the words are run by `sh -c`
         for s in starts:
             flags = tokens[p + 1:s]
@@ -3963,13 +4146,17 @@ def _classify_segment(tokens: list[str], seg: str, categories: list[str], flags:
         else:
             categories.append("docker-other")
     elif seg.startswith("git "):
-        if _is_git_commit(tokens[start:]):  # `commit` as the subcommand only (A2): not `config --get commit.x`
+        committing = _creates_git_commits(tokens[start:])  # the subcommand only (A2): not `config --get commit.x`
+        if committing:
             categories.append("git-commit")
             flags.append("git_commit")
-        elif re.match(r"^git (\S+ )*push\b", seg):
+        # Not an `elif` after every git_commit: `merge`, `rebase`... can carry a `push` word too. After a plain
+        # `commit` it stays one (a `push` in its message is data).
+        pushes = re.match(r"^git (\S+ )*push\b", seg) and not (committing and _is_git_commit(tokens[start:]))
+        if pushes:
             categories.append("git-push")
             flags.append("git_push")
-        else:
+        if not committing and not pushes:
             categories.append("git-other")
     elif seg == "mise" or seg.startswith("mise "):
         categories.extend(mise_categories(seg))

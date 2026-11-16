@@ -32,4 +32,4 @@ Confirmed bugs that need fixing, one file per bug.
 | [agent-audit: canary spans inside a backtick with escapes are relative to the unescaped text](2026-11-14-audit-canary-span-backtick-escapes.md) | low | Open |
 | [agent-audit: heredoc with HTML body and a group-level redirect, or HEAD() { cat <<EOF }, reads as code (lex_error)](2026-11-14-audit-html-heredoc-group-redirect.md) | low | Open |
 | [hooks tests: SP8 linearity test compares CPU times with a 5x ratio (flake risk)](2026-11-14-audit-sp8-linearity-flake-risk.md) | low | Open |
-| [agent-audit: git_commit matches only the commit subcommand (commit-tree, update-ref, merge, cherry-pick, revert, am, rebase regression)](2026-11-14-audit-git-commit-subcommand-regression.md) | medium | Open |
+| [agent-audit: git_commit matches only the commit subcommand (commit-tree, update-ref, merge, cherry-pick, revert, am, rebase regression)](2026-11-14-audit-git-commit-subcommand-regression.md) | medium | Fixed |

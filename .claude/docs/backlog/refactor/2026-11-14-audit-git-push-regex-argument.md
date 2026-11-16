@@ -24,3 +24,9 @@ Not recorded.
 ## Out of scope
 
 Not recorded.
+
+## Seen again (2026-11-16)
+
+Source: agent run: fix of audit-git-commit-subcommand-regression, reviewers.
+
+git_push still matches the whole segment with `^git (\S+ )*push\b`, not the subcommand via `_git_walk`. More false positives: `git merge -m "x; git push"`, `git stash push -m store`, `git merge push`.

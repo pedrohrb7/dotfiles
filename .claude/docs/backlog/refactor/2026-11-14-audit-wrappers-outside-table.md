@@ -24,3 +24,9 @@ Not recorded.
 ## Out of scope
 
 Not recorded.
+
+## Seen again (2026-11-16)
+
+Source: agent run: fix of audit-git-commit-subcommand-regression, reviewers.
+
+The canary does not reach git fed by xargs: `echo fast-import | xargs git` and `echo commit | xargs git` classify as `other` with no flag. Pre-existing; `xargs` is another launcher outside the table.

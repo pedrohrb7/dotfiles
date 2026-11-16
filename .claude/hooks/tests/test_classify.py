@@ -131,6 +131,149 @@ class GitCommitSubcommand(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(classify(command), (["git-commit"], ["git_commit"]))
 
+    def test_gc1_every_commit_creating_or_moving_subcommand_is_git_commit(self):
+        for command in ("git commit-tree abc -m x", "git update-ref refs/heads/main abc", "git merge feature",
+                        "git cherry-pick abc", "git revert abc", "git am p.patch", "git rebase main", "git pull",
+                        "git -C . commit-tree abc -m x", "git -c user.name=x merge feature",
+                        "sudo git -C r rebase main", "git -c alias.m=merge m x"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertIn("git_commit", flags)
+
+    def test_gc1_ref_moving_forms_are_git_commit(self):
+        for command in ("git fast-import", "git filter-branch --all", "git subtree add --prefix=p repo main",
+                        "git subtree merge --prefix=p abc", "git subtree pull --prefix=p repo main",
+                        "git notes add -m x", "git notes edit", "git notes append -m x", "git notes copy a b",
+                        "git notes merge other", "git replace abc def", "git replace -d abc",
+                        "git symbolic-ref HEAD refs/heads/x", "git symbolic-ref -d HEAD",
+                        "git symbolic-ref --delete HEAD", "git hash-object -w -t commit --stdin",
+                        "git stash create", "git stash store abc",
+                        "git reset --hard", "git reset --soft HEAD~1", "git reset --keep abc", "git reset --merge",
+                        "git reset --mixed", "git reset HEAD~1", "git reset abc123",
+                        "git branch -f main abc", "git branch --force main abc", "git branch -M new", "git branch -C new",
+                        "git checkout -B x abc", "git switch -C x abc", "git switch --force-create x abc",
+                        "git -C r reset --hard abc", "git -c alias.fi=fast-import fi"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertIn("git_commit", flags)
+
+    def test_gc1_read_only_and_non_ref_forms_are_not_git_commit(self):
+        for command in ("git replace", "git replace -l", "git replace --list", "git symbolic-ref HEAD",
+                        "git symbolic-ref --short HEAD", "git hash-object file", "git stash", "git stash push",
+                        "git stash pop", "git stash list", "git stash show", "git stash apply", "git reset",
+                        "git reset -- file.txt", "git reset -p", "git branch", "git branch -a", "git branch --list",
+                        "git branch new-feature", "git branch -d x", "git checkout main", "git checkout -b x",
+                        "git switch main", "git switch -c x"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertNotIn("git_commit", flags)
+
+    def test_gc1_unique_long_option_prefixes_are_git_commit(self):
+        for command in ("git branch --forc main abc", "git branch --fo main abc", "git switch --force-c main abc",
+                        "git reset --har abc", "git reset --ke abc", "git notes --re x add -m y"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_branch_options_that_are_not_force_are_not_git_commit(self):
+        for command in ("git branch --format=%(refname)", "git branch --list"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_subtree_mutating_forms_with_leading_options_are_git_commit(self):
+        for command in ("git subtree -P lib add https://x main", "git subtree --prefix lib pull r main",
+                        "git subtree --prefix=lib merge abc", "git subtree split --rejoin -P x",
+                        "git subtree split -P x -b newbr"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_every_subtree_form_with_arguments_is_git_commit(self):
+        for command in ("git subtree -P p -b main split", "git subtree --branch main -P p split",
+                        "git subtree --onto abc -P p split", "git subtree --annotate x -P p split",
+                        "git subtree -P p push r main"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_subtree_help_forms_are_not_git_commit(self):
+        for command in ("git subtree", "git subtree -h", "git subtree --help"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_fetch_stdin_or_refmap_with_a_destination_is_git_commit(self):
+        for command in ("git fetch --stdin .", "git fetch --st .", "git fetch --refmap=+x:refs/heads/main . x",
+                        "git fetch --refmap +x:main . x"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_fetch_refmap_without_a_destination_is_not_git_commit(self):
+        for command in ("git fetch --refmap= origin", "git fetch --refmap=x: origin", "git fetch --dry-run origin"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_bare_subtree_is_not_git_commit(self):
+        for command in ("git subtree", "git subtree -h"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_worktree_force_branch_is_git_commit(self):
+        self.assertIn("git_commit", classify("git worktree add -B br ../p abc")[1])
+
+    def test_gc1_other_worktree_forms_are_not_git_commit(self):
+        for command in ("git worktree add ../p", "git worktree list", "git worktree add -b new ../p"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_fetch_with_a_local_ref_destination_is_git_commit(self):
+        for command in ("git fetch . abc:refs/heads/main", "git fetch origin +main:main",
+                        "git fetch origin refs/heads/x:refs/heads/y"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_fetch_without_a_destination_is_not_git_commit(self):
+        for command in ("git fetch", "git fetch origin", "git fetch origin main", "git fetch origin main:"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_rebase_exec_in_bundles_and_abbreviations_is_read_as_code(self):
+        for command in ("git rebase -ix 'docker compose up' main", "git rebase --exe 'docker compose up' main",
+                        "git rebase --ex='docker compose up' main"):
+            with self.subTest(command=command):
+                flags = classify(command)[1]
+                self.assertIn("git_commit", flags)
+                self.assertIn("docker_lifecycle", flags)
+
+    def test_gc1_reset_of_paths_only_is_not_git_commit(self):
+        for command in ("git reset HEAD -- f.txt", "git reset abc -- f.txt", "git reset HEAD f.txt", "git reset HEAD",
+                        "git reset --pathspec-from-file x", "git reset -q HEAD -- f"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_reset_that_may_move_a_ref_is_git_commit(self):
+        for command in ("git reset HEAD~1", "git reset abc", "git reset --hard HEAD", "git reset f.txt"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_rebase_exec_value_is_read_as_code(self):
+        for command in ("git rebase -x 'docker compose up' main", "git rebase --exec='docker compose up' main",
+                        "git rebase --exec 'docker compose up' main"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertIn("git_commit", flags)
+                self.assertIn("docker_lifecycle", flags)
+
+    def test_gc1_rebase_exec_push_is_not_masked_by_git_commit(self):
+        categories, flags = classify("git rebase -x 'git push origin main' main")
+        self.assertIn("git_commit", flags)
+        self.assertIn("git_push", flags)
+
+    def test_gc1_other_subcommands_and_words_as_arguments_are_not_git_commit(self):
+        for command in ("git commit-graph write", "git stash", "git tag v1", "git status", "git log", "git show",
+                        "git diff", "git log --grep merge", "git config --get merge.ff", "git show update-ref",
+                        "git config --get commit.template"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertNotIn("git_commit", flags)
+                self.assertNotIn("git-commit", categories)
+
 
 NV = "nvim --headless"
 MT = "--noplugin -u scripts/minimal_init.lua"
