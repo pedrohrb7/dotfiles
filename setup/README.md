@@ -94,38 +94,78 @@ As dependências (`nss`, `gtk+3`, `alsa-lib`, `libsecret`, `libxkbfile`,
 | `awesome/config/autostart.lua`         | inicia o PipeWire quando o socket não existe (`artix-pipewire-launcher` no Artix, `pipewire` no Void) |
 | `.zshrc` (`startemulator`)             | emulador Android com PRIME offload na NVIDIA só se o driver estiver carregado |
 
-## Webcam USB (DV20): câmera virtual "Webcam ampla"
+## Celular como webcam e microfone (scrcpy)
 
-O modo 16:9 da webcam USB DV20 (Jieli, `1280x720`) é um recorte do sensor e
-deixa a imagem perto demais; o `640x480` mostra o campo inteiro. A câmera
-também liga com contraste, saturação e nitidez zerados.
-`setup/webcam-ampla.sh` instala o `v4l2loopback` (DKMS), cria a câmera virtual
-`/dev/video10` ("Webcam ampla") e o serviço runit `webcam-ampla`, que corrige
-os controles e roda um `ffmpeg` lendo o `640x480` e entregando `854x480` (16:9)
-com faixas pretas nas laterais. Não corta nada: cortar o 4:3 em cima e embaixo
-para virar 16:9 (`640x360`) deixava o rosto ocupando mais do quadro e voltava a
-parecer zoom.
+`setup/celular-webcam.sh` usa o celular Android (USB) como webcam e microfone:
+a câmera vira a câmera virtual "Celular" (`/dev/video10`, `v4l2loopback`) e o
+microfone vira a entrada "Microfone do celular" do PipeWire. Substitui o
+antigo `setup/webcam-ampla.sh` (webcam USB DV20, que não é mais usada); o
+script remove sozinho o serviço runit `webcam-ampla` que tenha sobrado.
 
 ```sh
-~/dotfiles/setup/webcam-ampla.sh -n   # mostra o que faria
-~/dotfiles/setup/webcam-ampla.sh      # instala (pede sudo)
-~/dotfiles/setup/webcam-ampla.sh -r   # remove tudo
-ffplay /dev/video10                   # testar
+~/dotfiles/setup/celular-webcam.sh -n   # mostra o que faria
+~/dotfiles/setup/celular-webcam.sh      # instala (pede sudo)
+~/dotfiles/setup/celular-webcam.sh -r   # remove (mantém scrcpy e android-tools)
 ```
 
-No Meet/navegador, escolha a câmera "Webcam ampla". Com o serviço rodando, a
-webcam fica sempre ligada (LED aceso) e só a câmera virtual fica disponível
-para os apps. Desligar fora das reuniões: `sudo sv down webcam-ampla` (religar:
-`sudo sv up webcam-ampla`). Para não subir no boot:
-`sudo touch /etc/sv/webcam-ampla/down`. O `exclusive_caps=1` do módulo é o que
-faz o Chrome/Vivaldi listarem a câmera virtual: ela só aparece como câmera
-enquanto o serviço estiver escrevendo nela.
+O que ele instala:
 
-A webcam às vezes trava mandando só quadros MJPEG corrompidos (`Dequeued v4l2
-buffer contains corrupted data`), e o `ffmpeg` fica esperando para sempre. Por
-isso o serviço, antes de começar, exige 5 quadros em 8 s; se não vierem, ele
-desconecta e reconecta a USB da webcam (`authorized` 0/1 no sysfs, o mesmo que
-tirar e pôr o cabo) e o runit tenta de novo.
+- pacotes `scrcpy`, `android-tools` e `v4l2loopback`;
+- regra udev `/etc/udev/rules.d/70-android-adb.rules`;
+- `v4l2loopback` em `/dev/video10`, nome "Celular", com `exclusive_caps=1`
+  (sem isso Chrome/Vivaldi/Meet não listam a câmera);
+- `/etc/pipewire/pipewire.conf.d/30-celular-mic.conf`: sink
+  `celular_mic_entrada` e fonte "Microfone do celular" (`celular_mic`, mono);
+- `/etc/pipewire/pipewire-pulse.conf.d/30-navegador-volume-mic.conf`: quirk
+  `block-source-volume` do `pipewire-pulse` para `vivaldi-bin`, `chrome` e
+  `chromium`. O controle automático de ganho do WebRTC (Meet etc.) baixa o
+  volume de entrada do sistema durante a chamada (o "Microfone do celular"
+  chegou a 55%); o quirk ignora esses pedidos em todos os microfones, e o ganho
+  digital do próprio WebRTC continua valendo. O `-r` remove o arquivo;
+- o comando `/usr/local/bin/celular-cam`.
+
+Quando o microfone virtual já existe, a instalação também volta o volume do
+`celular_mic` para 100%.
+
+O PipeWire só lê a conf ao iniciar, então o microfone virtual aparece depois de
+reiniciar a sessão (ou só o PipeWire: `pkill -x pipewire; setsid -f pipewire`,
+que traz de volta o wireplumber e o pipewire-pulse pelo `pipewire.conf.d`).
+Mudanças no PipeWire, como a do volume acima, valem do mesmo jeito; reabra o
+navegador depois, porque um navegador aberto durante o restart perde a conexão
+de áudio. O `celular-cam` não roda sem ele, nem sem o celular no adb.
+
+No celular: Opções do desenvolvedor > Depuração USB ligada, e aceitar a chave
+do computador. Precisa de Android 12+ para a câmera e 11+ para o microfone.
+O Android revoga a autorização do adb após 7 dias sem conectar, a menos que
+"Desativar tempo limite de autorização adb" esteja ligado nas opções do
+desenvolvedor.
+
+```sh
+celular-cam                        # câmera frontal 1280x720, 30 fps
+celular-cam --camera-facing=back   # argumentos extras vão para o scrcpy
+scrcpy --list-cameras --list-camera-sizes   # câmeras e resoluções do aparelho
+```
+
+O `celular-cam` manda a câmera para `/dev/video10` e o microfone do celular
+para o microfone virtual, sem janela; Ctrl+C para. No Meet: câmera "Celular",
+microfone "Microfone do celular".
+
+Fluxo do dia a dia: conecte o celular, rode `celular-cam` ANTES de escolher a
+câmera no Meet (por causa do `exclusive_caps`, "Celular" só aparece na lista
+enquanto o `celular-cam` roda) e use Ctrl+C para encerrar.
+
+Armadilhas já resolvidas (testado num Xiaomi 11 Lite 5G NE, Android 14,
+scrcpy 5.0.1):
+
+- Sem a regra udev, com o celular em "só carregar"/só ADB, o `adb` diz "no
+  permissions": as regras do sistema só liberam o acesso pela interface MTP.
+- O scrcpy ignora `PULSE_SINK` e toca sempre na saída padrão (a voz saía no
+  alto-falante). O `celular-cam` usa `SDL_AUDIODRIVER=pipewire` e
+  `PIPEWIRE_PROPS='{ target.object = "celular_mic_entrada" }'` para ligar o
+  stream direto ao microfone virtual.
+- `scrcpy --stay-awake` falha no Xiaomi ("Could not change
+  stay_on_while_plugged_in") a menos que "Depuração USB (configurações de
+  segurança)" esteja ligada; por isso não é usado.
 
 ## ThinkPad T440p (ABNT2): tecla "/ ?"
 
