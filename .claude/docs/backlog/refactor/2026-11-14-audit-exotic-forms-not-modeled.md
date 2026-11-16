@@ -26,3 +26,11 @@ Not recorded.
 ## Out of scope
 
 Not recorded.
+
+## Seen again (2026-11-14)
+
+Source: automated security review of commit 5a47cc4 (feature audit-shell-lexer), `agent_audit_classify.py`. Review severity: high.
+
+- Alias rebinding is not handled by `_rebound_spans`: `alias cat=bash` or `alias jq=sh` (and bash `shopt -s expand_aliases`) can make a later heredoc sink or here-string data reader run a shell. Any aliased command name also has an unknown program.
+- Still unverified whether Claude Code's zsh eval expands an alias defined earlier in the same command string; until verified, treat it as a possible bypass.
+- Suggested fix: treat `alias` and `shopt -s expand_aliases` as rebinding (read bodies as code, unknown program for aliased names), or classify as level B when the text defines an alias.

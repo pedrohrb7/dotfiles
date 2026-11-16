@@ -32,3 +32,11 @@ Value-running keys are outside the model; aliases are known only within one text
 ## Fix
 
 Not fixed yet.
+
+## Seen again (2026-11-14)
+
+Source: automated security review of commit 5a47cc4 (feature audit-shell-lexer), `agent_audit_classify.py`.
+
+More alias vectors: `_git_aliases` reads only command-line/env `alias.*`. Aliases can also come from `include.path`, `includeIf.*`, or `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` set on the command line or env (pulling a file); and from `git config [--local|--global] alias.*` writes followed by an unknown git subcommand.
+
+Suggested fix: when include/`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` are set, the result is unresolved (level B); an unknown non-builtin git subcommand is unresolved.

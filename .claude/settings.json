@@ -110,7 +110,11 @@
       {
         "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*(creenshot|rowser|laywright|hrome|omputer|imulator|mulator|napshot)",
         "hooks": [
-          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"",
+            "timeout": 10
+          }
         ]
       }
     ],
@@ -118,7 +122,12 @@
       {
         "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
         "hooks": [
-          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"",
+            "timeout": 10,
+            "async": true
+          }
         ]
       }
     ],
@@ -126,21 +135,36 @@
       {
         "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
         "hooks": [
-          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"",
+            "timeout": 10,
+            "async": true
+          }
         ]
       }
     ],
     "SubagentStart": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"",
+            "timeout": 10,
+            "async": true
+          }
         ]
       }
     ],
     "SubagentStop": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"", "async": true, "timeout": 10 }
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/agent-audit.py\"",
+            "timeout": 10,
+            "async": true
+          }
         ]
       }
     ]
@@ -178,5 +202,6 @@
   "theme": "dark",
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
-  "useAutoModeDuringPlan": false
+  "useAutoModeDuringPlan": false,
+  "switchModelsOnFlag": false
 }

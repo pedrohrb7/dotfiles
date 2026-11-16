@@ -33,3 +33,11 @@ Not diagnosed yet.
 ## Fix
 
 Not fixed yet.
+
+## Seen again (2026-11-14)
+
+Source: automated security review of commit 5a47cc4 (feature audit-shell-lexer), `agent_audit_classify.py`.
+
+Data-reader angle: sed, awk and gawk are in `_STDIN_DATA`, so a here-string fed to them is treated as data. A sed script with an `e` command or `s///e` flag, or an awk program with `system(`, `|` pipes or `cmd | getline`, executes the data fed on stdin.
+
+Suggested fix: treat the stdin as data only when the program cannot run commands, else as code or level B; or remove sed/awk/gawk from `_STDIN_DATA`.
