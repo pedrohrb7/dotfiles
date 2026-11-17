@@ -169,6 +169,114 @@ def _classifier():
     return classifier
 
 
+GIT_ALIASES_TIMEOUT_S = 2.0  # `git config` reading the aliases; well under ANALYSIS_TIMEOUT_S
+GIT_ALIASES_MAX_BYTES = 1 << 20  # what that read may print; more is an unreadable configuration
+# Variables of the session that make a program run (or print traces) while git reads its configuration: never
+# passed to that read. The `GIT_*` ones that only select the repository or its files are dropped too, except
+# `GIT_CONFIG_*` (the configuration the agent's shell would give git) and `HOME` / `XDG_CONFIG_HOME` (kept).
+GIT_ALIASES_DROPPED_ENV = frozenset({
+    "PAGER", "EDITOR", "VISUAL", "LESSOPEN", "LESSCLOSE", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE",
+})
+
+
+def _git_aliases_env() -> dict[str, str]:
+    """The session environment for the alias read: the agent's `GIT_CONFIG_*`, `HOME` and `XDG_CONFIG_HOME` stay, so
+    the aliases match what the agent's shell gives git; the variables that run programs, print traces or select
+    another repository are dropped."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in GIT_ALIASES_DROPPED_ENV and not (k.startswith("GIT_") and not k.startswith("GIT_CONFIG_"))}
+    env["LC_ALL"] = "C"
+    return env
+
+
+def read_git_aliases(cwd: str | None) -> dict[str, str] | None:
+    """The aliases git finds for a command run in `cwd` (the process's cwd when empty): lower-cased name -> value,
+    from the repo, global and system configuration. None when they cannot be read: git missing, an error, a timeout,
+    or more than GIT_ALIASES_MAX_BYTES of output. Git runs without a pager and without the fsmonitor, with the
+    environment of `_git_aliases_env`, so reading the configuration never runs it."""
+    if any(name in os.environ for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")):
+        return None  # the session reads another repository than `cwd` names: the aliases are not the ones git sees
+    cmd = ["git", "--no-pager", "-c", "core.fsmonitor=", "config", "-z", "--get-regexp", r"^alias\."]
+    deadline = time.monotonic() + GIT_ALIASES_TIMEOUT_S
+    try:
+        proc = subprocess.Popen(cmd, cwd=cwd or None, env=_git_aliases_env(), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        if proc.stdout is None:
+            return None
+        raw = io.FileIO(proc.stdout.fileno(), closefd=False)  # (closed with the pipe below)
+        buffer = bytearray(65536)  # each read below fills at most this, after `select` says there is data
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            ready, _, _ = select.select([proc.stdout], [], [], left)
+            if not ready:
+                continue
+            size = raw.readinto(buffer)
+            if not size:
+                break
+            total += size
+            if total > GIT_ALIASES_MAX_BYTES:
+                return None
+            chunks.append(bytes(buffer[:size]))
+        returncode = proc.wait(timeout=max(0.05, deadline - time.monotonic()))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        if proc.stdout is not None:
+            proc.stdout.close()
+        proc.wait()
+    if returncode == 1:  # no key matches
+        return {}
+    if returncode != 0:
+        return None
+    aliases: dict[str, str] = {}
+    for entry in b"".join(chunks).decode("utf-8", "replace").split("\0"):
+        key, _, value = entry.partition("\n")
+        if key.lower().startswith("alias."):
+            aliases[key[6:].lower()] = value
+    return aliases
+
+
+GIT_EXEC_DIRS = ("/usr/lib/git-core", "/usr/libexec/git-core", "/usr/local/libexec/git-core")  # where git ships its own
+
+
+def git_external_exists(name: str) -> bool:
+    """A program `git-<name>` is on the PATH or in git's own program directories (git runs it as the subcommand
+    `<name>`: `git lfs`, `git credential-libsecret`)."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", name):
+        return False
+    path = (os.environ.get("PATH") or "/usr/local/bin:/usr/bin:/bin").split(os.pathsep)
+    for directory in (*path, *GIT_EXEC_DIRS):
+        candidate = os.path.join(directory or ".", f"git-{name}")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return True
+    return False
+
+
+def _classify_in(module, command: str, cwd: str | None):
+    """`analyze_command` with the resolvers the classifier cannot have itself (it starts no process and reads no
+    file) registered for this one analysis: where the aliases of the repo are read (`cwd`) and which `git-<name>`
+    programs exist. The registry is restored afterwards, also when the analysis raises."""
+    resolvers = getattr(module, "RESOLVERS", None)
+    if not isinstance(resolvers, dict):
+        return module.analyze_command(command)
+    saved = dict(resolvers)
+    resolvers.update(git_aliases=read_git_aliases, git_external=git_external_exists, cwd=cwd)
+    try:
+        return module.analyze_command(command)
+    finally:
+        resolvers.clear()
+        resolvers.update(saved)
+
+
 IMPLEMENTERS = {
     "backend-node", "backend-spring", "backend-go", "backend-rust", "backend-python",
     "frontend-react", "mobile-react-native", "lua",
@@ -655,6 +763,7 @@ WHY = {
     "visual_tool": "browser and screenshot tools are used only by ui-verifier, on an explicit request from the user",
     "git_commit": "commits need the user's explicit authorization in the current conversation, and never carry attribution lines",
     "git_push": "pushes need the user's explicit authorization in the current conversation",
+    "git_config_exec": "this git config write sets a key that runs a program, redirects a remote or a ref, pulls in another config file or defines an alias (which later calls cannot see through), so the user must confirm it",
     "out_of_scope_write": "this path is outside the task's allowed_paths and its approved scope",
     "suite_by_non_runner": "whole suites run only through test-runner; run only the tests of the files you touched",
     "md_outside_docs": "agents do not create new .md files (notes, summaries, reports) outside the project's docs root (docs/, or the \"- docs root:\" line of the root CLAUDE.md ## Workflow); documentation needs go to needs_docs, and a markdown file the task really needs must be in its Files or come through a scope_requests entry",
@@ -857,7 +966,7 @@ def _analysis(payload: dict, event: str, actor: str) -> dict:
     if tool == "Bash":
         cmd = tinput.get("command", "")
         out["cmd"] = cmd[:MAX_CMD]
-        out["categories"], flags, uncertainty = _classifier().analyze_command(cmd)
+        out["categories"], flags, uncertainty = _classify_in(_classifier(), cmd, payload.get("cwd") or None)
         suites = {"test-full", "test-package", "test-load"} & set(out["categories"])
         if suites and actor in IMPLEMENTERS | {"quality-fixer", "test-writer"}:
             flags.append("suite_by_non_runner")

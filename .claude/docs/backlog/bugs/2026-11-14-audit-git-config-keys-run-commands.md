@@ -1,6 +1,6 @@
 # agent-audit: git config keys that execute commands are not modeled (and cross-call aliases)
 
-- **Status:** Open
+- **Status:** Fixed
 - **Reported:** 2026-11-14
 - **Severity:** high
 - **Environment:** local (Claude Code hooks)
@@ -27,11 +27,19 @@ Allowed, nothing flagged (the alias case is a silent commit).
 
 ## Root cause
 
-Value-running keys are outside the model; aliases are known only within one text.
+`_git_aliases` (`.claude/hooks/agent_audit_classify.py`) kept only `alias.*` from the `-c`/`--config-env`/`GIT_CONFIG_*` pairs it already collected; no other key was read as code or as unknown. Config from files (include, `GIT_CONFIG_GLOBAL`/`SYSTEM`), `git config` writes, config-driven refspecs and unknown subcommands (git-other) were not modeled, so cross-call aliases were silent commits.
 
 ## Fix
 
-Not fixed yet.
+Fixed (user decisions 2026-11-16), committed with the fix:
+- New ask category `git_config_exec` for risky `git config` writes (and remote/submodule `ext::`/`fd::` URLs).
+- Keys and env vars whose value is shell code (GIT_PAGER, GIT_EDITOR, EDITOR, VISUAL, PAGER, LESSOPEN, GIT_SSH_COMMAND, ...) are read as code; program/file keys and env vars are level B unless empty.
+- `remote.*.fetch` into local refs is `git_commit`.
+- An unknown subcommand is resolved through builtins, text aliases, a hook-time repo alias read (trusted only under an allowlist of read-only commands) and `git-<name>` on PATH; otherwise blocked as `git_unknown_subcommand`.
+- 4 review rounds (code + security).
+- Changed: `.claude/hooks/agent_audit_classify.py`, `agent-audit.py`, `agent-audit.json`, `agent-metrics.py`, and tests.
+- Regression tests: `tests/test_command_positions.py` ReviewFixB2 sections 6b/6c; `tests/test_classify.py` GitConfigWrites, GitConfigWritesRound2; `tests/test_uncertainty.py` GitUnknownSubcommand (+Round2/3/4), GitConfigProgramKeysLevelB; `tests/test_hook_main.py` test_e5_*, ResolverHermeticity, ReadGitAliases; `tests/test_config_contract.py` f2/f6.
+- Checks: full claude-hooks suite 911 OK twice; pyright at the 20-error baseline.
 
 ## Seen again (2026-11-14)
 

@@ -145,3 +145,14 @@ Bug `2026-11-14-audit-pipe-into-group-not-flagged` (backlog). X4 only flagged a 
 **Files:** `.claude/hooks/agent_audit_shell.py` (`Site.piped`, `_fd_states`, `stdin_piped`, `fd_piped`, `_walk`, `_walk_redirects`), `.claude/hooks/agent_audit_classify.py` (`_stdin_code`); tests in `test_command_positions.py` and `test_shell_lexer.py`.
 
 **Gate:** the suite now has 846 tests (about 11-12 s). Spec: see "Adendo 2026-11-16 (2)".
+
+
+## Addendum 2026-11-16 (3) - git config keys that run commands and unknown git subcommands
+
+Bug `2026-11-14-audit-git-config-keys-run-commands` (backlog). Keys such as `core.pager`, `core.sshCommand`, `core.fsmonitor`, `credential.helper` and `diff.external` run a program, and an unknown git subcommand may be a repo alias or a `git-<name>` on PATH; none of it was read.
+
+**User decisions (2026-11-16):** new category `git_config_exec` (`ask`) for `git config` writes (and `git remote add|set-url`, `git submodule set-url` with `ext::`/`fd::` URLs) of risky keys; harmless writes and reads stay clean. Keys via `-c`, `--config-env` and `GIT_CONFIG_*` whose value is shell code are read as code, program and file keys are level B unless empty, `remote.*.fetch` into local refs is `git_commit`; the listed editor, pager, ssh and `LESS*` variables are read as code, the program and path variables are level B unless empty. An unknown git subcommand resolves through the builtin list, a text alias, a hook-time read of the repo aliases (2 s, 1 MiB, no read when the session sets `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`), a `git-<name>` on PATH, else level B `git_unknown_subcommand`. The repo read is trusted only next to known readers and with at most one non-builtin git verb; `-C`, `--git-dir`, `--work-tree`, `--bare`, `env -C`, `sudo -D`, file redirects, `git config` writes and mentions of `.git/config`/`.gitconfig` make it untrusted. Accepted: `HOME=/x git status` blocked, `git lfs` blocked without git-lfs, `GIT_EXEC_DIRS` hard-coded for Void Linux, direct `.git/config` file edits outside the classifier.
+
+**Files:** `.claude/hooks/agent_audit_classify.py`, `.claude/hooks/agent-audit.py` (`read_git_aliases`, `git_external_exists`, `_classify_in`, `GIT_ALIASES_MAX_BYTES`), `.claude/hooks/agent-audit.json` (`git_config_exec: ask`), `.claude/hooks/agent-metrics.py`; tests in `test_classify.py`, `test_command_positions.py`, `test_config_contract.py`, `test_hook_main.py`, `test_uncertainty.py`.
+
+**Gate:** the suite now has 911 tests (about 11-12 s). Spec: see "Adendo 2026-11-16 (3)".

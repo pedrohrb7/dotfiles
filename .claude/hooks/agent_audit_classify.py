@@ -738,9 +738,42 @@ def _git_has_subcommand(args: list[str], name: "str | frozenset[str]") -> bool:
 _GIT_ALIAS_DEPTH = 5
 
 
+# Environment variables that give git a program to run: `code` ones hold shell code (read as code), `program` ones
+# name a program or a file that cannot be known (level B unless empty).
+_GIT_ENV_VARS = {
+    "GIT_PAGER": "code", "GIT_EDITOR": "code", "GIT_SEQUENCE_EDITOR": "code", "GIT_SSH_COMMAND": "code",
+    "GIT_EXTERNAL_DIFF": "code", "EDITOR": "code", "VISUAL": "code", "PAGER": "code", "LESSOPEN": "code",
+    "LESSCLOSE": "code", "GIT_ASKPASS": "program", "GIT_PROXY_COMMAND": "program", "GIT_CONFIG_GLOBAL": "program",
+    "GIT_CONFIG_SYSTEM": "program", "GIT_SSH": "program", "GIT_EXEC_PATH": "program", "GIT_TEMPLATE_DIR": "program",
+    "GIT_ALLOW_PROTOCOL": "program", "HOME": "program", "XDG_CONFIG_HOME": "program",
+}
+# Where the text can mention one of them (the cheap test before the values of the text are read for them).
+_GIT_ENV_HINTS = ("GIT_", "HOME", "XDG_", "EDITOR", "VISUAL", "PAGER", "LESS", "PATH")
+# Another repo's configuration, or another one for the same repo.
+_GIT_REDIRECT_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "HOME", "XDG_CONFIG_HOME")
+# The repo the aliases are read in is the one git runs in, with the configuration read, only when nothing else in the
+# text can change directory or write a file: every other command of the text must be one of these (`_script_moves`).
+_REDIRECT_WRITES = frozenset({">", ">>", ">|", "&>", "&>>", "<>"})
+_NO_FILE_TARGETS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
+_READ_ONLY_PROGRAMS = frozenset(
+    "ls cat head tail grep egrep fgrep rg wc echo printf pwd true false test [ sort uniq cut tr jq stat file which "
+    "date env id whoami uname basename dirname realpath readlink diff cmp column fold nl tac rev seq expr sleep tree "
+    "du df hostname printenv : export unset set declare local readonly shift read".split())
+_FIND_WRITES = frozenset({"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"})
+# The git subcommands that write neither a file outside `.git/objects` and `.git/refs` nor the configuration.
+_GIT_READ_VERBS = frozenset(
+    "status log diff show ls-files rev-parse branch describe blame grep shortlog ls-tree cat-file show-ref "
+    "for-each-ref rev-list merge-base name-rev diff-tree diff-index ls-remote version help whatchanged reflog "
+    "count-objects check-ignore".split())
+
+
 def _has_git_config_names(cmd, env) -> bool:
-    """The command (prefix assignments) or the text (values) sets a `GIT_CONFIG_*` variable."""
-    return any(w.text.startswith("GIT_CONFIG_") for w in cmd.assignments) or any(n.startswith("GIT_CONFIG_") for n in env)
+    """The command (prefix assignments) or the text (values) sets a `GIT_CONFIG_*` variable, or one of
+    `_GIT_ENV_VARS`."""
+    def named(name: str) -> bool:
+        return name.startswith("GIT_CONFIG_") or name in _GIT_ENV_VARS
+
+    return any(named(w.text.partition("=")[0]) for w in cmd.assignments) or any(named(n) for n in env)
 
 
 def _sq_dequote(text: str, i: int) -> "tuple[str, int] | None":
@@ -877,11 +910,124 @@ def _git_env_config(cmd, env) -> "tuple[list[tuple[str, str]], bool]":
     return pairs, unresolved
 
 
-def _git_aliases(cmd, args: list[str], env) -> "tuple[dict[str, list[str]], bool]":
-    """The aliases a `git` reading defines for itself (`-c alias.p=push`, `--config-env=alias.p=VAR`, the
-    `GIT_CONFIG_*` variables): lower-cased name -> values, and whether some configuration cannot be known (a
-    key or value made by an expansion)."""
-    verbs, configs = _git_walk(args)
+_GIT_CODE_KEYS = re.compile(
+    r"^(?:core\.(?:pager|editor|sshcommand|fsmonitor|gitproxy|alternaterefscommand)|sequence\.editor|diff\.external"
+    r"|interactive\.difffilter|uploadpack\.packobjectshook|web\.browser|pager\..+|imap\.tunnel"
+    r"|diff\..+\.(?:command|textconv)|merge\..+\.driver|(?:mergetool|difftool|guitool)\..+\.cmd"
+    r"|filter\..+\.(?:clean|smudge|process)|remote\..+\.(?:uploadpack|receivepack)|trailer\..+\.(?:cmd|command)"
+    r"|(?:browser|man)\..+\.cmd|hook\..+\.command|gpg\.ssh\.defaultkeycommand"
+    r"|sendemail\.(?:sendmailcmd|tocmd|cccmd|headercmd))$")
+_GIT_BANG_KEYS = re.compile(r"^(?:credential(?:\..+)?\.helper|submodule\..+\.update)$")
+_GIT_PROGRAM_KEYS = re.compile(
+    r"^(?:core\.(?:hookspath|askpass|worktree)|include\.path|includeif\..+\.path|url\..+\.(?:pushinsteadof|insteadof)"
+    r"|remote\..+\.(?:url|pushurl|vcs)|gpg\.program|gpg\..+\.program|init\.templatedir|protocol\.(?:.+\.)?allow"
+    r"|sendemail\.smtpserver"
+    r"|(?:mergetool|difftool|browser)\..+\.path)$")
+_GIT_FETCH_KEY = re.compile(r"^remote\..+\.fetch$")
+_GIT_PROTOCOL_ALLOW = re.compile(r"^protocol\.(?:.+\.)?allow$")
+_GIT_WRITE_ONLY_KEYS = re.compile(r"^(?:alias\..+|remote\..+\.push|hook\..+\.event)$")  # risky to write, but not read as code
+
+
+def _config_kind(key: str) -> "str | None":
+    """What the value of the configuration `key` does when git runs: `code` (shell code), `bang` (shell code when it
+    starts with `!`), `program` (a program or a file that cannot be known), `fetch` (a refspec), or None."""
+    if key.startswith("env:"):
+        return _GIT_ENV_VARS.get(key[4:])
+    low = key.lower()
+    if _GIT_CODE_KEYS.match(low):
+        return "code"
+    if _GIT_BANG_KEYS.match(low):
+        return "bang"
+    if _GIT_PROGRAM_KEYS.match(low):
+        return "program"
+    if _GIT_FETCH_KEY.match(low):
+        return "fetch"
+    return None
+
+
+def _risky_config_key(key: str) -> bool:
+    """Writing this key to the configuration makes git run a program, read a file, redirect a remote or a ref, or
+    expands an alias later (`git config alias.c commit`)."""
+    low = key.lower()
+    return _config_kind(low) is not None or bool(_GIT_WRITE_ONLY_KEYS.match(low))
+
+
+def _config_effects(pairs: "list[tuple[str, str]]", user_off: bool = False) -> "tuple[list[str], bool, list[str]]":
+    """What the configuration pairs (not the aliases) make git do: the shell code their values hold, whether some
+    value names a program or a file that cannot be known (level B; an empty value resets the key and is not), and
+    the refspecs of `remote.*.fetch` that write local refs outside `refs/remotes/`. A protocol `allow` of `user`
+    allows what the user types: harmless only when the same command sets `GIT_PROTOCOL_FROM_USER=0` (`user_off`)."""
+    code: list[str] = []
+    unknown = False
+    specs: list[str] = []
+    for key, value in pairs:
+        kind = _config_kind(key)
+        low = key.lower()
+        if kind == "code":
+            if key in ("env:LESSOPEN", "env:LESSCLOSE"):  # `|cmd %s`, `||cmd %s`, `-cmd`: a leading pipe mark
+                value = value.lstrip("|-")
+            if value.strip():
+                code.append(value)
+        elif kind == "bang":
+            if value.startswith("!"):
+                code.append(value[1:])
+            elif low.startswith("credential") and value.strip():
+                if value.lstrip().startswith(("/", "~")):
+                    unknown = True  # a helper program given by its path
+                else:  # git runs `git credential-<value>` with the shell
+                    code.append("git credential-" + value.strip())
+        elif kind == "program":
+            allowed = (("", "never", "user") if user_off else ("", "never")) if _GIT_PROTOCOL_ALLOW.match(low) else ("",)
+            if value.strip().lower() not in allowed:
+                unknown = True
+        elif kind == "fetch":
+            dst = value.lstrip("+").partition(":")[2]
+            if dst and not dst.startswith("refs/remotes/"):
+                specs.append(value)
+    return code, unknown, specs
+
+
+def _env_is(cmd, env, name: str, value: str) -> bool:
+    """The command (a prefix assignment, `env NAME=v`) or the text sets the variable `name`, and only to `value`."""
+    known = None
+    for word in cmd.assignments:
+        first = word.parts[0]
+        target = _assignment_target(first.text) if first.kind == "lit" else None
+        if target is not None and target[0] == name and target[1] == "=":
+            known = None if word.dynamic else frozenset({word.text[target[2]:]})
+            return known == frozenset({value})
+    known = env.get(name)
+    return known == frozenset({value})
+
+
+def _git_env_var_pairs(cmd, env) -> "tuple[list[tuple[str, str]], bool]":
+    """The `_GIT_ENV_VARS` the command or the text sets, as `("env:NAME", value)` pairs, and whether one of them
+    holds a value that cannot be known."""
+    values: dict = {}
+    for word in cmd.assignments:
+        first = word.parts[0]
+        target = _assignment_target(first.text) if first.kind == "lit" else None
+        if target is not None and target[0] in _GIT_ENV_VARS and target[1] == "=":
+            values[target[0]] = None if word.dynamic else frozenset({word.text[target[2]:]})
+    for name, known in env.items():
+        if name in _GIT_ENV_VARS and name not in values:
+            values[name] = known
+    pairs: list[tuple[str, str]] = []
+    unresolved = False
+    for name, known in values.items():
+        real = [v for v in known if v is not None] if known is not None else []
+        if not real:
+            unresolved = True
+            continue
+        pairs.extend((f"env:{name}", v) for v in real)
+    return pairs, unresolved
+
+
+def _git_config_pairs(cmd, args: list[str], env) -> "tuple[list[tuple[str, str]], bool]":
+    """The configuration a `git` reading gives itself (`-c key=value`, `--config-env=key=VAR`, the `GIT_CONFIG_*`
+    variables, the `_GIT_ENV_VARS`), as (key, value) pairs, and whether some of it cannot be known (a key or value
+    made by an expansion, a variable with no known value for a key that matters)."""
+    _, configs = _git_walk(args)
     pairs: list[tuple[str, str]] = []
     unresolved = False
     for index, attached, from_env in configs:
@@ -899,7 +1045,7 @@ def _git_aliases(cmd, args: list[str], env) -> "tuple[dict[str, list[str]], bool
                     known = frozenset({word.text[target[2]:]})
             known = known if known is not None else env.get(value)
             if not known or None in known:
-                if key.lower().startswith("alias."):
+                if _risky_config_key(key):
                     unresolved = True
                 continue
             pairs.extend((key, v) for v in known)
@@ -909,11 +1055,10 @@ def _git_aliases(cmd, args: list[str], env) -> "tuple[dict[str, list[str]], bool
         extra, more = _git_env_config(cmd, env)
         pairs.extend(extra)
         unresolved = unresolved or more
-    aliases: dict[str, list[str]] = {}
-    for key, value in pairs:
-        if key.lower().startswith("alias."):
-            aliases.setdefault(key[6:].lower(), []).append(value)
-    return aliases, unresolved
+        extra, more = _git_env_var_pairs(cmd, env)
+        pairs.extend(extra)
+        unresolved = unresolved or more
+    return pairs, unresolved
 
 
 class _AssignView:
@@ -926,7 +1071,7 @@ class _AssignView:
         self.assignments = assignments
 
 
-def _wrapper_assignments(cmd, tokens: list[str], words: list, s: int) -> "tuple[object, bool]":
+def _wrapper_assignments(cmd, tokens: list[str], words: list, s: int) -> "tuple[_AssignView | shell.Simple, bool]":
     """Part E, V4: `cmd` with the `NAME=value` words among `tokens[:s]` (the wrapper operands before the program at
     `s`) added to its prefix assignments, and whether some such word cannot be read (its name is made by an
     expansion): then the configuration is not known."""
@@ -944,16 +1089,198 @@ def _wrapper_assignments(cmd, tokens: list[str], words: list, s: int) -> "tuple[
     return _AssignView(tuple(cmd.assignments) + tuple(extra)), unreadable
 
 
-def _git_alias_variants(variants: list, cmd, env) -> "tuple[list, list[str], bool]":
+# The subcommands git ships (`git --list-cmds=builtins,main,nohelpers,list-complete`, and the GUI and import
+# front ends): any other word after the global options may be an alias of a configuration file or a `git-<name>`
+# program.
+_GIT_BUILTINS = frozenset(
+    "add am annotate apply archimport archive backfill bisect blame branch bugreport bundle cat-file check-attr "
+    "check-ignore check-mailmap check-ref-format checkout checkout--worker checkout-index cherry cherry-pick citool "
+    "clean clone column commit commit-graph commit-tree config contacts count-objects credential credential-cache "
+    "credential-cache--daemon credential-store cvsexport cvsimport cvsserver daemon describe diagnose diff diff-files "
+    "diff-index diff-pairs diff-tree difftool difftool--helper fast-export fast-import fetch fetch-pack filter-branch "
+    "fmt-merge-msg for-each-ref for-each-repo format-patch format-rev fsck fsck-objects fsmonitor--daemon gc "
+    "get-tar-commit-id gitk grep gui gui--askyesno hash-object help history hook http-backend http-fetch http-push "
+    "imap-send index-pack init init-db instaweb interpret-trailers jump last-modified log ls-files ls-remote ls-tree "
+    "mailinfo mailsplit maintenance merge merge-base merge-file merge-index merge-octopus merge-one-file merge-ours "
+    "merge-recursive merge-recursive-ours merge-recursive-theirs merge-resolve merge-subtree merge-tree mergetool "
+    "mktag mktree multi-pack-index mv name-rev notes p4 pack-objects pack-redundant pack-refs patch-id pickaxe prune "
+    "prune-packed pull push quiltimport range-diff read-tree rebase receive-pack reflog refs remote remote-ext "
+    "remote-fd remote-ftp remote-ftps remote-http remote-https repack replace replay repo request-pull rerere reset "
+    "restore rev-list rev-parse revert rm send-email send-pack sh-i18n--envsubst shell shortlog show show-branch "
+    "show-index show-ref sparse-checkout stage stash status stripspace submodule submodule--helper subtree svn "
+    "switch symbolic-ref tag unpack-file unpack-objects update-index update-ref update-server-info upload-archive "
+    "upload-archive--writer upload-pack url-parse var verify-commit verify-pack verify-tag version web--browse "
+    "whatchanged worktree write-tree bisect--helper".split())
+
+
+# What the classifier cannot do itself (it starts no process and reads no file): the hook registers here, before it
+# analyzes, `git_aliases` (cwd -> {alias: value} | None, the aliases the configuration files of the repo at the cwd
+# define, None when they cannot be read), `git_external` (name -> bool, a `git-<name>` program is on the PATH) and
+# `cwd` (the cwd of the tool call). Without them nothing can be read: an unknown git subcommand is level B.
+RESOLVERS: dict = {}
+
+
+def _read_repo_git_aliases(cwd: "str | None") -> "dict[str, str] | None":
+    """The aliases git finds for a command run in `cwd` (lower-cased name -> value), or None when they cannot be
+    read: no reader registered (`RESOLVERS["git_aliases"]`, the hook's `read_git_aliases`), or it failed."""
+    reader = RESOLVERS.get("git_aliases")
+    return reader(cwd) if reader is not None else None
+
+
+def _git_external_exists(name: str) -> bool:
+    """A program `git-<name>` is on the PATH (git runs it as the subcommand `<name>`: `git lfs`)."""
+    exists = RESOLVERS.get("git_external")
+    return bool(exists(name)) if exists is not None else False
+
+
+_PLAIN_VERB = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]*")
+
+
+def _git_unknown_verb(word: str) -> bool:
+    """`word` is a plain subcommand name that git does not ship (so: an alias, or an external program). A word with
+    an expansion, a pattern or an escape is judged by the code that resolves it, not here."""
+    return _PLAIN_VERB.fullmatch(word) is not None and word not in _GIT_BUILTINS
+
+
+def _with_refmaps(tokens: list[str], words: list, s: int, specs: list[str]) -> "tuple[list[str], list] | None":
+    """The reading with the `remote.*.fetch` refspecs `specs` (they write local refs) given as `--refmap=<spec>` after
+    every `fetch` and `remote` subcommand it can have (`fetch`, `fetch --all`, `remote update`), where the
+    classifier already reads a refspec that writes a ref. None when it has none."""
+    ats = {s + 1 + v for v in _git_walk(tokens[s + 1:])[0] if tokens[s + 1 + v] in ("fetch", "remote")}
+    if not ats:
+        return None
+    extra = [f"--refmap={spec}" for spec in specs]
+    for at in sorted(ats, reverse=True):
+        if tokens[at + 1:at + 1 + len(extra)] == extra:
+            continue
+        tokens = tokens[:at + 1] + extra + tokens[at + 1:]
+        words = words[:at + 1] + [None] * len(extra) + words[at + 1:]
+    return tokens, words
+
+
+def _git_config_reads(rest: list[str]) -> bool:
+    """`git config` with the words `rest` only reads the configuration."""
+    if _short_in(rest, "l") or _long_in(rest, *_CONFIG_READ_LONG):
+        return True
+    if _short_in(rest, "e") or _long_in(rest, "edit", "unset", "unset-all", "add", "replace-all", "rename-section",
+                                        "remove-section"):
+        return False
+    pos = _positionals(rest, frozenset({"-f", "-t"}), ("file", "blob", "type", "default", "comment", "value", "url"))
+    if pos and pos[0] in ("set", "unset", "edit", "rename-section", "remove-section"):
+        return False
+    if pos and pos[0] in ("get", "list"):
+        return True
+    return len(pos) <= 1
+
+
+def _git_unknown_site(tokens: list[str], at: int) -> bool:
+    """The command at `tokens[at]` is `git` with a subcommand git does not ship (an alias, or a `git-<name>` program
+    that may write: `git lfs install`)."""
+    if _program_name(tokens[at]) != "git":
+        return False
+    args = tokens[at + 1:]
+    return any(_git_unknown_verb(args[v]) for v in _git_walk(args)[0])
+
+
+def _site_may_write(tokens: list[str], at: int) -> bool:
+    """The command at `tokens[at]` may change directory, write a file or write the configuration of git: anything
+    that is not a known reader (`_READ_ONLY_PROGRAMS`, a `find` that only searches, `git` with a reading subcommand,
+    an alias or `git-<name>` program, `git config` reading)."""
+    name = _program_name(tokens[at])
+    rest = tokens[at + 1:]
+    if name == "find":
+        return any(t in _FIND_WRITES for t in rest)
+    if name == "env":
+        return any(t.startswith(("-C", "--chdir")) for t in rest)
+    if name == "git":
+        args = tokens[at + 1:]
+        for v in _git_walk(args)[0]:
+            word = args[v]
+            if word == "config":
+                if not _git_config_reads(args[v + 1:]):
+                    return True
+            elif word in _GIT_BUILTINS and word not in _GIT_READ_VERBS:
+                return True
+        return False
+    return name not in _READ_ONLY_PROGRAMS
+
+
+def _script_moves(script, command: str) -> bool:
+    """The text may change directory or write a file before git runs: a command that is not a known reader
+    (`_site_may_write`: interpreters, scripts, archive tools, `cd`, `cp`, `tee`, `sed -i`, a `git config` write...), a
+    redirect to a file other than `/dev/null` and the descriptor copies, `--chdir`, `find -execdir`, or a name of a
+    configuration file of git. The repo the aliases are read in may not be the one git runs in, or may have changed.
+    The commands are those of the parsed text (a program name that is only an argument, `echo cp`, is not one)."""
+    if ".gitconfig" in command or ".git/config" in command:
+        return True
+    unknown_sites = 0  # git sites with a subcommand git does not ship: the second one follows a program that may write
+    for site in shell.iter_sites(script):
+        cmd = site.cmd
+        for r in cmd.redirects:
+            target = r.target.text if r.target is not None else None
+            if target is None or target in _NO_FILE_TARGETS:
+                continue
+            if r.op in _REDIRECT_WRITES or (r.op == ">&" and not (target.isdigit() or target == "-")):
+                return True
+        tokens = [w.text for w in cmd.words]
+        if any(t.startswith("--chdir") or t in ("-execdir", "-okdir") for t in tokens):
+            return True
+        for at in _token_readings(tokens).starts:
+            if at >= len(tokens):
+                continue
+            word = cmd.words[at] if at < len(cmd.words) else None
+            if word is not None and word.has_brace:  # `{git,c} -m x` runs `git c -m x`
+                expanded = _brace_words(word)
+                if not expanded:
+                    return True
+                if _site_may_write(tokens[:at] + expanded + tokens[at + 1:], at):
+                    return True
+            elif _site_may_write(tokens, at):
+                return True
+            if _git_unknown_site(tokens, at):
+                unknown_sites += 1
+                if unknown_sites > 1:
+                    return True
+    return False
+
+
+def _git_program_option(args: list[str]) -> bool:
+    """A command-line option moves git to other programs or templates: `--exec-path=<dir>` (the bare form prints the
+    path), `clone`/`init` with `--template=<dir>` (or `--template <dir>`)."""
+    verbs = _git_walk(args)[0]
+    lead = args[:min(verbs)] if verbs else args
+    if any(t.startswith("--exec-path=") and t[len("--exec-path="):] for t in lead):
+        return True
+    for v in verbs:
+        if args[v] not in ("clone", "init"):
+            continue
+        rest = args[v + 1:]
+        for k, tok in enumerate(rest):
+            if tok == "--":
+                break
+            if _is_long(tok, "template"):
+                value = tok.partition("=")[2] if "=" in tok else rest[k + 1] if k + 1 < len(rest) else ""
+                if value:
+                    return True
+    return False
+
+
+def _git_alias_variants(variants: list, cmd, env, repo=None, text_moved=None,
+                        in_fwd: bool = False) -> "tuple[list, list[str], set[str]]":
     """B2 item 6: `git -c alias.p=push p` runs `git push`. For every variant that reads a `git` with aliases of its
-    own: more variants with the alias name replaced by its value (an alias of an alias too, up to
-    _GIT_ALIAS_DEPTH), the shell code of the `!` aliases (the value, then the rest of the words), and whether an
-    alias could not be resolved or the chain goes on (level B)."""
+    own, or with a subcommand git does not ship (an alias of the configuration files of the repo, read through
+    `repo()`: `git c -m x`): more variants with the alias name replaced by its value (an alias of an alias too, up
+    to _GIT_ALIAS_DEPTH), the shell code of the `!` aliases (the value, then the rest of the words) and of the
+    configuration keys that run code (`-c core.pager=CODE`, `GIT_PAGER=CODE`), and the reasons of level B: an alias
+    that could not be resolved or a chain that goes on (`dynamic_code`), a key that names a program or a file, a
+    subcommand that is no alias and no `git-<name>` program, or whose alias cannot be read where git runs
+    (`git_unknown_subcommand`). `text_moved()`: the text may change directory before git runs; `in_fwd`: the words are
+    those of a forwarding function, where `ARG` stands for a parameter (the calls are classified with theirs)."""
     out = list(variants)
     code: list[str] = []
     seen: set = set()
-    unresolved = False
-    for tokens, words, readings in variants:
+    reasons: set[str] = set()
+    for index, (tokens, words, readings) in enumerate(variants):
         if not readings.complete:
             continue
         for s in readings.starts:
@@ -961,42 +1288,101 @@ def _git_alias_variants(variants: list, cmd, env) -> "tuple[list, list[str], boo
                 continue
             args = tokens[s + 1:]
             cmd_s, unreadable = _wrapper_assignments(cmd, tokens, words, s)  # `env VAR=v git`, `sudo VAR=v git` (V4)
-            if not (any(t == "-c" or t.startswith("--config-env") for t in args) or _has_git_config_names(cmd_s, env)):
-                unresolved = unresolved or (unreadable and any(t.startswith("GIT_CONFIG") for t in tokens[:s]))
-                continue
-            aliases, more = _git_aliases(cmd_s, args, env)
-            unresolved = unresolved or more or unreadable
-            if not aliases:
-                continue
+            pairs: list[tuple[str, str]] = []
+            if any(t == "-c" or t.startswith("--config-env") for t in args) or _has_git_config_names(cmd_s, env):
+                pairs, more = _git_config_pairs(cmd_s, args, env)
+                if more or unreadable:
+                    reasons.add("dynamic_code")
+            elif unreadable and any(t.startswith("GIT_CONFIG") for t in tokens[:s]):
+                reasons.add("dynamic_code")
+            aliases: dict[str, list[str]] = {}
+            others: list[tuple[str, str]] = []
+            for key, value in pairs:
+                if key.lower().startswith("alias."):
+                    aliases.setdefault(key[6:].lower(), []).append(value)
+                else:
+                    others.append((key, value))
+            run, unknown, specs = _config_effects(others, _env_is(cmd_s, env, "GIT_PROTOCOL_FROM_USER", "0"))
+            code.extend(run)
+            if unknown:
+                reasons.add("dynamic_code")
+            if specs:  # `remote.*.fetch` into local refs: the fetch writes them as `--refmap` would
+                injected = _with_refmaps(tokens, words, s, specs)
+                if injected is not None:
+                    entry = (injected[0], injected[1], _token_readings(injected[0]))
+                    if len(readings.starts) == 1:
+                        out[index] = entry  # the configuration applies to this command: it is this form
+                    else:
+                        out.append(entry)
+            if _git_program_option(args):
+                reasons.add("dynamic_code")
+            verbs_at = _git_walk(args)[0]
+            lead = args[:min(verbs_at)] if verbs_at else args  # the global options of git: before the subcommand
+            redirected = any(t in ("-C", "--bare") or t.startswith(("--git-dir", "--work-tree")) for t in lead) or any(
+                t in ("-C", "-D", "-execdir", "-okdir") or t.startswith("--chdir") for t in tokens[:s]) or any(
+                w.text.partition("=")[0] in _GIT_REDIRECT_VARS for w in cmd_s.assignments) or any(
+                n in _GIT_REDIRECT_VARS for n in env)
+            path_set = any(w.text.partition("=")[0] == "PATH" for w in cmd_s.assignments) or "PATH" in env
+            lookups: dict[str, list[str]] = {}
+
+            def resolve(word: str) -> "list[str]":
+                """The alias values of a subcommand git does not ship: the repo's, else none (a `git-<name>` program),
+                else level B."""
+                if word not in lookups:
+                    moved = redirected or (text_moved is not None and text_moved())
+                    known = repo() if repo is not None and not moved else None
+                    if known is not None and word.lower() in known:
+                        lookups[word] = [known[word.lower()]]
+                    else:
+                        lookups[word] = []
+                        # (a PATH of the text may put another `git-<name>` first: the one that exists here is not it)
+                        if path_set or not _git_external_exists(word):
+                            reasons.add("git_unknown_subcommand")
+                return lookups[word]
+
             frontier = [(tokens, words)]
             for _ in range(_GIT_ALIAS_DEPTH):
                 following = []
                 for toks, wds in frontier:
-                    for v in _git_walk(toks[s + 1:])[0]:
+                    walked = _git_walk(toks[s + 1:])[0]
+                    for v in walked:
                         at = s + 1 + v
-                        for value in aliases.get(toks[at].lower(), ()):
+                        values = aliases.get(toks[at].lower(), ())
+                        # (an option this does not know is read both ways; git itself refuses it, so only the
+                        # reading where it takes no value names a subcommand that can run)
+                        if not values and v == min(walked) and _git_unknown_verb(toks[at]) \
+                                and not (in_fwd and toks[at] == "ARG") \
+                                and not any(
+                                    toks[s + 1 + w] in _GIT_BUILTINS or toks[s + 1 + w].lower() in aliases
+                                    for w in walked):
+                            values = resolve(toks[at])
+                        for value in values:
                             if value.startswith("!"):
                                 code.append((value[1:] + " " + " ".join(_sh_quote(t) for t in toks[at + 1:])).strip())
                                 continue
                             pieces = _split_cmdline(value)
                             if pieces is None:  # a quote that does not close: git refuses it or reads it its own way
-                                unresolved = True
+                                reasons.add("dynamic_code")
                                 continue
                             new_tokens = toks[:at] + pieces + toks[at + 1:]
                             if not pieces or tuple(new_tokens) in seen:
                                 continue
                             seen.add(tuple(new_tokens))
                             if len(seen) > MAX_VALUE_CANDIDATES:
-                                return out, code, True
+                                return out, code, reasons | {"dynamic_code"}
                             new_words = wds[:at] + [None] * len(pieces) + wds[at + 1:]
+                            if specs:
+                                injected = _with_refmaps(new_tokens, new_words, s, specs)
+                                if injected is not None:
+                                    new_tokens, new_words = injected
                             out.append((new_tokens, new_words, _token_readings(new_tokens)))
                             following.append((new_tokens, new_words))
                 frontier = following
                 if not frontier:
                     break
             else:
-                unresolved = True  # an alias chain longer than the limit
-    return out, code, unresolved
+                reasons.add("dynamic_code")  # an alias chain longer than the limit
+    return out, code, reasons
 
 
 def _is_git_commit(tokens: list[str]) -> bool:
@@ -1118,6 +1504,13 @@ def _fetch_writes_a_ref(rest: list[str]) -> bool:
     return any(_refmap_dst(word) for word in _positionals(rest, long_values=("refmap",))[1:])
 
 
+def _remote_update_writes_a_ref(rest: list[str]) -> bool:
+    """`remote update` fetches: with the `--refmap` the classifier gives it for a `remote.*.fetch` that writes local
+    refs (`_with_refmaps`) it writes them."""
+    words = _positionals(rest, long_values=("refmap",))
+    return bool(words) and words[0] == "update" and _long_in(rest, "refmap")
+
+
 def _subtree_acts(rest: list[str]) -> bool:
     """Every `subtree` form with arguments may commit or move refs (`add`, `merge`, `pull`, `split`, `push`, with
     their options in any order): only the bare command and the help forms do not."""
@@ -1141,6 +1534,7 @@ _GIT_COMMIT_FORMS = {
     "switch": lambda rest: _short_in(rest, "C") or _long_in(rest, "force-create", exact=frozenset({"force"})),
     "worktree": _worktree_forces_branch,
     "fetch": _fetch_writes_a_ref,
+    "remote": _remote_update_writes_a_ref,
 }
 
 
@@ -1160,8 +1554,68 @@ def _creates_git_commits(tokens: list[str]) -> bool:
     return False
 
 
+_CONFIG_READ_LONG = ("get", "get-all", "get-regexp", "get-urlmatch", "list", "get-color", "get-colorbool")
+_CONFIG_SECTIONS = frozenset(
+    "alias include includeif core remote url credential diff merge filter pager sequence interactive gpg protocol "
+    "init submodule trailer uploadpack mergetool difftool browser man web hook sendemail imap guitool".split())
+
+
+def _git_config_writes_risky(tokens: list[str]) -> bool:
+    """`tokens` (a reading, from its head) is a `git config` that writes a risky key (`_risky_config_key`: an alias, a
+    key that runs a program, reads a file or redirects a remote or a ref), renames or removes a section of such keys,
+    or opens the file in an editor. Reads (`--get`, `--list`, `get`, one positional) and writes of other keys are
+    not. Every reading of the global options counts."""
+    args = _git_args(tokens)
+    if args is None:
+        return False
+    for i in _git_walk(args)[0]:
+        rest = args[i + 1:]
+        if args[i] in ("remote", "submodule"):  # a URL that runs a program (`ext::`) or reads a descriptor (`fd::`)
+            words = _positionals(rest)
+            verbs = ("set-url", "add") if args[i] == "remote" else ("set-url",)
+            if words and words[0] in verbs and any(w.lower().startswith(("ext::", "fd::")) for w in words[1:]):
+                return True
+            continue
+        if args[i] != "config":
+            continue
+        if _short_in(rest, "e") or _long_in(rest, "edit"):
+            return True
+        if _short_in(rest, "l") or _long_in(rest, *_CONFIG_READ_LONG):
+            continue
+        pos = _positionals(rest, frozenset({"-f", "-t"}), ("file", "blob", "type", "default", "comment", "value", "url"))
+        if not pos:
+            continue
+        if pos[0] == "edit":
+            return True
+        if pos[0] in ("get", "list"):
+            continue
+        sections = None
+        key = None
+        value = None  # None: no value is written (an unset)
+        if pos[0] in ("rename-section", "remove-section"):
+            sections = pos[1:]
+        elif _long_in(rest, "rename-section", "remove-section"):
+            sections = pos
+        elif pos[0] == "set":
+            key, value = (pos[1] if len(pos) > 1 else None), (pos[2] if len(pos) > 2 else "")
+        elif pos[0] == "unset":
+            key = pos[1] if len(pos) > 1 else None
+        elif _long_in(rest, "unset", "unset-all"):
+            key = pos[0]
+        elif _long_in(rest, "add", "replace-all") or len(pos) >= 2:
+            key, value = pos[0], (pos[1] if len(pos) > 1 else "")
+        if sections and any(name.partition(".")[0].lower() in _CONFIG_SECTIONS for name in sections):
+            return True
+        if key is not None and _risky_config_key(key):
+            if value is not None and _GIT_PROTOCOL_ALLOW.match(key.lower()) and value.strip().lower() in ("", "never"):
+                continue  # a protocol allow that only restricts
+            return True
+    return False
+
+
 _STDIN_FILE_FLAGS = {"git": [["-F", "-"], ["--file", "-"], ["--file=-"]], "gh": [["--body-file", "-"], ["-F", "-"], ["--body-file=-"]]}
-_GIT_CONFIG = re.compile(r"(?:^|\s)-c\s*\S*(?:alias|core)\.")  # -c alias.x=!cmd / core.pager=cmd run code
+_GIT_CONFIG = re.compile(  # -c alias.x=!cmd / core.pager=cmd / sequence.editor=cmd ... run code
+    r"(?:^|\s)(?:-c\s*|--config-env[=\s]\s*)\S*(?:" + "|".join(sorted(_CONFIG_SECTIONS | {"sequence"})) + r")\.")
 # `$(cat <<EOF ...)` is data only as the value of these options, right before the `$(` (and its `"`).
 # (the reading must also be a `git commit`, `_is_git_commit`: `commit` as the subcommand, not as an argument)
 _GIT_MESSAGE_VALUE = re.compile(r"^git\s.*(?:\s-[A-Za-z]*m|\s--message)(?:=|\s+)?\"?$")
@@ -2782,7 +3236,7 @@ def _code_text(text: str, categories: list[str], flags: list[str], reasons: set[
         flags.append("unclassified_command")
         reasons.add("nested_shell_depth")
         return
-    sub = analyze_command(text, _depth + 1, env, budget, code)
+    sub = analyze_command(text, _depth + 1, env, budget, code, _cwd=False)  # (the cwd of a nested text is not known)
     categories.extend(sub.categories)
     flags.extend(sub.flags)
     reasons.update(sub.uncertainty)
@@ -3808,10 +4262,15 @@ class _Run:
     each of them only adds to `categories`, `flags` and `reasons`."""
 
     __slots__ = ("command", "depth", "outer_env", "budget", "code", "script", "categories", "flags", "reasons",
-                 "has_dollar", "funcs", "forwarded", "raws", "_values", "_views", "_names", "fwd_spans", "in_fwd")
+                 "has_dollar", "funcs", "forwarded", "raws", "_values", "_views", "_names", "fwd_spans", "in_fwd",
+                 "cwd", "_repo_aliases", "_moved")
 
-    def __init__(self, command: str, depth: int, outer_env, budget, code: bool, script):
+    def __init__(self, command: str, depth: int, outer_env, budget, code: bool, script, cwd=None):
         self.command = command
+        # the cwd of the tool call (the hook registers it); None: the process's; False: a nested text (not known)
+        self.cwd = cwd if cwd is not None else RESOLVERS.get("cwd")
+        self._moved: list = []  # `cwd_moved`, computed when needed
+        self._repo_aliases: list = []  # the aliases of the repo (`_read_repo_git_aliases`), read once, when needed
         self.depth = depth
         self.outer_env = outer_env  # the values of the variables of the outer text (V3)
         self.budget = budget
@@ -3821,7 +4280,7 @@ class _Run:
         self.flags: list[str] = []
         self.reasons: set[str] = set()
         # no expansion in the text: no value to resolve, none to pass down (the `GIT_CONFIG_*` names are values too)
-        self.has_dollar = "$" in command or "GIT_CONFIG_" in command
+        self.has_dollar = "$" in command or any(h in command for h in _GIT_ENV_HINTS)
         self.funcs = _forwarding_functions(script, command) if self.has_dollar and (
             "function" in command or "()" in command.replace(" ", "")) else {}
         self.forwarded: set = set()
@@ -3839,6 +4298,21 @@ class _Run:
     def unclassified(self) -> None:
         self.categories.append("unclassified")
         self.flags.append("unclassified_command")
+
+    def repo_aliases(self) -> "dict[str, str] | None":
+        """The aliases the configuration of the repo at the cwd defines (read once), or None when they cannot be
+        read (a nested text has no known cwd)."""
+        if self.cwd is False:
+            return None
+        if not self._repo_aliases:
+            self._repo_aliases.append(_read_repo_git_aliases(self.cwd))
+        return self._repo_aliases[0]
+
+    def cwd_moved(self) -> bool:
+        """The directory git runs in may not be the cwd of the call: a nested text, or the text changes directory."""
+        if not self._moved:
+            self._moved.append(self.cwd is False or _script_moves(self.script, self.command))
+        return self._moved[0]
 
     def functions(self) -> frozenset:
         if not self._names:
@@ -3969,9 +4443,10 @@ class _Run:
         if args_unresolved:
             self.block("dynamic_code")
         # item 6: `git -c alias.p=push p` and the `GIT_CONFIG_*` variables: the alias as the command it is
-        arg_variants, alias_code, alias_unresolved = _git_alias_variants(arg_variants, cmd, env)
-        if alias_unresolved:
-            self.block("dynamic_code")
+        arg_variants, alias_code, alias_reasons = _git_alias_variants(
+            arg_variants, cmd, env, self.repo_aliases, self.cwd_moved, self.in_fwd)
+        for reason in sorted(alias_reasons):
+            self.block(reason)
         for code in alias_code:
             self.code_text(code, env if "$" in code else None)
         for a_tokens, a_words, a_readings in arg_variants:
@@ -4083,7 +4558,8 @@ class _Run:
         return Analysis(sorted(set(self.categories)) or ["other"], sorted(set(self.flags)), sorted(self.reasons))
 
 
-def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _code: bool = False) -> Analysis:
+def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _code: bool = False,
+                    cwd: "str | None" = None, _cwd=None) -> Analysis:
     """Classify a Bash command: categories, flags and the reasons of any parser uncertainty (spec
     audit-hook-hardening, section 3; audit-shell-lexer, section 4.1). The command is read by the shell parser, and
     every simple command of the tree is classified by its readings. Uncertainty never becomes an allow:
@@ -4108,7 +4584,7 @@ def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _cod
         return _level_b("analysis_budget")
     except shell.ShellError:  # does not close, or is outside the subset: never read as a guess (S3)
         return _level_b("lex_error")
-    run = _Run(command, _depth, _env, budget, _code, script)
+    run = _Run(command, _depth, _env, budget, _code, script, cwd if _cwd is None else _cwd)
     items = []
     for site in shell.iter_sites(script):
         tokens = [w.text for w in site.cmd.words]
@@ -4165,6 +4641,8 @@ def _classify_segment(tokens: list[str], seg: str, categories: list[str], flags:
         if pushes:
             categories.append("git-push")
             flags.append("git_push")
+        if _git_config_writes_risky(tokens[start:]):
+            flags.append("git_config_exec")
         if not committing and not pushes:
             categories.append("git-other")
     elif seg == "mise" or seg.startswith("mise "):

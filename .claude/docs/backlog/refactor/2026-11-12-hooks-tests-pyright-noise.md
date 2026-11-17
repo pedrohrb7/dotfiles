@@ -30,3 +30,9 @@ Not recorded.
 ## Out of scope
 
 Not recorded.
+
+## Seen again (2026-11-16)
+
+Source: agent run: fix of audit-git-config-keys-run-commands, out_of_scope_issues.
+
+20 pre-existing pyright errors in the hook modules `.claude/hooks/agent-audit.py` and `agent_audit_classify.py` (Optional access, ModuleSpec None, Final reassignment, socketpair on None, Never iterable). This is the baseline the fix was checked against (unchanged at 20). The scope of this entry now includes the hook modules (it already covered `_assess_root` in `agent-audit.py`).

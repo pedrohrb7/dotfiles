@@ -9,6 +9,7 @@
     "visual_tool": "block",
     "git_commit": "ask",
     "git_push": "ask",
+    "git_config_exec": "ask",
     "out_of_scope_write": "warn",
     "suite_by_non_runner": "warn",
     "md_outside_docs": "warn",

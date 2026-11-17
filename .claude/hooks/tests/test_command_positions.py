@@ -1417,6 +1417,180 @@ class ReviewFixB2(unittest.TestCase):
                 result = self.assertNotBlocked(command)
                 self.assertEqual(result.flags, [], command)
 
+    # -- 6b. git configuration keys and variables that run a program (bug audit-git-config-keys-run-commands) --
+
+    SHELL_KEYS = (
+        "core.pager", "pager.log", "core.editor", "sequence.editor", "core.sshCommand", "core.fsmonitor",
+        "diff.external", "diff.x.command", "diff.x.textconv", "merge.x.driver", "mergetool.x.cmd",
+        "difftool.x.cmd", "filter.x.clean", "filter.x.smudge", "filter.x.process", "interactive.diffFilter",
+        "core.gitProxy", "remote.origin.uploadpack", "remote.origin.receivepack", "trailer.x.cmd",
+    )
+
+    def test_a_shell_code_key_set_on_the_command_line_is_read_as_code(self):
+        for key in self.SHELL_KEYS:
+            for command in (f"git -c {key}='{UP}' log", f"git -c {key}=\"{UP}\" status",
+                            f"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0={key} GIT_CONFIG_VALUE_0='{UP}' git log",
+                            f"V='{UP}' git --config-env={key}=V log",
+                            f"GIT_CONFIG_PARAMETERS=\"'{key}={UP}'\" git log"):
+                with self.subTest(command=command):
+                    self.assertIn(LIFECYCLE, analyze(command).flags)
+
+    def test_a_shell_code_value_is_classified_like_the_command_it_holds(self):
+        for command, flag in (("git -c core.pager='git push' log", PUSH),
+                              ("git -c core.sshCommand='git commit -m x' fetch", COMMIT),
+                              (f"git -c sequence.editor='{UP}' rebase -i main", LIFECYCLE)):
+            with self.subTest(command=command):
+                self.assertIn(flag, analyze(command).flags)
+
+    def test_a_helper_and_an_update_key_are_code_only_when_the_value_starts_with_a_bang(self):
+        for command in (f"git -c credential.helper='!{UP}' fetch", f"git -c credential.https://h.example.helper='!{UP}' fetch",
+                        f"git -c submodule.m.update='!{UP}' submodule update"):
+            with self.subTest(command=command):
+                self.assertIn(LIFECYCLE, analyze(command).flags)
+
+    def test_a_harmless_value_of_a_shell_code_key_is_allowed(self):
+        for command in ("git -c core.pager=cat log", "git -c core.editor=true commit --amend", "git -c core.pager='less -R' log",
+                        "git -c sequence.editor=true rebase -i main", "git -c core.sshCommand='ssh -i k' fetch",
+                        "git -c diff.external=difft diff", "git -c credential.helper=cache fetch",
+                        "git -c core.fsmonitor=false status", "git -c core.pager= log"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertNotIn(LIFECYCLE, result.flags, command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+
+    def test_an_environment_variable_that_runs_shell_code_is_read_as_code(self):
+        for var in ("GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_SSH_COMMAND", "GIT_EXTERNAL_DIFF"):
+            for command in (f"{var}='{UP}' git log", f"env {var}='{UP}' git log", f"export {var}='{UP}'; git log",
+                            f"{var}='{UP}'; export {var}; git log", f"sudo env {var}='{UP}' git log"):
+                with self.subTest(command=command):
+                    self.assertIn(LIFECYCLE, analyze(command).flags)
+
+    def test_a_harmless_environment_variable_value_is_allowed(self):
+        for command in ("GIT_PAGER=cat git log", "GIT_EDITOR=true git commit --amend", "GIT_SSH_COMMAND='ssh -i k' git fetch",
+                        "env GIT_PAGER=cat git log", "export GIT_EDITOR=vim; git log"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertNotIn(LIFECYCLE, result.flags, command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+
+    def test_a_program_or_file_key_is_level_b_unless_its_value_is_empty(self):
+        for command in ("git -c core.hooksPath=/tmp/h status", "git -c include.path=/tmp/x status",
+                        "git -c includeIf.gitdir:/a/.path=/tmp/x status", "git -c url.x.insteadOf=y fetch",
+                        "git -c remote.origin.url=/tmp/r fetch origin", "git -c remote.origin.pushurl=/tmp/r status",
+                        "git -c gpg.program=/tmp/g log", "git -c gpg.ssh.program=/tmp/g log", "git -c core.askPass=/tmp/a fetch",
+                        "git -c credential.helper=/tmp/h fetch", "git -c init.templateDir=/tmp/t status",
+                        "git -c protocol.ext.allow=always fetch",
+                        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path GIT_CONFIG_VALUE_0=/tmp/x git status",
+                        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp/h git status",
+                        "V=/tmp/x git --config-env=include.path=V status",
+                        "GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/tmp/h'\" git status",
+                        "GIT_CONFIG_GLOBAL=/tmp/x git status", "GIT_CONFIG_SYSTEM=/tmp/x git status",
+                        "env GIT_CONFIG_GLOBAL=/tmp/x git status", "export GIT_CONFIG_GLOBAL=/tmp/x; git status",
+                        "GIT_ASKPASS=/tmp/a git fetch", "GIT_PROXY_COMMAND=/tmp/p git fetch",
+                        "env GIT_ASKPASS=/tmp/a git fetch", "export GIT_PROXY_COMMAND=/tmp/p; git fetch"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_an_empty_program_or_file_value_is_allowed(self):
+        for command in ("git -c core.hooksPath= status", "git -c include.path= status", "git -c credential.helper= fetch",
+                        "GIT_ASKPASS= git fetch", "GIT_CONFIG_GLOBAL= git status", "git -c user.name=x -c core.autocrlf=false status"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_a_dynamic_value_of_a_risky_key_stays_dynamic(self):
+        for command in ("git -c core.pager=$P log", "git -c core.hooksPath=$H status", "GIT_PAGER=$P git log",
+                        "GIT_ASKPASS=$A git fetch"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_fetch_refspec_given_as_configuration_that_writes_outside_the_remote_refs_is_a_commit(self):
+        for command in ("git -c remote.origin.fetch=+refs/heads/*:refs/heads/* fetch origin",
+                        "git -c remote.origin.fetch=refs/heads/main:refs/heads/main fetch origin",
+                        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.fetch GIT_CONFIG_VALUE_0=+refs/heads/*:refs/heads/* git fetch origin"):
+            with self.subTest(command=command):
+                self.assertIn(COMMIT, analyze(command).flags)
+        for command in ("git -c remote.origin.fetch=+refs/heads/*:refs/remotes/origin/* fetch origin",
+                        "git -c user.name=x fetch origin"):
+            with self.subTest(command=command):
+                self.assertNotIn(COMMIT, analyze(command).flags)
+
+    # -- 6c. round 2 of audit-git-config-keys-run-commands: more keys, variables and forms --
+
+    def test_a_credential_helper_without_a_bang_is_the_program_git_credential_name(self):
+        for command, flag in ((f"git -c credential.helper='store; {UP}' fetch", LIFECYCLE),
+                              ("git -c credential.helper='x; git commit -m y' fetch", COMMIT),
+                              (f"git -c credential.https://h.example.helper='store; {UP}' fetch", LIFECYCLE)):
+            with self.subTest(command=command):
+                self.assertIn(flag, analyze(command).flags)
+        for command in ("git -c credential.helper=store fetch", "git -c credential.helper=cache fetch",
+                        "git -c credential.helper= fetch", "git -c credential.helper='cache --timeout=300' fetch"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+                self.assertNotIn(LIFECYCLE, result.flags, command)
+
+    def test_the_protocol_allow_list_is_level_b_unless_it_restricts(self):
+        for command in ("git -c protocol.allow=always fetch x", "git -c protocol.ext.allow=always fetch x",
+                        "git -c protocol.ext.allow=user fetch x", "git -c protocol.allow=user fetch x",
+                        "GIT_ALLOW_PROTOCOL=ext git fetch x", "env GIT_ALLOW_PROTOCOL=ext git fetch x"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+        for command in ("git -c protocol.allow=never fetch x",
+                        "GIT_PROTOCOL_FROM_USER=0 git -c protocol.ext.allow=user fetch x",
+                        "git -c protocol.allow= fetch x", "git -c protocol.file.allow=never fetch x"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_hook_configuration_commands_are_code(self):
+        self.assertIn(LIFECYCLE, analyze(
+            f"git -c hook.x.event=post-checkout -c hook.x.command='{UP}' checkout main").flags)
+
+    def test_more_shell_code_keys_are_code(self):
+        for key, tail in (("trailer.t.command", "commit --trailer t=1"), ("gpg.ssh.defaultKeyCommand", "tag -s v1"),
+                          ("core.alternateRefsCommand", "fetch"), ("sendemail.sendmailCmd", "send-email x"),
+                          ("sendemail.toCmd", "send-email x"), ("sendemail.ccCmd", "send-email x"),
+                          ("sendemail.headerCmd", "send-email x"), ("imap.tunnel", "imap-send"),
+                          ("guitool.t.cmd", "status")):
+            command = f"git -c {key}='{UP}' {tail}"
+            with self.subTest(command=command):
+                self.assertIn(LIFECYCLE, analyze(command).flags)
+
+    def test_more_program_keys_are_level_b_unless_empty(self):
+        for command in ("git -c sendemail.smtpServer=/x/y send-email x", "git -c remote.origin.vcs=x fetch"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+        for command in ("git -c sendemail.smtpServer= send-email x", "git -c remote.origin.vcs= fetch"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_an_editor_pager_or_lessopen_variable_is_code(self):
+        for var in ("EDITOR", "VISUAL", "PAGER"):
+            command = f"{var}='{UP}' git tag -a v1"
+            with self.subTest(command=command):
+                self.assertIn(LIFECYCLE, analyze(command).flags)
+        command = f"LESSOPEN='|{UP} %s' git log"
+        with self.subTest(command=command):
+            self.assertIn(LIFECYCLE, analyze(command).flags)
+        for command in ("EDITOR=true git tag -a v1", "EDITOR=vim git tag -a v1", "PAGER=cat git log", "git --exec-path"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertNotIn(LIFECYCLE, result.flags, command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+
+    def test_a_variable_or_option_that_moves_git_to_another_program_or_config_is_level_b(self):
+        for command in ("GIT_SSH=/tmp/e git fetch", "GIT_EXEC_PATH=/tmp/e git fetch", "git --exec-path=/tmp/e fetch",
+                        "GIT_TEMPLATE_DIR=/tmp/t git clone a b", "git clone --template=/tmp/t a b",
+                        "HOME=/tmp/h git status", "XDG_CONFIG_HOME=/tmp/h git status"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_remote_fetch_refspec_reached_by_other_subcommands_is_a_commit(self):
+        for command in ("git -c remote.origin.fetch=+refs/heads/*:refs/heads/* remote update",
+                        "git -c remote.origin.fetch=+refs/heads/*:refs/heads/* fetch --all",
+                        "git -c remote.origin.fetch=+refs/heads/*:refs/heads/* -c alias.f=fetch f origin"):
+            with self.subTest(command=command):
+                self.assertIn(COMMIT, analyze(command).flags)
+
     def test_the_git_walk_finds_the_subcommand_and_the_configuration(self):
         verbs, configs = classifier._git_walk(["-c", "alias.p=push", "--config-env=alias.q=V", "-C", "d", "p"])
         self.assertEqual(verbs, [5])

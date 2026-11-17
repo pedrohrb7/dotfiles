@@ -50,8 +50,9 @@ class ConfigContract(unittest.TestCase):
                          "command_too_long", "analysis_timeout", "unclassified_command"):
             with self.subTest(category=category):
                 self.assertEqual(categories[category], "block")
-        for category in ("git_commit", "git_push"):
+        for category in ("git_commit", "git_push", "git_config_exec"):
             with self.subTest(category=category):
+                self.assertIn(category, categories)
                 self.assertGreaterEqual(audit.SEVERITY[categories[category]], audit.SEVERITY["ask"])
 
     def test_f3_categories_why_and_labels_have_the_same_keys(self):

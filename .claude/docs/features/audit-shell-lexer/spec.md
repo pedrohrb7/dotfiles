@@ -1394,3 +1394,19 @@ Lacunas que o log registra como não modeladas ou fora do escopo desta rodada. V
 **Não muda:** os níveis A e B, o conjunto de motivos (U1-U4), a classificação sem pipe e `agent-audit.json`.
 
 **Testes:** `test_command_positions.py` e `test_shell_lexer.py`. A suite tem 846 tests.
+
+
+## Adendo 2026-11-16 (3) - chaves de configuração do git que executam comandos e subcomandos desconhecidos
+
+**Motivo.** Bug `2026-11-14-audit-git-config-keys-run-commands` (backlog). Chaves como `core.pager`, `core.sshCommand`, `core.fsmonitor`, `credential.helper` e `diff.external`, dadas por `-c`, `--config-env`, `GIT_CONFIG_*`, variáveis de ambiente ou gravadas por `git config`, executam um programa, e um subcomando desconhecido pode ser um alias do repositório ou um `git-<nome>` no PATH; nada disso era lido. Decisões do usuário (2026-11-16).
+
+**Regra nova** (`agent_audit_classify.py`: `_GIT_CODE_KEYS`, `_GIT_PROGRAM_KEYS`, `_CONFIG_SECTIONS`, tabelas de variáveis de ambiente, `_git_config_writes_risky`, `_GIT_BUILTINS`, `RESOLVERS`, `_git_unknown_site`, `_script_moves` com `_READ_ONLY_PROGRAMS` e `_GIT_READ_VERBS`; `agent-audit.py`: `read_git_aliases`, `git_external_exists`, `_classify_in`, `GIT_ALIASES_MAX_BYTES`; `agent-audit.json`: `git_config_exec: ask`):
+
+- **Categoria `git_config_exec` (`ask`).** Escrita de `git config`, e `git remote add|set-url` e `git submodule set-url` com URL `ext::` ou `fd::`, de chave arriscada: `alias.*`, chaves cujo valor executa um programa, chaves de programa ou arquivo, `include*`, refspecs de `remote`/`url`, `protocol.*allow`, `hook.*` e `submodule.*.update`. Escritas inofensivas e leituras seguem limpas.
+- **Chaves por `-c`, `--config-env` e `GIT_CONFIG_*`.** Valor que é código de shell é lido como código (`-c core.pager=cat` passa; `-c core.pager='docker compose up'` é bloqueado). Chaves de programa ou arquivo (`core.hooksPath`, `include.path`, `url.*.insteadOf`, `gpg.program`, `protocol.*allow` exceto `never` ou vazio, ...) são nível B, salvo valor vazio. `remote.*.fetch` para refs locais em `fetch`, `remote update` e aliases de `fetch` é `git_commit`.
+- **Variáveis de ambiente.** Lidas como código: `GIT_PAGER`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `GIT_SSH_COMMAND`, `GIT_EXTERNAL_DIFF`, `EDITOR`, `VISUAL`, `PAGER`, `LESSOPEN`, `LESSCLOSE`. Nível B salvo valor vazio: `GIT_ASKPASS`, `GIT_PROXY_COMMAND`, `GIT_SSH`, `GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`, `GIT_ALLOW_PROTOCOL`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `HOME`, `XDG_CONFIG_HOME`, `--exec-path=` e `--template`.
+- **Subcomando desconhecido**, nesta ordem: lista de builtins (`_GIT_BUILTINS`, nunca faz fork); alias do texto; leitura, na hora do hook, dos aliases do repositório (`git config --get-regexp ^alias\.` no cwd do payload, timeout de 2 s, teto de 1 MiB, ambiente da sessão sem variáveis de programa e de trace, `None` quando a sessão define `GIT_DIR`, `GIT_WORK_TREE` ou `GIT_COMMON_DIR`); programa `git-<nome>` no PATH (não quando o texto atribui `PATH`); senão nível B `unclassified_command`, motivo `git_unknown_subcommand`.
+- **Confiança na leitura do repositório.** Só vale quando todo outro comando do texto é leitor conhecido (lista `_READ_ONLY_PROGRAMS`, `_GIT_READ_VERBS`) e no máximo um ponto de git tem verbo fora dos builtins. `-C`, `--git-dir`, `--work-tree`, `--bare`, `env -C`, `sudo -D`, redirecionamentos de arquivo (exceto `/dev/null` e duplicação de fd), escrita de `git config` e menção a `.git/config` ou `.gitconfig` tornam a leitura não confiável.
+- **Efeitos aceitos:** `HOME=/x git status` é bloqueado (como `GIT_CONFIG_GLOBAL`); `git lfs` é bloqueado em máquina sem git-lfs; `GIT_EXEC_DIRS` é fixo (caminhos do Void Linux); a edição direta de `.git/config` por escrita de arquivo fica fora do classificador.
+
+**Testes:** `test_classify.py`, `test_command_positions.py`, `test_config_contract.py`, `test_hook_main.py` e `test_uncertainty.py`. A suite tem 911 tests.

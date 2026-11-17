@@ -457,6 +457,120 @@ TIMEOUT_ROUND2 = [
 ]
 
 
+class GitConfigWrites(unittest.TestCase):
+    """Bug audit-git-config-keys-run-commands: a `git config` write of a key that runs code, pulls a file or
+    redirects a remote or a ref is `git_config_exec`; harmless writes and every read stay without it."""
+
+    FLAG = "git_config_exec"
+    RISKY_KEYS = (
+        "alias.c", "alias.p", "core.pager", "pager.log", "core.editor", "sequence.editor", "core.sshCommand",
+        "core.fsmonitor", "credential.helper", "diff.external", "diff.x.textconv", "merge.x.driver",
+        "filter.x.clean", "interactive.diffFilter", "core.gitProxy", "remote.origin.uploadpack", "trailer.x.cmd",
+        "core.hooksPath", "gpg.program", "core.askPass", "init.templateDir", "include.path", "includeIf.gitdir:/a/.path",
+        "remote.origin.fetch", "remote.origin.url", "remote.origin.pushurl", "remote.origin.push",
+        "url.x.insteadOf", "url.x.pushInsteadOf", "protocol.ext.allow", "submodule.m.update",
+    )
+
+    def flags(self, command):
+        return classifier.analyze_command(command).flags
+
+    def test_a_write_of_a_risky_key_is_git_config_exec(self):
+        for key in self.RISKY_KEYS:
+            for command in (f"git config {key} v", f"git config --global {key} v", f"git config --local {key} v",
+                            f"git config --system {key} v", f"git config --worktree {key} v",
+                            f"git config -f /tmp/f {key} v", f"git config --file /tmp/f {key} v",
+                            f"git config --add {key} v", f"git config --replace-all {key} v",
+                            f"git config --unset {key}", f"git config --unset-all {key}",
+                            f"git config set {key} v", f"git config unset {key}",
+                            f"git -C d config {key} v", f"sudo git config {key} v"):
+                with self.subTest(command=command):
+                    self.assertIn(self.FLAG, self.flags(command))
+
+    def test_editing_the_config_file_is_git_config_exec(self):
+        for command in ("git config -e", "git config --edit", "git config --global -e", "git config --global --edit",
+                        "git config --system --edit", "git config -f /tmp/f --edit", "git config --worktree -e"):
+            with self.subTest(command=command):
+                self.assertIn(self.FLAG, self.flags(command))
+
+    def test_the_alias_that_hides_a_commit_is_asked_when_it_is_written(self):
+        self.assertIn(self.FLAG, self.flags("git config alias.c commit"))
+
+    def test_a_harmless_write_is_not_git_config_exec(self):
+        for command in ("git config user.name x", "git config --global user.email a@b.c", "git config core.autocrlf false",
+                        "git config --local color.ui auto", "git config --unset user.name", "git config set user.name x",
+                        "git config --add safe.directory /x", "git config pull.rebase true", "git config core.editorconfig x"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+    def test_a_read_is_not_git_config_exec(self):
+        for command in ("git config --get alias.c", "git config alias.c", "git config user.name", "git config -l",
+                        "git config --list", "git config --global --list", "git config --get-all remote.origin.url",
+                        "git config --get-regexp alias", "git config --global core.pager", "git config get alias.c",
+                        "git config list", "git config --show-origin --get include.path", "git config remote.origin.url",
+                        "git config --global --get core.hooksPath", "git config --list --show-origin"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+    def test_git_that_is_not_config_is_not_git_config_exec(self):
+        for command in ("git log --grep alias.c", "git status", "echo git config alias.c commit", "git commit -m 'config alias.c x'"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+    def test_a_remote_fetch_refspec_that_writes_local_branches_is_a_commit(self):
+        for command in ("git -c remote.origin.fetch=+refs/heads/*:refs/heads/* fetch origin",
+                        "git -c remote.origin.fetch=+refs/heads/*:refs/heads/* fetch"):
+            with self.subTest(command=command):
+                self.assertEqual(classify(command), (["git-commit"], ["git_commit"]))
+        for command in ("git -c remote.origin.fetch=+refs/heads/*:refs/remotes/origin/* fetch origin",):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+
+class GitConfigWritesRound2(unittest.TestCase):
+    """Round 2 of audit-git-config-keys-run-commands: more keys, the `set --value` form and remote URLs."""
+
+    FLAG = "git_config_exec"
+
+    def flags(self, command):
+        return classifier.analyze_command(command).flags
+
+    def test_a_write_of_the_added_keys_is_git_config_exec(self):
+        for key in ("protocol.allow", "protocol.ext.allow", "hook.x.command", "hook.x.event", "trailer.t.command",
+                    "gpg.ssh.defaultKeyCommand", "core.alternateRefsCommand", "sendemail.sendmailCmd",
+                    "sendemail.toCmd", "sendemail.ccCmd", "sendemail.headerCmd", "imap.tunnel", "guitool.t.cmd",
+                    "sendemail.smtpServer", "remote.origin.vcs"):
+            for command in (f"git config {key} x", f"git config --global {key} x"):
+                with self.subTest(command=command):
+                    self.assertIn(self.FLAG, self.flags(command))
+        self.assertIn(self.FLAG, self.flags("git config protocol.allow always"))
+
+    def test_a_protocol_allow_write_is_git_config_exec_unless_it_is_never_or_empty(self):
+        for command in ("git config protocol.allow user", "git config protocol.ext.allow user",
+                        "git config protocol.allow always"):
+            with self.subTest(command=command):
+                self.assertIn(self.FLAG, self.flags(command))
+        for command in ("git config protocol.allow never", "git config protocol.file.allow never"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+    def test_the_set_form_with_an_option_before_the_key_is_git_config_exec(self):
+        self.assertIn(self.FLAG, self.flags("git config set --value foo alias.c commit"))
+
+    def test_a_read_with_a_url_option_stays_clean(self):
+        for command in ("git config --url https://x --get-urlmatch http.proxy", "git config --get-urlmatch http.proxy https://x"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+    def test_a_remote_url_that_runs_a_program_is_git_config_exec(self):
+        for command in ("git remote add o 'ext::sh -c x'", "git remote set-url o 'fd::3'",
+                        "git submodule set-url s 'ext::x'"):
+            with self.subTest(command=command):
+                self.assertIn(self.FLAG, self.flags(command))
+        for command in ("git remote add o https://github.com/a/b", "git remote set-url o git@github.com:a/b.git"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+
 class LuaCommands(unittest.TestCase):
     """Spec lua-agent, Testing, cases L1-L25: Lua test runners, linters, mise tasks and prefixes."""
 
