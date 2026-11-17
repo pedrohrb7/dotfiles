@@ -1410,3 +1410,16 @@ Lacunas que o log registra como não modeladas ou fora do escopo desta rodada. V
 - **Efeitos aceitos:** `HOME=/x git status` é bloqueado (como `GIT_CONFIG_GLOBAL`); `git lfs` é bloqueado em máquina sem git-lfs; `GIT_EXEC_DIRS` é fixo (caminhos do Void Linux); a edição direta de `.git/config` por escrita de arquivo fica fora do classificador.
 
 **Testes:** `test_classify.py`, `test_command_positions.py`, `test_config_contract.py`, `test_hook_main.py` e `test_uncertainty.py`. A suite tem 911 tests.
+
+## Adendo 2026-11-16 (4) - opções de subcomandos git que executam código shell
+
+**Motivo.** Bug `2026-11-16-audit-git-subcommands-run-shell-code` (backlog). Várias opções de subcomandos git executam um comando como `git rebase -x` faz, e nenhuma era lida. Decisões do usuário (2026-11-16).
+
+**Regra nova** (`agent_audit_classify.py`: `_GIT_CODE_OPTIONS`, `_git_exec_code`, `_is_getopt`, `_ends_options`, `_ext_url_code`, `_ext_codes`, `_git_program_option`, `_git_strategies`, `_git_clone_config`, o caso `git` de `_prefix_steps`):
+
+- **Lidas como código:** `filter-branch` `--*-filter` e `--setup`; `bisect run <cmd...>` (início do comando); `submodule [--helper] foreach <cmd>` (a primeira palavra é o código, o resto são seus argumentos); `difftool -x`/`--extcmd`; `clone -u`/`--upload-pack`, `fetch`/`pull`/`fetch-pack` `--upload-pack`, `ls-remote` `--upload-pack`/`--exec`, `push`/`send-pack` `--receive-pack`/`--exec`, `archive --exec`; `send-email` `--to-cmd`, `--cc-cmd`, `--header-cmd`, `--sendmail-cmd` (grafias do Perl Getopt::Long); `grep -O`/`--open-files-in-pager` (valor anexado).
+- **URLs `ext::`** em clone, fetch, pull, push, ls-remote, `submodule add`, `archive --remote`, `push --repo`, fetch-pack e send-pack: o código é o texto da URL, com `% ` e `%%` sem escape e `%G`/`%V` descartados. `clone -c`/`--config` passa os pares pelas regras de configuração.
+- **Nível B (`dynamic_code`):** `instaweb -b/-d/-m` e config `instaweb.*`; `send-email --smtp-server` com `/`, `~` ou expansão; estratégias de merge personalizadas (`merge`/`pull`/`rebase` `-s`, `cherry-pick`/`revert` `--strategy`, `pull.twohead`, `pull.octopus`); `daemon --access-hook`; `merge-index`.
+- **Aliases:** as opções de programa valem também através de aliases. Um `--` logo depois de uma opção escrita sem `=` é lido como o valor dela (falha fechada). `send-pack` conta como `git_push`. `mergetool`/`difftool --tool-cmd` não existem e não são modelados.
+
+**Testes:** `test_classify.py` e `test_command_positions.py`. A suite tem 951 tests.

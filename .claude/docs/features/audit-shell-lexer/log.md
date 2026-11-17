@@ -156,3 +156,13 @@ Bug `2026-11-14-audit-git-config-keys-run-commands` (backlog). Keys such as `cor
 **Files:** `.claude/hooks/agent_audit_classify.py`, `.claude/hooks/agent-audit.py` (`read_git_aliases`, `git_external_exists`, `_classify_in`, `GIT_ALIASES_MAX_BYTES`), `.claude/hooks/agent-audit.json` (`git_config_exec: ask`), `.claude/hooks/agent-metrics.py`; tests in `test_classify.py`, `test_command_positions.py`, `test_config_contract.py`, `test_hook_main.py`, `test_uncertainty.py`.
 
 **Gate:** the suite now has 911 tests (about 11-12 s). Spec: see "Adendo 2026-11-16 (3)".
+
+## Addendum 2026-11-16 (4) - git subcommand options that run shell code
+
+Bug `2026-11-16-audit-git-subcommands-run-shell-code` (backlog). Options of git subcommands that run a command (like `git rebase -x`) were not read.
+
+**User decisions (2026-11-16):** read as code: `filter-branch` `--*-filter`/`--setup`, `bisect run`, `submodule [--helper] foreach`, `difftool -x`/`--extcmd`, `--upload-pack`/`--receive-pack`/`--exec` of clone, fetch, pull, fetch-pack, ls-remote, push, send-pack and archive, `send-email` `--to-cmd/--cc-cmd/--header-cmd/--sendmail-cmd` (Perl Getopt::Long spellings), `grep -O`/`--open-files-in-pager`, `ext::` URLs (`% `/`%%` unescaped, `%G`/`%V` dropped), `clone -c/--config` through the config rules. Level B `dynamic_code`: `instaweb` `-b/-d/-m` and `instaweb.*`, `send-email --smtp-server` with `/`, `~` or an expansion, custom merge strategies, `pull.twohead`/`pull.octopus`, `daemon --access-hook`, `merge-index`. Program options apply through aliases; a `--` right after an option written without `=` is its value (fail closed); `send-pack` counts as `git_push`; `mergetool/difftool --tool-cmd` do not exist.
+
+**Files:** `.claude/hooks/agent_audit_classify.py` (`_GIT_CODE_OPTIONS`, `_git_exec_code`, `_is_getopt`, `_ends_options`, `_ext_url_code`, `_ext_codes`, `_git_program_option`, `_git_strategies`, `_git_clone_config`, `git` case of `_prefix_steps`); tests in `test_classify.py`, `test_command_positions.py`.
+
+**Gate:** the suite now has 951 tests (about 11-12 s idle; 15-18 s under load). Spec: see "Adendo 2026-11-16 (4)".

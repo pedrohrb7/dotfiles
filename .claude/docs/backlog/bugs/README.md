@@ -38,4 +38,9 @@ Confirmed bugs that need fixing, one file per bug.
 | [agent-audit: a group or subshell with a process-substitution stdin is not flagged](2026-11-16-audit-group-procsub-stdin-not-flagged.md) | high | Open |
 | [agent-audit: plain pipe readers other than a shell are not flagged as piped_shell](2026-11-16-audit-pipe-readers-not-piped-shell.md) | medium | Open |
 | [agent-audit: operand-path stdin aliases are matched exactly](2026-11-16-audit-operand-stdin-alias-exact-match.md) | medium | Open |
-| [agent-audit: git subcommands that run shell code are not read as code](2026-11-16-audit-git-subcommands-run-shell-code.md) | high | Open |
+| [agent-audit: git subcommands that run shell code are not read as code](2026-11-16-audit-git-subcommands-run-shell-code.md) | high | Fixed |
+| [agent-audit: repo-alias trust allowlist includes programs that write files or run programs](2026-11-16-audit-repo-alias-allowlist-writes-and-runs.md) | high | Open |
+| [agent-audit: git config keys gc.recentObjectsHook and man.<tool>.path not modeled](2026-11-16-audit-git-config-keys-missing-hook-path.md) | medium | Open |
+| [agent-audit: env vars SSH_ASKPASS, SSH_ASKPASS_REQUIRE and BROWSER not modeled as program kind](2026-11-16-audit-git-env-vars-askpass-browser.md) | medium | Open |
+| [agent-audit: code fed through xargs to a git code option, and variable clone URLs, get no flag](2026-11-16-audit-xargs-git-code-option-variable-clone-url.md) | low | Open |
+| [agent-audit: other git programs that start arbitrary programs are not modeled (svn --authors-prog, hook run, submodule update=!cmd)](2026-11-16-audit-git-other-program-starters.md) | low | Open |

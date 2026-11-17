@@ -260,6 +260,150 @@ class GitCommitSubcommand(unittest.TestCase):
                 self.assertIn("git_commit", flags)
                 self.assertIn("docker_lifecycle", flags)
 
+    # -- git subcommands that run shell code from an option or a word (bug audit-git-subcommands-run-shell-code) --
+
+    def assertFlagsIn(self, command, *wanted):
+        flags = classify(command)[1]
+        for flag in wanted:
+            self.assertIn(flag, flags, command)
+
+    def test_gc2_filter_branch_filter_values_are_read_as_code(self):
+        for option in ("--tree-filter X", "--index-filter=X", "--msg-filter X", "--env-filter X", "--commit-filter X",
+                       "--parent-filter X", "--tag-name-filter X", "--setup X", "--tree X"):
+            command = "git filter-branch " + option.replace("X", "'docker compose up'") + " HEAD"
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle", "git_commit")
+
+    def test_gc2_filter_branch_push_in_a_filter_is_not_masked_by_git_commit(self):
+        self.assertFlagsIn("git filter-branch --tree-filter 'git push' HEAD", "git_push", "git_commit")
+
+    def test_gc2_filter_branch_subdirectory_filter_is_a_path_not_code(self):
+        flags = classify("git filter-branch --subdirectory-filter lib HEAD")[1]
+        self.assertNotIn("docker_lifecycle", flags)
+        self.assertNotIn("git_push", flags)
+
+    def test_gc2_submodule_foreach_command_is_read_as_code(self):
+        for command in ("git submodule foreach 'docker compose up'", "git submodule foreach --recursive 'docker compose up'",
+                        "git submodule --quiet foreach 'docker compose up'",
+                        "git submodule foreach -q --recursive docker compose up"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc2_submodule_other_uses_are_clean(self):
+        for command in ("git submodule foreach 'git status'", "git submodule update --init"):
+            with self.subTest(command=command):
+                self.assertEqual(classify(command)[1], [])
+
+    def test_gc2_difftool_extcmd_is_read_as_code(self):
+        for command in ("git difftool -x 'docker compose up'", "git difftool -x'docker compose up'",
+                        "git difftool --extcmd='docker compose up'", "git difftool --extcmd 'docker compose up'",
+                        "git difftool --extc='docker compose up'"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc2_difftool_harmless_extcmd_and_nonexistent_options_are_not_code(self):
+        self.assertNotIn("docker_lifecycle", classify("git difftool -x 'diff -u'")[1])
+        for command in ("git difftool --tool-cmd='docker compose up'", "git mergetool --tool-cmd='docker compose up'"):
+            with self.subTest(command=command):
+                self.assertNotIn("docker_lifecycle", classify(command)[1])
+
+    def test_gc2_transport_program_options_are_read_as_code(self):
+        up = "'docker compose up'"
+        for command in (f"git clone -u {up} a b", f"git clone --upload-pack={up} a b", f"git fetch --upload-pack {up} origin",
+                        f"git pull --upload-pack={up} origin", f"git ls-remote --upload-pack={up} origin",
+                        f"git ls-remote --exec={up} origin", f"git archive --exec={up} --remote=r HEAD"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+        for command in (f"git push --receive-pack={up} origin", f"git push --exec={up} origin",
+                        f"git send-pack --receive-pack={up} r"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle", "git_push")
+
+    def test_gc2_send_email_command_options_are_read_as_code(self):
+        for option in ("--to-cmd", "--cc-cmd", "--header-cmd", "--sendmail-cmd"):
+            command = f"git send-email {option}='docker compose up' x.patch"
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc2_send_email_smtp_host_is_clean(self):
+        self.assertEqual(classify("git send-email --smtp-server=smtp.example.com x.patch")[1], [])
+
+    def test_gc2_grep_pager_option_is_read_as_code(self):
+        for command in ("git grep -O'docker compose up' x", "git grep --open-files-in-pager='docker compose up' x"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+        for command in ("git grep -O x", "git grep -n x"):
+            with self.subTest(command=command):
+                self.assertEqual(classify(command)[1], [])
+
+    def test_gc2_ext_url_command_is_read_as_code(self):
+        for command in ("git clone 'ext::docker compose up' d", "git fetch 'ext::docker compose up'",
+                        "git push 'ext::docker compose up' main", "git ls-remote 'ext::docker compose up'",
+                        "git clone 'ext::sh -c docker% compose% up' d"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc2_a_plain_url_is_clean(self):
+        self.assertEqual(classify("git clone https://x/y d")[1], [])
+
+    def test_gc3_submodule_foreach_shell_wrapper_and_helper_are_read_as_code(self):
+        for command in ("git submodule foreach sh -c 'docker compose up'", "git submodule foreach bash -c 'docker compose up'",
+                        "git submodule--helper foreach 'docker compose up'"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc3_send_email_getopt_spellings_are_read_as_code(self):
+        up = "'docker compose up'"
+        for command in (f"git send-email -to-cmd={up} x.patch", f"git send-email +to-cmd={up} x.patch",
+                        f"git send-email --TO-CMD={up} x.patch", f"git send-email -sendmail-cmd {up} x",
+                        f"git send-email --to-c={up} x.patch"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc3_clone_local_config_of_a_code_key_is_read_as_code(self):
+        for command in ("git clone -c core.sshCommand='docker compose up' ssh://h/r d",
+                        "git clone --config=core.sshCommand='docker compose up' ssh://h/r d"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+        self.assertEqual(classify("git clone -c user.name=x a b")[1], [])
+
+    def test_gc3_ext_url_in_more_places_is_read_as_code(self):
+        for command in ("git submodule add 'ext::docker compose up' d", "git archive --remote='ext::docker compose up' HEAD",
+                        "git push --repo='ext::docker compose up' main", "git fetch-pack 'ext::docker compose up'",
+                        "git send-pack 'ext::docker compose up'", "git clone 'ext::%Gx docker compose up' d"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc3_unrelated_short_options_and_words_are_not_push_or_code(self):
+        for command in ("git push -u origin main", "git fetch -u origin", "git pull -u origin", "git grep -nO x",
+                        "git grep -On x", "git bisect run"):
+            with self.subTest(command=command):
+                flags = classify(command)[1]
+                self.assertNotIn("docker_lifecycle", flags)
+        self.assertNotIn("git_push", classify("git grep send-pack")[1])
+        for command in ("git fetch -u origin", "git pull -u origin", "git grep -nO x", "git grep -On x"):
+            with self.subTest(push=command):
+                self.assertNotIn("git_push", classify(command)[1])
+
+    def test_gc4_a_double_dash_that_is_an_option_value_does_not_end_the_options(self):
+        up = "'docker compose up'"
+        for command in (f"git difftool -t -- -x {up}", f"git rebase --onto -- -x {up} main", f"git clone -o -- -u {up} u d",
+                        f"git fetch --depth -- --upload-pack {up} origin", f"git push -o -- --receive-pack {up} origin",
+                        f"git filter-branch -d -- --tree-filter {up} HEAD", f"git send-email --from -- --to-cmd {up} a.patch"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc4_a_real_double_dash_stays_clean(self):
+        for command in ("git difftool -- file", "git clone -- url d", "git push origin -- main"):
+            with self.subTest(command=command):
+                self.assertNotIn("docker_lifecycle", classify(command)[1])
+
+    def test_gc4_clone_config_through_an_alias_is_read_as_code(self):
+        self.assertFlagsIn("git -c alias.c=clone c -c core.sshCommand='docker compose up' url", "docker_lifecycle")
+        with mock.patch.object(classifier, "_read_repo_git_aliases", create=True,
+                               side_effect=lambda *a, **k: {"cl": "clone"}):
+            self.assertFlagsIn("git cl -c core.sshCommand='docker compose up' url", "docker_lifecycle")
+
     def test_gc1_rebase_exec_push_is_not_masked_by_git_commit(self):
         categories, flags = classify("git rebase -x 'git push origin main' main")
         self.assertIn("git_commit", flags)

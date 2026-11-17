@@ -334,7 +334,7 @@ def _prefix_steps(tokens: list[str], p: int) -> list[int]:
     Prefixes: env assignments after a wrapper; the wrappers of `_WRAPPERS` with their flag grammar (an option the
     table does not know yields two readings, fail closed); the flagless prefixes of `_PLAIN_PREFIXES`; zsh
     `repeat N`; `timeout [options] DURATION` (every GNU form); `mise [global flags] exec|x [...] --` (cut up to
-    the `--`). Program names go through `_program_name`. Every step moves forward, so a search over positions
+    the `--`); `git [global options] bisect run` (the command it runs). Program names go through `_program_name`. Every step moves forward, so a search over positions
     ends."""
     if p >= len(tokens):
         return []
@@ -362,6 +362,10 @@ def _prefix_steps(tokens: list[str], p: int) -> list[int]:
         return []
     if tok == "timeout":
         return [p + length for length in _timeout_prefix_lengths(tokens, p)]
+    if tok == "git":  # `git bisect run COMMAND ARGS`: git runs the words as a command (and `git` is a command too)
+        args = tokens[p + 1:]
+        runs = [p + 1 + i + 2 for i in _git_walk(args)[0] if args[i] == "bisect" and args[i + 1:i + 2] == ["run"]]
+        return [p] + runs if runs else []
     return []
 
 
@@ -922,7 +926,8 @@ _GIT_PROGRAM_KEYS = re.compile(
     r"^(?:core\.(?:hookspath|askpass|worktree)|include\.path|includeif\..+\.path|url\..+\.(?:pushinsteadof|insteadof)"
     r"|remote\..+\.(?:url|pushurl|vcs)|gpg\.program|gpg\..+\.program|init\.templatedir|protocol\.(?:.+\.)?allow"
     r"|sendemail\.smtpserver"
-    r"|(?:mergetool|difftool|browser)\..+\.path)$")
+    r"|(?:mergetool|difftool|browser)\..+\.path|instaweb\.(?:httpd|browser|modulepath))$")
+_GIT_STRATEGY_KEYS = re.compile(r"^pull\.(?:twohead|octopus)$")
 _GIT_FETCH_KEY = re.compile(r"^remote\..+\.fetch$")
 _GIT_PROTOCOL_ALLOW = re.compile(r"^protocol\.(?:.+\.)?allow$")
 _GIT_WRITE_ONLY_KEYS = re.compile(r"^(?:alias\..+|remote\..+\.push|hook\..+\.event)$")  # risky to write, but not read as code
@@ -930,7 +935,7 @@ _GIT_WRITE_ONLY_KEYS = re.compile(r"^(?:alias\..+|remote\..+\.push|hook\..+\.eve
 
 def _config_kind(key: str) -> "str | None":
     """What the value of the configuration `key` does when git runs: `code` (shell code), `bang` (shell code when it
-    starts with `!`), `program` (a program or a file that cannot be known), `fetch` (a refspec), or None."""
+    starts with `!`), `program` (a program or a file that cannot be known), `strategy` (merge strategies: level B unless built in), `fetch` (a refspec), or None."""
     if key.startswith("env:"):
         return _GIT_ENV_VARS.get(key[4:])
     low = key.lower()
@@ -940,6 +945,8 @@ def _config_kind(key: str) -> "str | None":
         return "bang"
     if _GIT_PROGRAM_KEYS.match(low):
         return "program"
+    if _GIT_STRATEGY_KEYS.match(low):
+        return "strategy"
     if _GIT_FETCH_KEY.match(low):
         return "fetch"
     return None
@@ -979,6 +986,9 @@ def _config_effects(pairs: "list[tuple[str, str]]", user_off: bool = False) -> "
         elif kind == "program":
             allowed = (("", "never", "user") if user_off else ("", "never")) if _GIT_PROTOCOL_ALLOW.match(low) else ("",)
             if value.strip().lower() not in allowed:
+                unknown = True
+        elif kind == "strategy":  # a strategy of the merge programs git ships is no program of the user's
+            if any(name not in _GIT_BUILTIN_STRATEGIES for name in value.split()):
                 unknown = True
         elif kind == "fetch":
             dst = value.lstrip("+").partition(":")[2]
@@ -1252,17 +1262,103 @@ def _git_program_option(args: list[str]) -> bool:
     if any(t.startswith("--exec-path=") and t[len("--exec-path="):] for t in lead):
         return True
     for v in verbs:
-        if args[v] not in ("clone", "init"):
-            continue
+        sub = args[v]
         rest = args[v + 1:]
+        if sub == "instaweb" and _instaweb_program(rest):
+            return True  # the browser, the server and the module path are programs
+        if sub == "send-email":
+            for k, tok in enumerate(rest):
+                if _ends_options(rest, k):
+                    break
+                if _is_getopt(tok, "smtp-server"):
+                    value = tok.partition("=")[2] if "=" in tok else rest[k + 1] if k + 1 < len(rest) else ""
+                    if value.startswith(("/", "~")) or "$" in value or "`" in value:
+                        return True  # a path is a program that sends the mail
+        if sub == "daemon" and _long_in(rest, "access-hook"):
+            return True
+        if sub == "merge-index":
+            return True  # its first word is the program that merges each file
+        letters = _GIT_STRATEGY_SHORT.get(sub)
+        if (letters is not None or sub in ("cherry-pick", "revert")) and any(
+                s not in _GIT_BUILTIN_STRATEGIES for s in _git_strategies(rest, letters)):
+            return True  # `git-merge-<name>` of the PATH or the exec path (cherry-pick, revert: `-s` is signoff)
+        if sub not in ("clone", "init"):
+            continue
         for k, tok in enumerate(rest):
-            if tok == "--":
+            if _ends_options(rest, k):
                 break
             if _is_long(tok, "template"):
                 value = tok.partition("=")[2] if "=" in tok else rest[k + 1] if k + 1 < len(rest) else ""
                 if value:
                     return True
     return False
+
+
+_GIT_BUILTIN_STRATEGIES = frozenset({"ort", "recursive", "resolve", "octopus", "ours", "subtree"})
+# The short options that take a value (the rest of the word, else the next one), per subcommand with `-s`: a letter
+# not listed is read as a flag, so the scan goes on (fail closed).
+_GIT_STRATEGY_SHORT = {"merge": "mFXS", "pull": "XSjo", "rebase": "xXSC"}
+
+
+def _git_strategies(rest: list[str], letters: "str | None") -> list[str]:
+    """The merge strategies named by `-s`, `-sNAME`, `--strategy NAME` and `--strategy=NAME` (any prefix of the long
+    option) in the words after a merge, pull or rebase; `letters`: the short options of the subcommand that take
+    a value, None for a subcommand whose `-s` is another option (cherry-pick, revert: the long form only)."""
+    out: list[str] = []
+    for k, tok in enumerate(rest):
+        if _ends_options(rest, k):
+            break
+        following = rest[k + 1] if k + 1 < len(rest) else ""
+        if _is_long(tok, "strategy"):
+            out.append(tok.partition("=")[2] if "=" in tok else following)
+        elif letters is not None and tok.startswith("-") and not tok.startswith("--"):
+            for at, c in enumerate(tok[1:], 1):
+                if c == "s":
+                    out.append(tok[at + 1:] or following)
+                    break
+                if c in letters:
+                    break
+    return out
+
+
+def _instaweb_program(rest: list[str]) -> bool:
+    """`instaweb` (a shell script that scans every word, `--` included) is given a browser, a server or a module path."""
+    for tok in rest:
+        if tok.startswith("--"):
+            if any(_is_long(tok, name) for name in ("browser", "httpd", "module-path")):
+                return True
+        elif tok.startswith("-") and any(c in "bdm" for c in tok[1:]):
+            return True
+    return False
+
+
+def _git_clone_config(args: list[str]) -> "tuple[list[tuple[str, str]], bool]":
+    """The `-c key=value` / `--config key=value` pairs of a `git clone` in `args` (the words after `git`), and whether
+    one is made by an expansion."""
+    pairs: list[tuple[str, str]] = []
+    unresolved = False
+    for v in _git_walk(args)[0]:
+        if args[v] != "clone":
+            continue
+        rest = args[v + 1:]
+        for k, tok in enumerate(rest):
+            if _ends_options(rest, k):
+                break
+            following = rest[k + 1] if k + 1 < len(rest) else None
+            if _is_long(tok, "config"):
+                text = tok.partition("=")[2] if "=" in tok else following
+            elif tok.startswith("-") and not tok.startswith("--") and "c" in tok[1:]:
+                text = tok[tok.index("c") + 1:] or following
+            else:
+                continue
+            if text is None:
+                continue
+            if "$" in text or "`" in text:
+                unresolved = True
+                continue
+            key, _, value = text.partition("=")
+            pairs.append((key, value))
+    return pairs, unresolved
 
 
 def _git_alias_variants(variants: list, cmd, env, repo=None, text_moved=None,
@@ -1295,6 +1391,11 @@ def _git_alias_variants(variants: list, cmd, env, repo=None, text_moved=None,
                     reasons.add("dynamic_code")
             elif unreadable and any(t.startswith("GIT_CONFIG") for t in tokens[:s]):
                 reasons.add("dynamic_code")
+            if "clone" in args:
+                clone_pairs, more = _git_clone_config(args)
+                pairs.extend(clone_pairs)
+                if more:
+                    reasons.add("dynamic_code")
             aliases: dict[str, list[str]] = {}
             others: list[tuple[str, str]] = []
             for key, value in pairs:
@@ -1377,6 +1478,13 @@ def _git_alias_variants(variants: list, cmd, env, repo=None, text_moved=None,
                                     new_tokens, new_words = injected
                             out.append((new_tokens, new_words, _token_readings(new_tokens)))
                             following.append((new_tokens, new_words))
+                            if _git_program_option(new_tokens[s + 1:]):
+                                reasons.add("dynamic_code")
+                            clone_pairs, more = _git_clone_config(new_tokens[s + 1:])
+                            run, unknown, _ = _config_effects(clone_pairs)  # `git c -c KEY=VALUE` (c = clone)
+                            code.extend(run)
+                            if more or unknown:
+                                reasons.add("dynamic_code")
                 frontier = following
                 if not frontier:
                     break
@@ -1404,6 +1512,16 @@ def _is_long(tok: str, name: str, exact: frozenset = frozenset()) -> bool:
         return False
     part = tok[2:].partition("=")[0]
     return len(part) >= 2 and name.startswith(part) and part not in exact
+
+
+def _ends_options(rest: list[str], k: int) -> bool:
+    """`rest[k]` is a `--` that ends the options. A `--` right after an option word written without `=` is that
+    option's value (git parse-options and Getopt::Long take it so, and go on reading options): fail closed, the scan
+    goes on. A `--` that is the first word or follows a positional ends them."""
+    if rest[k] != "--":
+        return False
+    prev = rest[k - 1] if k else ""
+    return not (prev.startswith("-") and prev != "--" and "=" not in prev)
 
 
 def _positionals(rest: list[str], short_values: frozenset = frozenset(), long_values: tuple = ()) -> list[str]:
@@ -1557,7 +1675,63 @@ def _creates_git_commits(tokens: list[str]) -> bool:
 _CONFIG_READ_LONG = ("get", "get-all", "get-regexp", "get-urlmatch", "list", "get-color", "get-colorbool")
 _CONFIG_SECTIONS = frozenset(
     "alias include includeif core remote url credential diff merge filter pager sequence interactive gpg protocol "
-    "init submodule trailer uploadpack mergetool difftool browser man web hook sendemail imap guitool".split())
+    "init submodule trailer uploadpack mergetool difftool browser man web hook sendemail imap guitool pull "
+    "instaweb".split())
+
+
+def _is_ext_url(word: str) -> bool:
+    """`word` is a remote URL of the `ext::` transport (git-remote-ext runs the program it names) or of `fd::`
+    (reads a descriptor)."""
+    return word.lower().startswith(("ext::", "fd::"))
+
+
+_EXT_SERVICE = {"s": "upload-pack", "S": "git-upload-pack", "G": "x", "V": "x"}
+
+
+def _ext_url_code(word: str) -> "str | None":
+    """The command line an `ext::<program> <arguments>...` URL runs, as shell code (each word quoted), or None for
+    another URL. git-remote-ext splits the text on spaces and unescapes: `% ` is a space, `%%` a `%`, `%s` is
+    `upload-pack` (`%S`: `git-upload-pack`), and a word that starts with `%G` or `%V` is an argument git adds (dropped)."""
+    if not word.lower().startswith("ext::"):
+        return None
+    words: list[str] = []
+    cur: list[str] = []
+    drop = False
+    text = word[5:]
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if not cur and not drop and text[i:i + 2] in ("%G", "%V"):
+            drop = True
+        if c == "%" and i + 1 < len(text):
+            nxt = text[i + 1]
+            cur.append(_EXT_SERVICE.get(nxt, nxt if nxt in "% " else "%" + nxt))
+            i += 2
+            continue
+        if c == " ":
+            if cur and not drop:
+                words.append("".join(cur))
+            cur = []
+            drop = False
+        else:
+            cur.append(c)
+        i += 1
+    if cur and not drop:
+        words.append("".join(cur))
+    return " ".join("'" + w.replace("'", "'\\''") + "'" for w in words) if words else None
+
+
+def _ext_codes(words: list[str]) -> list[str]:
+    """The commands the `ext::` URLs among `words` run: a word, or the value of a `--option=` word."""
+    out: list[str] = []
+    for w in words:
+        if "ext::" not in w.lower():
+            continue
+        for cand in (w, w.partition("=")[2] if w.startswith("--") else ""):
+            code = _ext_url_code(cand)
+            if code:
+                out.append(code)
+    return out
 
 
 def _git_config_writes_risky(tokens: list[str]) -> bool:
@@ -1573,7 +1747,7 @@ def _git_config_writes_risky(tokens: list[str]) -> bool:
         if args[i] in ("remote", "submodule"):  # a URL that runs a program (`ext::`) or reads a descriptor (`fd::`)
             words = _positionals(rest)
             verbs = ("set-url", "add") if args[i] == "remote" else ("set-url",)
-            if words and words[0] in verbs and any(w.lower().startswith(("ext::", "fd::")) for w in words[1:]):
+            if words and words[0] in verbs and any(_is_ext_url(w) for w in words[1:]):
                 return True
             continue
         if args[i] != "config":
@@ -3532,25 +3706,90 @@ def _xargs_replace(flags: list[str]) -> frozenset:
     return frozenset(r for r in out if r)
 
 
+# Git subcommands with options that hold shell code: subcommand -> (long names, short letters, whether the value
+# may be the next word; else only the attached one: `git grep -O<pager>`).
+_GIT_CODE_OPTIONS = {
+    "rebase": (("exec",), "x", True),
+    "filter-branch": (("env-filter", "tree-filter", "index-filter", "parent-filter", "msg-filter", "commit-filter",
+                       "tag-name-filter", "setup"), "", True),
+    "difftool": (("extcmd",), "x", True),
+    "clone": (("upload-pack",), "u", True),
+    "fetch": (("upload-pack",), "", True),
+    "pull": (("upload-pack",), "", True),
+    "fetch-pack": (("upload-pack", "exec"), "", True),
+    "ls-remote": (("upload-pack", "exec"), "", True),
+    "push": (("receive-pack", "exec"), "", True),
+    "send-pack": (("receive-pack", "exec"), "", True),
+    "archive": (("exec",), "", True),
+    "grep": (("open-files-in-pager",), "O", False),
+}
+_SEND_EMAIL_CODE = ("to-cmd", "cc-cmd", "header-cmd", "sendmail-cmd")
+# Subcommands whose URL words (or `--remote=`/`--repo=` values) can be `ext::` URLs.
+_GIT_EXT_URL_VERBS = frozenset({"clone", "fetch", "pull", "push", "ls-remote", "fetch-pack", "send-pack", "archive"})
+
+
+def _is_getopt(tok: str, name: str, exact: frozenset = frozenset()) -> bool:
+    """`tok` is the option `name` as Perl's Getopt::Long (git-send-email) reads it: the name in any case or any prefix
+    of it of two letters or more, after `-`, `--` or `+`, with or without `=value`."""
+    if not tok or tok[0] not in "-+" or tok in ("--", "-", "+"):
+        return False
+    body = tok[2:] if tok.startswith("--") else tok[1:]
+    part = body.partition("=")[0].lower()
+    return len(part) >= 2 and name.startswith(part) and part not in exact
+
+
+_SEND_EMAIL_EXACT = frozenset({"to", "cc"})
+
+
 def _git_exec_code(args: list[str]) -> list[str]:
-    """The shell code `git rebase` runs for `-x`/`--exec` in `args` (the words after `git`), for every reading of the
-    global options: the next word or the attached value of `--exec` (any prefix: `--ex=CODE`) and of a short cluster
-    holding `x` (`-xCODE`, `-ix CODE`: the rest of the cluster after the `x`, else the next word)."""
+    """The shell code git runs for the options of `_GIT_CODE_OPTIONS` in `args` (the words after `git`), for every
+    reading of the global options: the next word or the attached value of the long option (any prefix:
+    `--ex=CODE`) and of a short cluster holding the letter (`-xCODE`, `-ix CODE`: the rest of the cluster after
+    it, else the next word); the command of `submodule foreach` (its first word is the shell code, the others its
+    arguments); the command an `ext::` URL of a transport subcommand runs."""
     out: list[str] = []
     for i in _git_walk(args)[0]:
-        if args[i] != "rebase":
-            continue
+        sub = args[i]
         rest = args[i + 1:]
+        if sub in ("submodule", "submodule--helper"):
+            j = next((k for k, tok in enumerate(rest) if not tok.startswith("-")), None)
+            if j is not None and rest[j] == "foreach":
+                tail = rest[j + 1:]
+                k = 0
+                while k < len(tail) and tail[k].startswith("-"):
+                    k += 1
+                    if tail[k - 1] == "--":
+                        break
+                if k < len(tail):
+                    out.append(" ".join([tail[k]] + [_sh_quote(t) for t in tail[k + 1:]]))
+            elif j is not None and rest[j] == "add":
+                out.extend(_ext_codes(rest[j + 1:]))
+            continue
+        if sub == "send-email":
+            for k, tok in enumerate(rest):
+                if _ends_options(rest, k):
+                    break
+                if any(_is_getopt(tok, name, _SEND_EMAIL_EXACT) for name in _SEND_EMAIL_CODE):
+                    value = tok.partition("=")[2] if "=" in tok else rest[k + 1] if k + 1 < len(rest) else None
+                    if value is not None:
+                        out.append(value)
+            continue
+        if sub in _GIT_EXT_URL_VERBS:
+            out.extend(_ext_codes(rest))
+        spec = _GIT_CODE_OPTIONS.get(sub)
+        if spec is None:
+            continue
+        names, letters, next_word = spec
         for k, tok in enumerate(rest):
-            if tok == "--":
+            if _ends_options(rest, k):
                 break
-            following = rest[k + 1] if k + 1 < len(rest) else None
-            if _is_long(tok, "exec"):
+            following = rest[k + 1] if next_word and k + 1 < len(rest) else None
+            value = None
+            if any(_is_long(tok, name) for name in names):
                 value = tok.partition("=")[2] if "=" in tok else following
-            elif tok.startswith("-") and not tok.startswith("--") and "x" in tok[1:]:
-                value = tok[1:].partition("x")[2] or following
-            else:
-                continue
+            elif letters and tok.startswith("-") and not tok.startswith("--") and any(c in letters for c in tok[1:]):
+                at = min(tok.index(c) for c in letters if c in tok[1:])
+                value = tok[at + 1:] or following
             if value is not None:
                 out.append(value)
     return out
@@ -3587,7 +3826,7 @@ def _position_code(site, tokens: list[str], p: int, name: str, starts: list[int]
         for s in starts:
             if s < n and _flag_cluster(tokens[p + 1:s], "si"):
                 out.append(CodeArg(" ".join(tokens[s:]), None))
-    elif name == "git":  # `rebase -x CODE`, `--exec CODE`, `--exec=CODE`: git runs CODE with the shell
+    elif name == "git":  # `rebase -x CODE`, `filter-branch --tree-filter CODE`, `submodule foreach CODE`, ...
         out.extend(CodeArg(code, None) for code in _git_exec_code(tokens[p + 1:]))
     elif name == "watch":  # without -x / --exec the words are run by `sh -c`
         for s in starts:
@@ -4638,6 +4877,8 @@ def _classify_segment(tokens: list[str], seg: str, categories: list[str], flags:
         # Not an `elif` after every git_commit: `merge`, `rebase`... can carry a `push` word too. After a plain
         # `commit` it stays one (a `push` in its message is data).
         pushes = re.match(r"^git (\S+ )*push\b", seg) and not (committing and _is_git_commit(tokens[start:]))
+        if not pushes:  # (`send-pack` pushes too: as the subcommand, not as a word)
+            pushes = _git_has_subcommand(_git_args(tokens[start:]) or [], "send-pack")
         if pushes:
             categories.append("git-push")
             flags.append("git_push")

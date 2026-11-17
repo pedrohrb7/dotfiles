@@ -6,6 +6,7 @@ literal would be denied by the live hook in a Bash call; here they only reach `a
 """
 import shlex
 import unittest
+from unittest import mock
 
 from ._support import ForkedSuite, classifier
 
@@ -2122,6 +2123,122 @@ class ReviewFixE(unittest.TestCase):
         for dot in (".s", ".sh", ".st", ".schema", ".tables", ".mode csv", ".sha3sum", ".stats on"):
             with self.subTest(dot=dot):
                 self.assertNotIn("unclassified_command", analyze(f"sqlite3 :memory: <<'EOF'\n{dot}\nEOF").flags, dot)
+
+
+class GitSubcommandsRunningCode(unittest.TestCase):
+    """Bug audit-git-subcommands-run-shell-code: `git bisect run` starts a command, and program options of git
+    subcommands (merge strategy, send-email, instaweb) are level B."""
+
+    def assertLevelB(self, command):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        self.assertIn("dynamic_code", result.uncertainty, command)
+
+    def test_bisect_run_starts_a_command(self):
+        for command in (f"git bisect run {UP}", f"git bisect run sh -c '{UP}'", f"git -C d bisect run {UP}",
+                        f"git --no-pager bisect run {UP}"):
+            with self.subTest(command=command):
+                self.assertIn(LIFECYCLE, analyze(command).flags, command)
+
+    def test_bisect_run_of_a_script_and_other_bisect_verbs_are_clean(self):
+        for command in ("git bisect run ./test.sh", "git bisect run make", "git bisect good"):
+            with self.subTest(command=command):
+                self.assertNotIn(LIFECYCLE, analyze(command).flags, command)
+
+    def test_send_email_smtp_server_program_is_level_b(self):
+        self.assertLevelB("git send-email --smtp-server=/tmp/prog x.patch")
+
+    def test_send_email_smtp_host_is_not_level_b(self):
+        self.assertNotIn("unclassified_command", analyze("git send-email --smtp-server=smtp.example.com x.patch").flags)
+
+    def test_instaweb_browser_and_httpd_programs_are_level_b(self):
+        for command in ("git instaweb -b /tmp/prog", "git instaweb --browser=/tmp/prog", "git instaweb -d /tmp/httpd",
+                        "git instaweb --httpd=/tmp/httpd"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_instaweb_stop_is_clean(self):
+        self.assertNotIn("unclassified_command", analyze("git instaweb --stop").flags)
+
+    def test_a_custom_merge_strategy_is_level_b(self):
+        for command in ("git merge -s evil feature", "git merge --strategy=evil feature", "git pull -s evil",
+                        "git rebase -s evil main"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_a_builtin_merge_strategy_is_not_level_b(self):
+        for name in ("ort", "recursive", "resolve", "octopus", "ours", "subtree"):
+            command = f"git merge -s {name} feature"
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+                self.assertIn(COMMIT, result.flags, command)
+
+    # -- round 2 --
+
+    def test_send_email_smtp_server_spellings_are_level_b(self):
+        for command in ("git send-email -smtp-server=/tmp/p x", "git send-email --SMTP-SERVER=/tmp/p x",
+                        "git send-email --smtp-server ~/prog x", 'git send-email --smtp-server "$HOME/p" x'):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_program_options_through_aliases_are_level_b(self):
+        for command in ("git -c alias.m='merge -s evil' m x", "git -c alias.w='instaweb -d /tmp/x' w",
+                        "git -c alias.s='send-email --smtp-server=/tmp/p' s x", "git -c alias.c='clone --template=/tmp/t' c a b"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_program_option_through_a_repo_alias_is_level_b(self):
+        with mock.patch.object(classifier, "_read_repo_git_aliases", create=True,
+                               side_effect=lambda *a, **k: {"m": "merge -s evil"}):
+            self.assertLevelB("git m x")
+
+    def test_clone_config_of_a_protocol_key_is_level_b(self):
+        self.assertLevelB("git clone -c protocol.allow=always a b")
+        self.assertNotIn("unclassified_command", analyze("git clone -c user.name=x a b").flags)
+
+    def test_rebase_strategy_in_a_short_cluster_is_level_b(self):
+        for command in ("git rebase -ms evil main", "git rebase -ims evil main"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+        self.assertNotIn("unclassified_command", analyze("git rebase -m main").flags)
+
+    def test_other_strategy_carriers_are_level_b(self):
+        for command in ("git cherry-pick --strategy=evil abc", "git revert --strat evil abc",
+                        "git -c pull.twohead=evil pull", "git -c pull.octopus=evil pull"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+        for command in ("git cherry-pick -s abc", "git cherry-pick --strategy=ort abc"):
+            with self.subTest(command=command):
+                self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def test_instaweb_config_and_module_path_are_level_b(self):
+        for command in ("git -c instaweb.httpd=/tmp/x instaweb", "git -c instaweb.browser=/tmp/x instaweb",
+                        "git -c instaweb.modulepath=/tmp/m instaweb", "git instaweb -- -d /tmp/x", "git instaweb -m /tmp/m",
+                        "git instaweb --module-path=/tmp/m"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_daemon_hook_and_merge_index_program_are_level_b(self):
+        for command in ("git daemon --access-hook=/tmp/h", "git merge-index /tmp/p -a"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+        self.assertNotIn("unclassified_command", analyze("git daemon --export-all").flags)
+
+    def test_bisect_run_without_a_command_is_clean(self):
+        self.assertNotIn(LIFECYCLE, analyze("git bisect run").flags)
+
+    # -- round 3 --
+
+    def test_a_double_dash_that_is_an_option_value_does_not_end_the_options(self):
+        for command in ("git merge -m -- -s evil x", "git cherry-pick -m -- --strategy evil abc",
+                        "git send-email --smtp-domain -- --smtp-server /tmp/x a.patch",
+                        "git clone -o -- -c core.hooksPath=/x u d"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_a_short_option_that_takes_a_value_is_not_a_strategy_cluster(self):
+        self.assertNotIn("unclassified_command", analyze("git pull -os evil").flags)
 
 
 def load_tests(loader, tests, pattern):
