@@ -1423,3 +1423,24 @@ Lacunas que o log registra como não modeladas ou fora do escopo desta rodada. V
 - **Aliases:** as opções de programa valem também através de aliases. Um `--` logo depois de uma opção escrita sem `=` é lido como o valor dela (falha fechada). `send-pack` conta como `git_push`. `mergetool`/`difftool --tool-cmd` não existem e não são modelados.
 
 **Testes:** `test_classify.py` e `test_command_positions.py`. A suite tem 951 tests.
+
+## Adendo 2026-11-18 - stdin de pipe e de substituição de processo: escritor, coproc, chamada de função e composto
+
+**Motivo.** Bugs `2026-11-16-audit-procsub-writer-shell-not-flagged`, `2026-11-16-audit-function-coproc-pipe-receiver-not-followed` e `2026-11-16-audit-group-procsub-stdin-not-flagged` (backlog), corrigidos numa só rodada. **Altera o Adendo 2026-11-16 (2)** em dois pontos: o corpo de `coproc` passa a ler sempre um pipe (antes "não herda"), e a função deixa de ser ignorada: a chamada é resolvida no ponto de chamada. Decisões do usuário (2026-11-18).
+
+**Regra nova** (estende X4 e o Adendo 2026-11-16 (2); `agent_audit_shell.py`: `part_script_items`, `Word.script_items`, `_NO_STDIN_KINDS`, `_walk`; `agent_audit_classify.py`: `_SAME_SHELL_LOADERS`, `_function_readers`, `_receiver_heads`, `_Run.function_verdicts`, `_Run.function_call`, `_Run.compound_procsub_stdin`, parâmetros `fn`/`same_shell`):
+
+- **Escritor `>(...)`.** O script de uma substituição `>(...)` tem sempre o stdin piped (o pipe que o escritor enche): `echo x > >(bash)` é `piped_shell`.
+- **`coproc`.** O corpo que lê código é sempre piped, com escritor visível ou não. Só o corpo de função continua sem herdar o stdin.
+- **Chamada de função.** Sob um pipe ou com `<(...)` no stdin, a chamada de uma função definida no texto vale como o shell que o corpo guarda (`f() { bash; }; echo x | f` é `piped_shell`), pelas mesmas regras de `_stdin_code`. O predicado do corpo é `_compound_reads_code` sem mudança. O veredito junta todas as definições do nome, é calculado uma vez por execução e cobra `VARIANT_COST` por corpo lido. A chamada vale em cada cabeça resolvida (`$g` com `g=f`, `{f,}`, `${g:-f}`) e em cabeça não resolvida (expansão ou glob sem `/` literal), que pode nomear qualquer função (falha fechada); cabeça com `/` literal não é chamada de função.
+- **Tabela de funções externa.** Desce para `eval`, `trap`, `source`/`.`, `bash -c` e corpos de heredoc. Uma função definida dentro de string de `eval`, `trap` ou `source` (`_SAME_SHELL_LOADERS`: também `.`, `mapfile`, `readarray`, `emulate`) é `dynamic_code`, porque sobrevive à string e suas chamadas não são vistas; `bash -c` é um filho, então `bash -c 'f() { :; }; f'` fica limpo. Corpo de heredoc lido por carregador do mesmo shell, ou por receptor de cabeça desconhecida, recebe o mesmo bloqueio.
+- **`command_not_found_handle`.** Uma definição que lê código é `dynamic_code`: o bash a chama para qualquer comando desconhecido.
+- **Composto com `<(...)`.** Um composto com `<(...)` como alvo de qualquer redirecionamento de entrada (`<` ou `<>`, qualquer fd) que lê código é `dynamic_code`, como `bash < <(x)`: `{ bash; } 3< <(x)` bloqueia.
+
+**Falsos positivos aceitos:** `{ bash <<< x; } < <(y)`; `f() { eval "$1"; }; echo x | f a`; nome redefinido (conta qualquer definição que leia código); `command`/`sudo`/`env`/`timeout f` e `echo x | command f` sob pipe contam como chamada; `f() { bash; } < <(x)` sem chamada bloqueia; `f() { cat; }; g() { f; }; echo x | g` bloqueia; `echo x | $UNKNOWN` bloqueia quando o texto define função que lê código; `eval 'x=$(f() { :; }; f)'` bloqueia.
+
+**Limitações aceitas:** uma função definida em chamada anterior (outro comando da sessão) não é resolvida; uma função definida por `bash -c` ou em corpo de heredoc é analisada no filho e não aparece para o pai. O stdin de handlers de `trap` (DEBUG/ERR/EXIT) e de callbacks de `mapfile -C` foi para o backlog.
+
+**Não muda:** os níveis A e B, o conjunto de motivos, a classificação sem pipe e `agent-audit.json`.
+
+**Testes:** `test_shell_lexer.py` (`PipedStdin`, o caso de `coproc` invertido) e `test_command_positions.py` (`PipeReceivers`). A suite tem 989 tests.

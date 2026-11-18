@@ -33,9 +33,9 @@ Confirmed bugs that need fixing, one file per bug.
 | [agent-audit: heredoc with HTML body and a group-level redirect, or HEAD() { cat <<EOF }, reads as code (lex_error)](2026-11-14-audit-html-heredoc-group-redirect.md) | low | Open |
 | [hooks tests: SP8 linearity test compares CPU times with a 5x ratio (flake risk)](2026-11-14-audit-sp8-linearity-flake-risk.md) | low | Open |
 | [agent-audit: git_commit matches only the commit subcommand (commit-tree, update-ref, merge, cherry-pick, revert, am, rebase regression)](2026-11-14-audit-git-commit-subcommand-regression.md) | medium | Fixed |
-| [agent-audit: a shell reading stdin from a process-substitution writer is not flagged](2026-11-16-audit-procsub-writer-shell-not-flagged.md) | high | Open |
-| [agent-audit: a function or coproc used as a pipe receiver is not followed](2026-11-16-audit-function-coproc-pipe-receiver-not-followed.md) | high | Open |
-| [agent-audit: a group or subshell with a process-substitution stdin is not flagged](2026-11-16-audit-group-procsub-stdin-not-flagged.md) | high | Open |
+| [agent-audit: a shell reading stdin from a process-substitution writer is not flagged](2026-11-16-audit-procsub-writer-shell-not-flagged.md) | high | Fixed |
+| [agent-audit: a function or coproc used as a pipe receiver is not followed](2026-11-16-audit-function-coproc-pipe-receiver-not-followed.md) | high | Fixed |
+| [agent-audit: a group or subshell with a process-substitution stdin is not flagged](2026-11-16-audit-group-procsub-stdin-not-flagged.md) | high | Fixed |
 | [agent-audit: plain pipe readers other than a shell are not flagged as piped_shell](2026-11-16-audit-pipe-readers-not-piped-shell.md) | medium | Open |
 | [agent-audit: operand-path stdin aliases are matched exactly](2026-11-16-audit-operand-stdin-alias-exact-match.md) | medium | Open |
 | [agent-audit: git subcommands that run shell code are not read as code](2026-11-16-audit-git-subcommands-run-shell-code.md) | high | Fixed |
@@ -44,3 +44,10 @@ Confirmed bugs that need fixing, one file per bug.
 | [agent-audit: env vars SSH_ASKPASS, SSH_ASKPASS_REQUIRE and BROWSER not modeled as program kind](2026-11-16-audit-git-env-vars-askpass-browser.md) | medium | Open |
 | [agent-audit: code fed through xargs to a git code option, and variable clone URLs, get no flag](2026-11-16-audit-xargs-git-code-option-variable-clone-url.md) | low | Open |
 | [agent-audit: other git programs that start arbitrary programs are not modeled (svn --authors-prog, hook run, submodule update=!cmd)](2026-11-16-audit-git-other-program-starters.md) | low | Open |
+| [agent-audit: a pipe into a code string (eval, bash -c) is not followed](2026-11-18-audit-pipe-into-code-string-not-followed.md) | high | Open |
+| [agent-audit: trap actions run with the stdin of the context they fire in, not followed](2026-11-18-audit-trap-action-stdin-context.md) | medium | Open |
+| [agent-audit: a mapfile/readarray -C callback runs with mapfile's stdin, not followed](2026-11-18-audit-mapfile-callback-stdin.md) | medium | Open |
+| [agent-audit: a shell reading a named pipe or an fd set up elsewhere is not tracked](2026-11-18-audit-named-pipe-fd-stdin-not-tracked.md) | medium | Open |
+| [agent-audit: stdin set by exec is not followed](2026-11-18-audit-exec-stdin-not-followed.md) | medium | Open |
+| [agent-audit: a file written earlier in the same text and then sourced is not read](2026-11-18-audit-sourced-file-written-in-same-text.md) | medium | Open |
+| [agent-audit: time and ! after a pipe are not parsed (lex_error, fail closed)](2026-11-18-audit-time-bang-after-pipe-lex-error.md) | low | Open |

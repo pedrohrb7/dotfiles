@@ -1,6 +1,6 @@
 # agent-audit: a shell reading stdin from a process-substitution writer is not flagged
 
-- **Status:** Open
+- **Status:** Fixed
 - **Reported:** 2026-11-16
 - **Severity:** high
 - **Environment:** local (Claude Code hooks)
@@ -25,8 +25,10 @@ Flags are `['other']`; the command is allowed.
 
 ## Root cause
 
-Not diagnosed yet.
+`_walk` / `_walk_redirects` in `.claude/hooks/agent_audit_shell.py` passed the enclosing stdin state to `>(...)` scripts, because `part_scripts` / `Word.scripts` dropped the `procsub_out` vs `procsub_in` distinction.
 
 ## Fix
 
-Not fixed yet.
+`part_script_items` / `Word.script_items` carry a writer flag, and a `>(...)` script is always piped. Regression tests: `test_shell_lexer.py` PipedStdin (`test_a_process_substitution_writer_script_is_piped`).
+
+Fixed on 2026-11-18 (not committed yet). Run: `.claude/runs/bug-audit-pipe-procsub-stdin-family.json`. Suite: 989 tests pass.

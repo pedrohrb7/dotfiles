@@ -144,6 +144,17 @@ def part_scripts(part: Part):
         yield from word.scripts()
 
 
+def part_script_items(part: Part):
+    """`part_scripts` with a flag: `(script, writer)`, `writer` true for the script of a `>(...)` process
+    substitution, whose standard input is always the pipe its writer fills."""
+    if part.script is not None:
+        yield part.script, part.kind == "procsub_out"
+    for inner in part.inner:
+        yield from part_script_items(inner)
+    for word in part.elements:
+        yield from word.script_items()
+
+
 class Word(_Node):
     """parts: tuple of `Part`; span: (start, end) in the source; quoted: some part is quoted ('...', "...", $'...',
     a backslash escape)."""
@@ -188,6 +199,11 @@ class Word(_Node):
         """The nested scripts of this word (substitutions, wherever they sit), outermost first."""
         for part in self.parts:
             yield from part_scripts(part)
+
+    def script_items(self):
+        """`scripts()` as `(script, writer)` pairs (see `part_script_items`)."""
+        for part in self.parts:
+            yield from part_script_items(part)
 
 
 class Heredoc(_Node):
@@ -1443,7 +1459,7 @@ def parse(text: str, budget: Budget, *, base: int = 0) -> Script:
 
 
 _STDIN_REPLACERS = frozenset({"<<", "<<-", "<<<"})
-_NO_STDIN_KINDS = frozenset({"function", "coproc"})
+_NO_STDIN_KINDS = frozenset({"function"})
 
 
 def _fd_number(redirect, default: int) -> "int | None":
@@ -1492,12 +1508,12 @@ def _walk_redirects(redirects, owner: "Site | None", in_compound: bool, fed: boo
     for i, r in enumerate(redirects):
         state = fed if (r.heredoc is not None or r.op == "<<<") else stdin_piped(redirects[:i], fed)
         if r.target is not None:
-            for script in r.target.scripts():
-                yield from _walk(script, False, in_compound, owner, r.target, state)
+            for script, writer in r.target.script_items():
+                yield from _walk(script, False, in_compound, owner, r.target, writer or state)
         if r.heredoc is not None:
             for part in r.heredoc.expansions:
-                for script in part_scripts(part):
-                    yield from _walk(script, False, in_compound, owner, None, fed)
+                for script, writer in part_script_items(part):
+                    yield from _walk(script, False, in_compound, owner, None, writer or fed)
 
 
 def _walk(script: Script, top: bool, in_compound: bool, parent: "Site | None", sub_word: "Word | None",
@@ -1512,14 +1528,15 @@ def _walk(script: Script, top: bool, in_compound: bool, parent: "Site | None", s
                 site = Site(cmd, top, stages, index, parent, sub_word, in_compound, piped)
                 yield site
                 for word in (*cmd.assignments, *cmd.words):
-                    for nested in word.scripts():
-                        yield from _walk(nested, False, in_compound, site, word, fed)
+                    for nested, writer in word.script_items():
+                        yield from _walk(nested, False, in_compound, site, word, writer or fed)
                 yield from _walk_redirects(cmd.redirects, site, in_compound, fed)
             else:
-                inner = cmd.kind not in _NO_STDIN_KINDS and fd_piped(cmd.redirects, fed)
+                # a function body has no stdin until it is called; a coproc body always reads its own pipe
+                inner = cmd.kind == "coproc" or (cmd.kind not in _NO_STDIN_KINDS and fd_piped(cmd.redirects, fed))
                 for word in cmd.words:
-                    for nested in word.scripts():
-                        yield from _walk(nested, False, True, parent, word, inner)
+                    for nested, writer in word.script_items():
+                        yield from _walk(nested, False, True, parent, word, writer or inner)
                 for body in cmd.bodies:
                     yield from _walk(body, False, True, parent, sub_word, inner)
                 yield from _walk_redirects(cmd.redirects, parent, True, fed)

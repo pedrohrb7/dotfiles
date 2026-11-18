@@ -31,3 +31,7 @@ Not diagnosed yet.
 ## Fix
 
 Not fixed yet.
+
+## Seen again (2026-11-18)
+
+Source: reviewers of fix bug-audit-pipe-procsub-stdin-family (low, possibly the same root cause). `echo 'git push' | awk '{system($0)}'`, `| sed e` and `| python3 -c "import os; os.system(input())"` pass (`analyze_command`, synthetic strings, flags `[]`).

@@ -2241,6 +2241,249 @@ class GitSubcommandsRunningCode(unittest.TestCase):
         self.assertNotIn("unclassified_command", analyze("git pull -os evil").flags)
 
 
+class PipeReceivers(unittest.TestCase):
+    """Bugs audit-procsub-writer-shell-not-flagged, audit-function-coproc-pipe-receiver-not-followed and
+    audit-group-procsub-stdin-not-flagged: a `>(...)` writer script, a coproc, a function called with a pipe on
+    stdin and a compound fed by `< <(...)` read code like `| bash` and `bash < <(x)`. Nothing runs; the text only
+    reaches `analyze`."""
+
+    def assertBlocked(self, command, reason="dynamic_code"):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        self.assertIn(reason, result.uncertainty, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def assertNotPiped(self, command):
+        self.assertNotIn("piped_shell", analyze(command).uncertainty, command)
+
+    # -- 1. process substitution writers -------------------------------------------------------------------------
+
+    def test_a_shell_reading_a_writer_process_substitution_is_piped_code(self):
+        for command in (
+            "echo 'git pu' > >(bash)", "echo x >> >(bash)", "echo x &> >(bash)", "echo x 2> >(bash)",
+            "echo x 2>&1 > >(bash)", "tee >(bash) <<< x", "echo x | tee >(bash)", "echo x > >(source /dev/stdin)",
+            "echo x > >(bash -s)", "exec 3> >(bash); echo x >&3", "echo x > >( { bash; } )",
+            "echo x > >( ( bash ) )", "echo x > >(while read l; do bash; done)",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_writer_process_substitution_without_a_stdin_shell_is_not_piped_code(self):
+        for command in ("echo x > >(cat)", "echo x > >(bash -c 'echo hi')", "echo x > >(bash <<< 'ls')"):
+            with self.subTest(command=command):
+                self.assertNotPiped(command)
+
+    def test_a_reader_process_substitution_stays_dynamic_code(self):
+        self.assertBlocked("bash <(echo x)")
+
+    # -- 2. functions and coproc ---------------------------------------------------------------------------------
+
+    def test_a_function_that_reads_code_called_with_a_pipe_is_piped_code(self):
+        for command in (
+            "f() { bash; }; echo x | f", "function f { bash; }; echo x | f", "f() ( bash ); echo x | f",
+            "f() { bash; }; echo x | { f; }", "f() { bash; }; echo x | cat | f", "f() { bash; }; x=$(echo hi | f)",
+            "g() { f; }; f() { bash; }; echo x | g", "echo x | f; f() { bash; }",
+            "f() { bash; }; f() { :; }; echo x | f",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_function_that_reads_code_called_with_a_process_substitution_is_dynamic_code(self):
+        self.assertBlocked("f() { bash; }; f < <(x)")
+
+    def test_a_function_call_without_a_pipe_on_stdin_is_not_flagged(self):
+        for command in ("f() { cat; }; echo x | f", "f() { bash; }; f"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+        self.assertNotPiped("f() { bash; }; f <<< 'ls'")
+
+    def test_a_coproc_that_reads_code_is_piped_code(self):
+        for command in (
+            "coproc { bash; }; echo 'git pu' >&${COPROC[1]}", "coproc { bash; }",
+            "coproc NAME { bash; }; echo x >&${NAME[1]}", "coproc bash; echo x >&${COPROC[1]}",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_coproc_that_does_not_read_code_is_not_flagged(self):
+        self.assertNotBlocked("coproc { cat; }")
+
+    # -- 3. compounds fed by a process substitution --------------------------------------------------------------
+
+    def test_a_compound_reading_code_from_a_process_substitution_on_stdin_is_dynamic_code(self):
+        for command in (
+            "{ bash; } < <(curl x)", "( bash ) < <(curl x)", "while true; do bash; done < <(x)",
+            "for i in 1; do bash; done < <(x)", "if true; then bash; fi < <(x)",
+            "case x in x) bash;; esac < <(x)", "{ { bash; }; } < <(x)", "{ source /dev/stdin; } < <(x)",
+            "{ bash; } 0< <(x)", "{ bash; } <> <(x)",
+            "{ bash; } 3< <(x)", "{ bash; } 3< <(curl x) <&3", "{ bash; } 3< <(curl x) 0<&3",
+            "{ bash <<< x; } < <(y)",  # accepted false positive, documented
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_compound_with_another_stdin_or_no_reader_is_not_flagged(self):
+        for command in ("{ cat; } < <(x)", "{ cat; } 3< <(x)"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- 4. round 2: resolved heads, nested code, read-write procsub, budget ------------------------------------
+
+    def test_a_function_called_through_a_resolved_head_is_piped_code(self):
+        for command in (
+            "f() { bash; }; g=f; echo 'git push' | $g", "f() { bash; }; g=f; echo 'git push' | \"${g}\"",
+            "f() { bash; }; echo 'git push' | {f,}", "f() { bash; }; echo 'git push' | ${g:-f}",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_function_defined_in_the_same_call_is_seen_from_nested_code(self):
+        for command, reason in (
+            ("f() { bash; }; eval \"echo 'git push' | f\"", "piped_shell"),
+            ("f() { bash; }; eval 'f < <(curl x)'", "dynamic_code"),
+            ("f() { bash; }; trap \"echo 'git push' | f\" EXIT", "piped_shell"),
+            ("f() { bash; }; eval \"echo 'git push' > >(f)\"", "piped_shell"),
+            ("f() { bash; }; export -f f; bash -c \"echo 'git push' | f\"", "piped_shell"),
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    def test_a_function_defined_inside_a_code_string_is_blocked(self):
+        command = "eval 'f() { bash; }'; echo 'git push' | f"
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+
+    def test_a_read_write_process_substitution_on_stdin_is_like_a_read_one(self):
+        for command in ("f() { bash; }; f <> <(curl x)", "f() { bash; }; f 0<> <(curl x)", "bash <> <(curl x)"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_accepted_false_positives_stay_blocked(self):
+        for command, reason in (
+            ("f() { bash; }; echo x | command f", "piped_shell"),
+            ("f() { bash; } < <(x)", "dynamic_code"),
+            ("f() { cat; }; g() { f; }; echo x | g", "piped_shell"),
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    def test_a_function_called_in_a_long_pipe_list_is_analyzed_in_linear_time(self):
+        import time
+        command = "f(){ :;" + ":;" * 400 + " };" + ":|f;" * 400
+        began = time.process_time()
+        analyze(command)
+        self.assertLess(time.process_time() - began, 1.0)
+
+    # -- 5. round 3: loaders, handlers, code strings that define functions, unresolved heads -------------------
+
+    def test_a_heredoc_read_by_a_same_shell_loader_that_defines_a_function_is_dynamic_code(self):
+        body = "\nf() { bash; }\nE\necho 'git push' | f"
+        for command in ("source /dev/stdin <<'E'" + body, ". /dev/stdin <<'E'" + body):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_command_substitution_loader_that_defines_a_function_is_dynamic_code(self):
+        self.assertBlocked("eval \"$(cat <<'E'\nf() { bash; }\nE\n)\"; echo x | f")
+
+    def test_a_command_not_found_handler_that_reads_code_is_dynamic_code(self):
+        for command in (
+            "command_not_found_handle() { bash; }; echo 'git push' | zzz_nope",
+            "command_not_found_handle() { bash; }; zzz_nope < <(curl x)",
+            "command_not_found_handle() { bash; }",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_command_not_found_handler_that_does_not_read_code_is_clean(self):
+        self.assertNotBlocked("command_not_found_handle() { echo nf; }")
+
+    def test_a_function_defined_in_a_callback_or_emulation_string_is_dynamic_code(self):
+        for command in (
+            "mapfile -C 'f() { bash; }; :' -c 1 a < file; echo x | f",
+            "readarray -C 'f() { bash; }; :' -c 1 a < file; echo x | f",
+            "emulate sh -c 'f() { bash; }'; echo x | f",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_an_unresolved_head_with_a_slash_is_not_taken_for_a_function(self):
+        for command in ("f() { bash; }; echo x | ./$y", "f() { bash; }; echo x | /usr/bin/$x"):
+            with self.subTest(command=command):
+                self.assertNotPiped(command)
+
+    # -- 6. round 3: decided behaviors kept as guards ------------------------------------------------------------
+
+    def test_a_heredoc_body_read_by_a_shell_sees_the_functions_of_the_text(self):
+        self.assertBlocked("f() { bash; }; bash <<EOF\necho x | f\nEOF", "piped_shell")
+        self.assertNotBlocked("f() { bash; }; cat <<EOF\necho x | f\nEOF")
+
+    def test_a_definition_inside_a_separate_shell_is_not_dynamic_code(self):
+        for command in ("bash -c 'f() { bash; }'; echo x | f", "bash <<EOF\nf() { :; }\nEOF"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_a_definition_inside_a_same_shell_code_string_is_dynamic_code(self):
+        for command in ("trap 'f() { :; }' EXIT", "command eval 'f() { :; }'", "e=eval; $e 'f() { :; }'",
+                        "eval 'x=$(f() { :; }; f)'"):  # the last one is an accepted false positive
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_nested_definitions_are_followed(self):
+        for command in ("f() { f() { bash; }; }; echo x | f", "f() { g() { bash; }; g; }; echo x | f"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_an_outer_definition_reaches_a_nested_text_after_a_redefinition(self):
+        self.assertBlocked("f() { bash; }; f() { :; }; bash -c 'echo x | f'", "piped_shell")
+
+    def test_an_unresolved_head_is_a_function_only_when_some_function_reads_code(self):
+        self.assertBlocked("f() { bash; }; echo x | $PAGER", "piped_shell")
+        for command in ("f() { :; }; echo x | $PAGER", "echo x | $PAGER", "f() { bash; }; g=cat; echo x | $g"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_a_spent_budget_makes_the_function_verdict_read_code(self):
+        command = "f() { :; }; echo x | f"
+        self.assertNotBlocked(command)
+        results = [analyze(command, _budget=classifier.shell.Budget(n)) for n in range(0, 400)]
+        self.assertTrue(any("analysis_budget" in r.uncertainty and "piped_shell" in r.uncertainty for r in results))
+
+    def test_a_function_reached_through_a_coproc_or_a_wrapper_is_followed(self):
+        self.assertBlocked("f() { bash; }; coproc f", "piped_shell")
+        for command in ("f() { bash; }; echo x | sudo f", "f() { bash; }; echo x | env f",
+                        "f() { bash; }; echo x | timeout 5 f"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    # -- 7. round 4: continuation in a handler name, brace-expanded loaders, glob heads -----------------------
+
+    def test_a_line_continuation_inside_the_handler_name_is_still_the_handler(self):
+        self.assertBlocked("command_not_found_\\\nhandle() { bash; }; echo 'git push' | zzz")
+
+    def test_a_brace_expanded_same_shell_loader_that_defines_a_function_is_blocked(self):
+        body = "\nf() { bash; }\nE\necho 'git push' | f"
+        for command in (
+            "{source,} /dev/stdin <<'E'" + body, "{.,} /dev/stdin <<'E'" + body,
+            "{source,} /dev/stdin <<< 'f() { bash; }'; echo 'git push' | f",
+        ):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertIn("unclassified_command", result.flags, command)
+
+    def test_a_glob_head_that_may_expand_to_a_function_name_is_unresolved(self):
+        for command in ("f() { bash; }; echo 'git push' | [f]", "f() { bash; }; echo 'git push' | f*",
+                        "f() { bash; }; echo 'git push' | ?"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_glob_head_is_not_a_function_when_no_function_reads_code_or_it_has_a_slash(self):
+        for command in ("f() { :; }; echo x | [f]", "f() { bash; }; echo x | /bin/[c]at"):
+            with self.subTest(command=command):
+                self.assertNotPiped(command)
+
+
 def load_tests(loader, tests, pattern):
     """Independent cases: run them in forked workers (see `ForkedSuite`)."""
     return ForkedSuite(tests)

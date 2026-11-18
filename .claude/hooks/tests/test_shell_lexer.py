@@ -778,7 +778,31 @@ class PipedStdin(unittest.TestCase):
                 self.assertIs(self.piped_of(text), True)
 
     def test_a_command_without_inherited_stdin_is_not_piped(self):
-        for text in ("f() { bash; }", "coproc { bash; }", "{ bash; }"):
+        for text in ("f() { bash; }", "{ bash; }"):
+            with self.subTest(text=text):
+                self.assertIs(self.piped_of(text), False)
+
+    def test_a_process_substitution_writer_script_is_piped(self):
+        """The stdin of a `>(...)` script is always the pipe the writer fills, whatever encloses it."""
+        for text in (
+            "echo x > >(bash)", "echo x >> >(bash)", "echo x &> >(bash)", "echo x 2> >(bash)",
+            "echo x 2>&1 > >(bash)", "tee >(bash) <<< x", "echo x > >( { bash; } )", "echo x > >( ( bash ) )",
+            "echo x > >(while read l; do bash; done)",
+        ):
+            with self.subTest(text=text):
+                self.assertIs(self.piped_of(text), True)
+
+    def test_a_process_substitution_reader_script_is_not_piped(self):
+        self.assertIs(self.piped_of("bash <(echo x)", head="echo"), False)
+
+    def test_a_coproc_body_is_always_piped(self):
+        """User decision 2026-11-18: a coproc body is piped whether or not the writer is visible."""
+        for text in ("coproc { bash; }", "coproc NAME { bash; }", "coproc bash", "coproc NAME ( bash )"):
+            with self.subTest(text=text):
+                self.assertIs(self.piped_of(text), True)
+
+    def test_a_function_body_is_not_piped_at_its_definition(self):
+        for text in ("f() { bash; }", "function f { bash; }", "f() ( bash )"):
             with self.subTest(text=text):
                 self.assertIs(self.piped_of(text), False)
 

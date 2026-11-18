@@ -2110,6 +2110,8 @@ TEXT_COST = 128
 VARIANT_COST = 64
 _NAME_READERS = frozenset({"read", "getopts", "mapfile", "readarray", "printf", "print", "vared", "let", "unset"})
 _CODE_LOADERS = frozenset({"eval", "source", "."})
+# the programs that run a string, or the heredoc they read, in the current shell: a function it defines outlives it
+_SAME_SHELL_LOADERS = _CODE_LOADERS | frozenset({"trap", "mapfile", "readarray", "emulate"})
 _OPTION_SETTERS = frozenset({"setopt", "unsetopt", "emulate", "set"})
 _DECLARE_BUILTINS = shell.DECLARE_BUILTINS
 _VALUE_HEADS = _DECLARE_BUILTINS | _NAME_READERS | _CODE_LOADERS | _OPTION_SETTERS
@@ -3398,11 +3400,13 @@ def _level_b(reason: str) -> Analysis:
 
 
 def _code_text(text: str, categories: list[str], flags: list[str], reasons: set[str], _depth: int,
-               budget, code: bool = False, env=None) -> None:
+               budget, code: bool = False, env=None, fn=None, same_shell: bool = False) -> None:
     """Classify a text the command runs as shell (a heredoc body, a code argument) as a command of its own, one
     level deeper; what it finds joins the outer result. More than MAX_CODE_DEPTH levels deep (X2): level B.
     `code`: the text is a code argument, so a command name made by an expansion is level B (X3). `env`: the
-    values of the variables of the outer text, which go down (V3)."""
+    values of the variables of the outer text, which go down (V3). `fn`: the functions of the outer text (name ->
+    whether the body may read code from stdin), which the same shell, or a child of it, can call. `same_shell`: the
+    text runs in the current shell (`eval`, `trap`, `source`), so a function it defines outlives it."""
     if not text.strip():
         return
     if _depth >= MAX_CODE_DEPTH:
@@ -3410,7 +3414,7 @@ def _code_text(text: str, categories: list[str], flags: list[str], reasons: set[
         flags.append("unclassified_command")
         reasons.add("nested_shell_depth")
         return
-    sub = analyze_command(text, _depth + 1, env, budget, code, _cwd=False)  # (the cwd of a nested text is not known)
+    sub = analyze_command(text, _depth + 1, env, budget, code, _cwd=False, _fn=fn, _same=same_shell)  # (the cwd of a nested text is not known)
     categories.extend(sub.categories)
     flags.extend(sub.flags)
     reasons.update(sub.uncertainty)
@@ -3523,7 +3527,7 @@ def _stdin_code(site) -> list[CodeArg]:
         if redirect.op == "<<<" and redirect.target is not None:
             out = [CodeArg(redirect.target.text, None)]
             break
-        if redirect.op == "<" and redirect.target is not None \
+        if redirect.op in ("<", "<>") and redirect.target is not None \
                 and any(part.kind == "procsub_in" for part in redirect.target.parts):
             out = [CodeArg(None, "dynamic_code")]
             break
@@ -3874,6 +3878,20 @@ def _function_names(script) -> frozenset:
     return frozenset(c.name for c in shell.iter_compounds(script) if c.kind == "function" and c.name)
 
 
+def _literal_slash(word) -> bool:
+    """A `/` written in the word itself (not inside an expansion): bash calls no function through such a name."""
+    return any((p.kind in ("lit", "sq") or (p.kind == "dq" and not p.inner)) and "/" in p.text for p in word.parts)
+
+
+def _function_readers(script) -> "dict[str, list]":
+    """The functions the text defines, name -> every definition (a redefined name counts each one)."""
+    found: dict = {}
+    for comp in shell.iter_compounds(script):
+        if comp.kind == "function" and comp.name:
+            found.setdefault(comp.name, []).append(comp)
+    return found
+
+
 def _receiver_reads_code(readings: Readings, functions: frozenset) -> bool:
     """Some reading of the receiver of a heredoc or here-string runs its input (a shell, `source`, `eval`, `xargs`,
     `at`, ...) or is a function of the text: the body is code, so a program name made by an expansion in it is level
@@ -3882,9 +3900,29 @@ def _receiver_reads_code(readings: Readings, functions: frozenset) -> bool:
                for t in readings.texts)
 
 
+def _receiver_heads(site, readings: Readings) -> "list[str] | None":
+    """The program names the receiver of a heredoc or here-string may be: the readings' own and, for a head made by a
+    brace expansion, each word it makes. None when a head stays unknown (an expansion, a brace expansion that cannot
+    be known): the caller fails closed."""
+    heads = [_head_of(t) for t in readings.texts]
+    words = site.cmd.words
+    for s in readings.starts:
+        word = words[s] if s < len(words) else None
+        if word is None:
+            continue
+        if word.has_brace:
+            expanded = _brace_words(word)
+            if expanded is None:
+                return None
+            heads.extend(expanded)
+        elif word.dynamic:
+            return None
+    return heads
+
+
 def _heredoc_code(site, readings: Readings, categories: list[str], flags: list[str], reasons: set[str],
                   disqualified: bool, _depth: int, budget, view_at, grouped: bool, functions,
-                  rebound: bool = False) -> None:
+                  rebound: bool = False, verdicts=None) -> None:
     """The bodies of the heredocs of one simple command (spec audit-shell-lexer, HD3-HD5): data is not read; the
     program of another language (`python`, `node`, ...) is not shell either; any other receiver gets its body
     classified as a script of its own. The expansions of an unquoted body are commands too (HD2), but they are
@@ -3903,12 +3941,16 @@ def _heredoc_code(site, readings: Readings, categories: list[str], flags: list[s
             _block(categories, flags, reasons, "dynamic_code")  # `.shell`, `\!`: the client runs a command
         return
     data = not rebound and _data_reader(readings)
-    code = _receiver_reads_code(readings, functions())
+    heads = _receiver_heads(site, readings)
+    same_shell = heads is None or any(h.rsplit("/", 1)[-1] in _SAME_SHELL_LOADERS for h in heads)
+    code = _receiver_reads_code(readings, functions()) or any(
+        h.rsplit("/", 1)[-1] in _STDIN_CODE_READERS or h in names for h in heads or ())
     for body, here in bodies:
         if here and data:
             continue
         env = view_at(pos) if "$" in body else None
-        _code_text(body, categories, flags, reasons, _depth, budget, code, env)
+        _code_text(body, categories, flags, reasons, _depth, budget, code, env, verdicts() if verdicts else None,
+                   same_shell)
 
 
 _BAD = "bad"  # a positional form the substitution does not model: the call is level B (part E, V1)
@@ -4502,10 +4544,12 @@ class _Run:
 
     __slots__ = ("command", "depth", "outer_env", "budget", "code", "script", "categories", "flags", "reasons",
                  "has_dollar", "funcs", "forwarded", "raws", "_values", "_views", "_names", "fwd_spans", "in_fwd",
-                 "cwd", "_repo_aliases", "_moved")
+                 "cwd", "_repo_aliases", "_moved", "outer_fn", "_verdicts")
 
-    def __init__(self, command: str, depth: int, outer_env, budget, code: bool, script, cwd=None):
+    def __init__(self, command: str, depth: int, outer_env, budget, code: bool, script, cwd=None, outer_fn=None):
         self.command = command
+        self.outer_fn = outer_fn or {}  # the functions of the enclosing texts: name -> may read code from stdin
+        self._verdicts: list = []  # `function_verdicts`, computed when a call needs it
         # the cwd of the tool call (the hook registers it); None: the process's; False: a nested text (not known)
         self.cwd = cwd if cwd is not None else RESOLVERS.get("cwd")
         self._moved: list = []  # `cwd_moved`, computed when needed
@@ -4555,8 +4599,43 @@ class _Run:
 
     def functions(self) -> frozenset:
         if not self._names:
-            self._names.append(_function_names(self.script))
+            self._names.append(_function_names(self.script) | frozenset(self.outer_fn))
         return self._names[0]
+
+    def function_verdicts(self) -> dict:
+        """Per function name (this text and the enclosing ones), whether some definition may read code from the
+        stdin its call gives it (`_compound_reads_code`). Read once per text; each body read is charged."""
+        if not self._verdicts:
+            verdicts = dict(self.outer_fn)
+            names = self.functions()
+            for name, comps in _function_readers(self.script).items():
+                for comp in comps:
+                    if not self.charge(VARIANT_COST):
+                        verdicts[name] = True  # (fail closed) the budget is spent
+                        break
+                    verdicts[name] = verdicts.get(name, False) or _compound_reads_code(comp, names)
+            self._verdicts.append(verdicts)
+        return self._verdicts[0]
+
+    def function_call(self, site, readings: Readings, unresolved: bool = False) -> None:
+        """A call of a function the text defines (or an enclosing text does), with a pipe or a `<(...)` on its
+        standard input, runs the body on it: when some definition may read code from stdin the call is as the shell it
+        holds, `piped_shell` or `dynamic_code` (the rules of `_stdin_code`). `unresolved`: the program name is an
+        expansion that stays unknown, so it may be any function: every one that reads code counts. A function from
+        an earlier command is not known and not resolved."""
+        names = self.functions()
+        if not names:
+            return
+        called = names if unresolved else {_head_of(t) for t in readings.texts} & names
+        if not called:
+            return
+        reasons = [code.reason for code in _stdin_code(site) if code.reason]
+        if not reasons:
+            return
+        verdicts = self.function_verdicts()
+        if any(verdicts.get(name) for name in called):
+            for reason in reasons:
+                self.block(reason)
 
     def values(self) -> "_Values":
         return _values_of(self.script, self.outer_env, self._values, self.command)
@@ -4569,12 +4648,13 @@ class _Run:
             view = self._views[pos] = self.values().at(pos)
         return view
 
-    def code_text(self, text: str, env, code: bool = True, named: bool = True) -> None:
+    def code_text(self, text: str, env, code: bool = True, named: bool = True, same_shell: bool = False) -> None:
         """`named`: the text is a string a nested shell reads (not the source of a function body, which is in this
         text with its quotes)."""
         if named and self.funcs and _mentions(text, self.funcs):
             self.block("dynamic_code")  # a nested shell that names a forwarding function: `export -f f; bash -c 'f x'`
-        _code_text(text, self.categories, self.flags, self.reasons, self.depth, self.budget, code, env)
+        _code_text(text, self.categories, self.flags, self.reasons, self.depth, self.budget, code, env,
+                   self.function_verdicts(), same_shell)
 
     def forwarded_misuse(self, tokens: list[str], readings: Readings) -> None:
         """D1: a forwarding function named where it is not called with its arguments in view (`xargs f`, `eval f x`,
@@ -4622,6 +4702,11 @@ class _Run:
             self.forwarded_misuse(tokens, readings)
         env = self.view_at(start) if self.has_dollar else _NO_VALUES
         variants, head_unresolved, from_variant = self.head_variants(tokens, words, readings, env)
+        if head_unresolved or (not from_variant and any(
+                s < len(words) and words[s] is not None and (words[s].dynamic or words[s].has_glob)
+                and not _literal_slash(words[s])
+                for s in readings.starts)):
+            self.function_call(site, readings, True)  # the program is an expansion: it may name any function
         if head_unresolved:
             self.block("dynamic_code")
         for v_tokens, v_words, v_readings in variants:
@@ -4678,6 +4763,7 @@ class _Run:
         if not readings.complete:
             self.unclassified()
             return
+        self.function_call(site, readings)  # (each resolved program: `$g` with g=f, `{f,}`, `${g:-f}`)
         arg_variants, args_unresolved = _arg_variants(tokens, words, readings, env)
         if args_unresolved:
             self.block("dynamic_code")
@@ -4712,7 +4798,7 @@ class _Run:
                 self.block("dynamic_code")
         self.dynamic_program(words, tokens, readings, env, from_variant)
         self.forwarded_calls(site, tokens, words, readings, env)
-        self.code_arguments(site, tokens, words, env)
+        self.code_arguments(site, tokens, words, env, readings)
 
     def dynamic_program(self, words: list, tokens: list[str], readings: Readings, env: "_Values",
                         from_variant: bool) -> None:
@@ -4762,9 +4848,11 @@ class _Run:
                 text = _positional_text(body, args, tokens[s + 1:], marks)
                 self.code_text(text, env if "$" in text else None, named=False)
 
-    def code_arguments(self, site, tokens: list[str], words: list, env: "_Values") -> None:
+    def code_arguments(self, site, tokens: list[str], words: list, env: "_Values", readings: Readings) -> None:
         """X1-X6: the code the arguments of the command run, classified one level deeper."""
         cmd = site.cmd
+        heads = {_program_name(tokens[s]) for s in readings.starts if s < len(tokens)}
+        same_shell = bool(heads & _SAME_SHELL_LOADERS)  # what these run lives on in this shell
         for text, reason in _code_args(site, tokens, words):
             texts = None if text is None else (_expand_values(text, env) if self.has_dollar else [text])
             if texts is None:  # unknown code (X3/X5), or more than MAX_VALUE_CANDIDATES values (V4)
@@ -4774,7 +4862,16 @@ class _Run:
             for code in texts:
                 if len(texts) > 1 and not self.charge(VARIANT_COST):
                     break
-                self.code_text(code, inner if "$" in code else None)
+                self.code_text(code, inner if "$" in code else None, same_shell=same_shell)
+
+    def compound_procsub_stdin(self) -> None:
+        """`{ bash; } < <(x)`: a compound with a `<(...)` on any input descriptor (it may be copied to stdin) that may read code from it reads code
+        of unknown reach, like `bash < <(x)` (X5). A false positive when a command inside replaces the stdin."""
+        for compound in shell.iter_compounds(self.script):
+            if any(r.op in ("<", "<>") and r.target is not None
+                   and any(part.kind == "procsub_in" for part in r.target.parts) for r in compound.redirects) \
+                    and _compound_reads_code(compound, self.functions()):
+                self.block("dynamic_code")
 
     def compound_heredocs(self) -> None:
         """A heredoc or here-string on a compound command (`{ bash; } <<EOF`) feeds code of unknown reach."""
@@ -4798,7 +4895,7 @@ class _Run:
 
 
 def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _code: bool = False,
-                    cwd: "str | None" = None, _cwd=None) -> Analysis:
+                    cwd: "str | None" = None, _cwd=None, _fn=None, _same: bool = False) -> Analysis:
     """Classify a Bash command: categories, flags and the reasons of any parser uncertainty (spec
     audit-hook-hardening, section 3; audit-shell-lexer, section 4.1). The command is read by the shell parser, and
     every simple command of the tree is classified by its readings. Uncertainty never becomes an allow:
@@ -4823,7 +4920,12 @@ def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _cod
         return _level_b("analysis_budget")
     except shell.ShellError:  # does not close, or is outside the subset: never read as a guess (S3)
         return _level_b("lex_error")
-    run = _Run(command, _depth, _env, budget, _code, script, cwd if _cwd is None else _cwd)
+    run = _Run(command, _depth, _env, budget, _code, script, cwd if _cwd is None else _cwd, _fn)
+    if "command_not_found_handle" in run.functions():  # (the parsed names: `command_not_found_\<newline>handle`)
+        if run.function_verdicts().get("command_not_found_handle"):
+            run.block("dynamic_code")  # bash calls it for any unknown command, with whatever stdin that has
+    if _same and _function_readers(script):
+        run.block("dynamic_code")  # `eval 'f() { bash; }'`: the function exists in the text that ran it, not seen here
     items = []
     for site in shell.iter_sites(script):
         tokens = [w.text for w in site.cmd.words]
@@ -4839,9 +4941,11 @@ def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _cod
         if has_heredoc:
             _heredoc_code(site, readings, run.categories, run.flags, run.reasons, disqualified, _depth, budget,
                           run.view_at, id(site.cmd) in grouped, run.functions,
-                          any(lo <= site.cmd.span[0] < hi for lo, hi in rebound_spans))
+                          any(lo <= site.cmd.span[0] < hi for lo, hi in rebound_spans), run.function_verdicts)
     if has_heredoc:
         run.compound_heredocs()
+    if "<(" in command:
+        run.compound_procsub_stdin()
     return run.result()
 
 

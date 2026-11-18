@@ -1,6 +1,6 @@
 # agent-audit: a group or subshell with a process-substitution stdin is not flagged
 
-- **Status:** Open
+- **Status:** Fixed
 - **Reported:** 2026-11-16
 - **Severity:** high
 - **Environment:** local (Claude Code hooks)
@@ -26,8 +26,10 @@ Flags are `['other']`; the command is allowed.
 
 ## Root cause
 
-Not diagnosed yet.
+`_stdin_code` read only the simple command's redirects; the compound's `< <(...)` was never looked at.
 
 ## Fix
 
-Not fixed yet.
+`_Run.compound_procsub_stdin` blocks a compound with `<(...)` on any input fd (`<` or `<>`) whose body reads code with dynamic_code; `_stdin_code` accepts `<>`. Regression tests: `test_command_positions.py` class PipeReceivers.
+
+Fixed on 2026-11-18 (not committed yet). Run: `.claude/runs/bug-audit-pipe-procsub-stdin-family.json`. Suite: 989 tests pass.

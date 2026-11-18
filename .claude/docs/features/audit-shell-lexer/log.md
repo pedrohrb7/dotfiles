@@ -166,3 +166,24 @@ Bug `2026-11-16-audit-git-subcommands-run-shell-code` (backlog). Options of git 
 **Files:** `.claude/hooks/agent_audit_classify.py` (`_GIT_CODE_OPTIONS`, `_git_exec_code`, `_is_getopt`, `_ends_options`, `_ext_url_code`, `_ext_codes`, `_git_program_option`, `_git_strategies`, `_git_clone_config`, `git` case of `_prefix_steps`); tests in `test_classify.py`, `test_command_positions.py`.
 
 **Gate:** the suite now has 951 tests (about 11-12 s idle; 15-18 s under load). Spec: see "Adendo 2026-11-16 (4)".
+
+## Addendum 2026-11-18 - pipe and process-substitution stdin: writers, coproc, function calls, compounds
+
+Bugs `2026-11-16-audit-procsub-writer-shell-not-flagged`, `2026-11-16-audit-function-coproc-pipe-receiver-not-followed` and `2026-11-16-audit-group-procsub-stdin-not-flagged` (backlog), fixed together in one run. **Changes Addendum 2026-11-16 (2)** on two points: a `coproc` body now always reads a pipe (it no longer "does not inherit"), and a function is no longer skipped: a call of it is resolved at the call site.
+
+**User decisions (2026-11-18):**
+- The script of a `>(...)` process substitution is always piped (its stdin is the pipe its writer fills): `echo x > >(bash)` is `piped_shell`.
+- A `coproc` body that reads code is always piped, writer visible or not. The `PipedStdin` coproc test is inverted.
+- A call of a function defined in the text, under a pipe or with a `<(...)` on its stdin, is read as the shell its body holds: `f() { bash; }; echo x | f` is `piped_shell`. The body predicate is `_compound_reads_code` as is (eval, xargs, at and function heads count). The verdict covers every definition of the name (a redefined name counts each one), is computed once per run and charged `VARIANT_COST` per body read.
+- Calls are matched on every resolved head (`$g` with `g=f`, `{f,}`, `${g:-f}`) and on unresolved heads (expansion or glob without a literal `/`), which may name any function (fail closed). A head with a literal `/` is not a function call.
+- The outer function table reaches nested texts: `eval`, `trap`, `source`/`.`, `bash -c` and heredoc bodies. A function defined inside an `eval`/`trap`/`source` string (`_SAME_SHELL_LOADERS`: `eval`, `trap`, `source`, `.`, `mapfile`, `readarray`, `emulate`) is `dynamic_code`, since it outlives the string and its calls are not seen; a `bash -c` string is a child, so `bash -c 'f() { :; }; f'` stays clean. A heredoc body read by a same-shell loader, or by a receiver whose head stays unknown, gets the same block. Receivers of heredocs and here-strings resolve brace heads (`_receiver_heads`).
+- A definition of `command_not_found_handle` that reads code is `dynamic_code` (bash calls it for any unknown command).
+- A compound with a `<(...)` as the target of any input redirect (`<` or `<>`, any fd) that reads code is `dynamic_code`, like `bash < <(x)`: `{ bash; } 3< <(x)` blocks.
+
+**Accepted false positives:** `{ bash <<< x; } < <(y)`; `f() { eval "$1"; }; echo x | f a`; a redefined name counts (any definition that reads code); `command`/`sudo`/`env`/`timeout f` and `echo x | command f` under a pipe count as a call; `f() { bash; } < <(x)` with no call blocks; `f() { cat; }; g() { f; }; echo x | g` blocks; `echo x | $UNKNOWN` blocks when the text defines a function that reads code; `eval 'x=$(f() { :; }; f)'` blocks.
+
+**Accepted limitations:** a function defined in an earlier call (another command of the session) is not resolved; a function defined by `bash -c` or in a heredoc body is analyzed in the child, not visible to the parent. Two follow-ups went to the backlog: the stdin of `trap` handlers (DEBUG/ERR/EXIT) and of `mapfile -C` callbacks.
+
+**Files:** `.claude/hooks/agent_audit_shell.py` (`part_script_items`, `Word.script_items`, `_NO_STDIN_KINDS`, the coproc case and writer flag in `_walk`/`_walk_redirects`), `.claude/hooks/agent_audit_classify.py` (`_SAME_SHELL_LOADERS`, `_literal_slash`, `_function_readers`, `_receiver_heads`, `_Run.function_verdicts`, `_Run.function_call`, `_Run.compound_procsub_stdin`, `_code_text` and `analyze_command` parameters `fn`/`same_shell`, the `command_not_found_handle` check); tests in `test_shell_lexer.py` (`PipedStdin`) and `test_command_positions.py` (`PipeReceivers`). `.claude/README.md` (piped_shell line) updated.
+
+**Gate:** the suite now has 989 tests (12.7 s). Spec: see "Adendo 2026-11-18".
