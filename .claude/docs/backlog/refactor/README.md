@@ -45,3 +45,4 @@ Planned refactors that aren't urgent bugs but are worth doing deliberately, one 
 | [agent-audit: the git push check matches push as an argument; use the git subcommand](2026-11-14-audit-git-push-regex-argument.md) | Proposed |
 | [agent-audit: nvim vim.cmd / nvim_command executing ex commands with a bang are not modeled](2026-11-14-audit-nvim-vim-cmd-bang.md) | Proposed |
 | [agent-audit: _prefix_steps evaluated twice per site](2026-11-14-audit-prefix-steps-evaluated-twice.md) | Proposed |
+| [agent-audit: derive the stdin facts from the main analysis (second pass to a fixed point), high priority](2026-11-18-audit-stdin-facts-from-main-analysis.md) | Proposed |

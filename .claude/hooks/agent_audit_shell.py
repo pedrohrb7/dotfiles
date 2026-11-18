@@ -288,12 +288,14 @@ class Site(_Node):
     """One simple command and where it sits. cmd: the Simple; top_level: a direct element of the walked script's
     lists (no compound, subshell or substitution); stages / stage: stages of its pipeline and its index (0 =
     first); substitution / sub_word: the command whose word holds the substitution it is in, and that word;
-    in_compound; piped: its stdin is inherited from a pipe stage that holds it (a group, subshell or other
-    compound body, or a substitution, in a stage after the first), unless a redirection replaced it on the way."""
+    in_compound; stdin: the reason a reader of its inherited stdin gets (`piped_shell`: the pipe of a stage that
+    holds it, a group, subshell or other compound body, or a substitution, in a stage after the first;
+    `dynamic_code`: a process substitution or an `exec` redirect), or None, unless a redirection replaced it on the
+    way; ctx: the `StdinContext` it sits in (`exec` redirects, fifos)."""
 
-    __slots__ = ("cmd", "top_level", "stages", "stage", "substitution", "sub_word", "in_compound", "piped")
+    __slots__ = ("cmd", "top_level", "stages", "stage", "substitution", "sub_word", "in_compound", "stdin", "ctx")
 
-    def __init__(self, cmd, top_level, stages, stage, substitution, sub_word, in_compound, piped=False):
+    def __init__(self, cmd, top_level, stages, stage, substitution, sub_word, in_compound, stdin=None, ctx=None):
         self.cmd = cmd
         self.top_level = top_level
         self.stages = stages
@@ -301,7 +303,13 @@ class Site(_Node):
         self.substitution = substitution
         self.sub_word = sub_word
         self.in_compound = in_compound
-        self.piped = piped
+        self.stdin = stdin or None
+        self.ctx = ctx
+
+    @property
+    def piped(self) -> bool:
+        """`stdin` is a pipe."""
+        return self.stdin == PIPED
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1460,86 +1468,275 @@ def parse(text: str, budget: Budget, *, base: int = 0) -> Script:
 
 _STDIN_REPLACERS = frozenset({"<<", "<<-", "<<<"})
 _NO_STDIN_KINDS = frozenset({"function"})
+# The stdin states: the reason a reader of that stdin gets (None: not a source the hook cannot read).
+PIPED = "piped_shell"  # a pipe, a coproc or a `>(...)` writer, a named pipe made in the text
+DYNAMIC = "dynamic_code"  # a process substitution, an `exec` redirect from one
 
 
-def _fd_number(redirect, default: int) -> "int | None":
+def _fd_number(redirect, default: int) -> "int | str":
+    """The descriptor a redirection names: its number, `default` when it names none, `"?"` for a named one
+    (`{fd}<`: any descriptor from 10 up)."""
     if redirect.fd is None:
         return default
-    return int(redirect.fd) if redirect.fd.isdigit() else None
+    return int(redirect.fd) if redirect.fd.isdigit() else "?"
 
 
-def _fd_states(redirects, piped: bool) -> dict:
-    """Per descriptor, whether it is the pipe (`piped`) after `redirects`, applied left to right. Only descriptor 0
-    and the ones a redirection names are in the result; any other descriptor is the pipe when `piped`. A heredoc or
-    a here-string makes its descriptor not the pipe. A file (`<`, `<>`, to any target: it can name the pipe) and
-    `<&-` keep the incoming state, and `N<&M` copies the state of M, so the last of them wins."""
-    fds = {0: piped}
+def normalize_name(text: str) -> str:
+    """A path without its `.` and empty components, `..` applied lexically: an absolute path stays absolute, a
+    relative one keeps the `..` it cannot resolve (`.` when nothing is left)."""
+    absolute = text.startswith("/")
+    parts: list[str] = []
+    for part in text.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if parts and parts[-1] != "..":
+                parts.pop()
+            elif not absolute:
+                parts.append(part)
+            continue
+        parts.append(part)
+    joined = "/".join(parts)
+    return "/" + joined if absolute else joined or "."
+
+
+def normalize_path(text: str) -> "str | None":
+    """An absolute path without its `.` and empty components, `..` applied lexically; None for a relative one."""
+    return normalize_name(text) if text.startswith("/") else None
+
+
+_FD_NUMBER = r"(0|[1-9][0-9]*)"
+_FD_ALIAS = re.compile(r"/dev/fd/" + _FD_NUMBER + r"|/proc/[^/]+(?:/task/[^/]+)?/fd/" + _FD_NUMBER)
+_PROC_ROOT = re.compile(r"/proc/[^/]+(?:/task/[^/]+)?/(?:root|cwd)(?=/|$)")
+
+
+def _absolute_guess(text: str) -> "str | None":
+    """The absolute path a text may name when its cwd is unknown: an absolute path as it is; a path that goes up
+    (`../..`, or after `~user`) as the root it may reach, its leading `..` dropped; None for any other relative one."""
+    if text.startswith("~"):
+        text = text.partition("/")[2]
+        text = "../" + text
+    path = normalize_name(text)
+    if path.startswith("/"):
+        return path
+    if path == ".." or path.startswith("../"):
+        return "/" + "/".join(part for part in path.split("/") if part != "..")
+    return None
+
+
+def stdin_alias(text: str) -> "int | None":
+    """The descriptor a path names: `/dev/stdin` is 0, `/dev/fd/N` and `/proc/<pid>/[task/<tid>/]fd/N` (the pid
+    may be `self`, `thread-self`, a number or an expansion) are N, after `.`, `..` and `//` are applied, a relative
+    path that goes up is read from the root, a `~user` prefix is any directory, and `/proc/<pid>/root` and
+    `/proc/<pid>/cwd` are stripped. None for any other path."""
+    path = _absolute_guess(text)
+    if path is None:
+        return None
+    for _ in range(8):  # (a bounded number of links through /proc)
+        found = _PROC_ROOT.match(path)
+        if not found:
+            break
+        path = normalize_name(path[found.end():] or "/")
+    if path == "/dev/stdin":
+        return 0
+    found = _FD_ALIAS.fullmatch(path)
+    return int(found.group(1) or found.group(2)) if found else None
+
+
+class Fifos:
+    """The named pipes the text creates (`mkfifo`, `mknod NAME p`): their normalized names, and whether some could
+    not be read (an expansion, a wrapper, a code string, a `mv` or `ln` of one), when every file may be one."""
+
+    __slots__ = ("names", "unknown")
+
+    def __init__(self):
+        self.names: set = set()
+        self.unknown = False
+
+    def __bool__(self) -> bool:
+        return bool(self.names) or self.unknown
+
+    def match(self, word) -> bool:
+        """Whether the word may name one of them."""
+        if word is None or not self:
+            return False
+        if self.unknown or word.dynamic or word.has_glob:
+            return True
+        return self.match_text(word.text)
+
+    def match_text(self, text: str) -> bool:
+        """Whether the path (a word with no expansion) may name one of them."""
+        return bool(self) and (self.unknown or normalize_name(text) in self.names)
+
+
+class StdinContext:
+    """What the classifier knows about stdin outside one command: `fds`, the state of the descriptors an `exec`
+    set (or the enclosing text gave); `fifos`; `moved`: the text changes directory or makes links, so a relative
+    path may be any file; `end`: the descriptors at the end of the text (what an EXIT trap reads)."""
+
+    __slots__ = ("fds", "fifos", "moved", "end")
+
+    def __init__(self, fds: "dict | None" = None, fifos: "Fifos | None" = None, moved: bool = False,
+                 end: "dict | None" = None):
+        self.fds = fds or {}
+        self.fifos = fifos if fifos is not None else Fifos()
+        self.moved = moved
+        self.end = end if end is not None else self.fds
+
+
+NO_CONTEXT = StdinContext()
+
+
+def active(*maps):
+    """The first state (`PIPED` or `DYNAMIC`) any of the descriptor maps holds, or None."""
+    for fds in maps:
+        for state in fds.values():
+            if state:
+                return state
+    return None
+
+
+def descriptor(number: int, fds: dict, known: dict, base):
+    """The state of descriptor `number`: set by these redirections, by an `exec`, a named descriptor (from 10 up) when
+    the number is not known, else the incoming one."""
+    if number in fds:
+        return fds[number]
+    if number in known:
+        return known[number]
+    if number >= 10 and "?" in known:
+        return known["?"]
+    return base
+
+
+def _file_state(target, fds: dict, known: dict, base, ctx: StdinContext):
+    """The state of a descriptor opened for input on `target`. A process substitution is `dynamic_code` (a pipe it
+    comes after stays); a named pipe of the text is the pipe; a path that names a descriptor is that descriptor (or the
+    incoming state: a file never replaces a pipe); a target that may name one (an expansion, a glob, `~user`) is any
+    active descriptor; any other file keeps the incoming state (it may be the pipe itself: a link)."""
+    if any(part.kind == "procsub_in" for part in target.parts):
+        return base or DYNAMIC
+    if ctx.fifos.match(target):
+        return PIPED
+    alias = stdin_alias(target.text)
+    if alias is not None:
+        return descriptor(alias, fds, known, None) or base
+    if target.dynamic or target.has_glob or target.text.startswith("~") \
+            or (ctx.moved and not target.text.startswith("/")):
+        return base or active(fds, known)
+    return base
+
+
+def _copied_state(text: str, fds: dict, known: dict, base):
+    """The state a `N<&M` takes: that of descriptor M (`M-` moves it); an expansion is any active descriptor."""
+    number = text[:-1] if text.endswith("-") else text
+    if number.isdigit():
+        return descriptor(int(number), fds, known, base)
+    if text != "-" and ("$" in text or "*" in text or "?" in text or "[" in text):
+        return base or active(fds, known)
+    return base
+
+
+_UNSET = object()
+
+
+def fd_states(redirects, base, ctx: StdinContext = NO_CONTEXT, start=_UNSET) -> dict:
+    """Per descriptor, the state (`PIPED`, `DYNAMIC` or None) after `redirects`, applied left to right, from the
+    incoming `base` of descriptor 0 (`start` when it is not the one a file keeps). Only descriptor 0 and the ones a
+    redirection names are in the result; any other descriptor has `ctx.fds` or `base`. A heredoc or a here-string
+    makes its descriptor None. A file (`<`, `<>`) and `<&-` keep the incoming state (the file may name the pipe),
+    unless it is a fifo, a procsub or a descriptor alias; `N<&M` copies the state of M, so the last of them wins."""
+    fds: dict = {0: base if start is _UNSET else start}
+    known = ctx.fds
     for r in redirects:
         if r.heredoc is not None or r.op in _STDIN_REPLACERS:
-            fd, state = _fd_number(r, 0), False
+            fd, state = _fd_number(r, 0), None
         elif r.op in ("<&", ">&") and r.target is not None:
             fd = _fd_number(r, 0 if r.op == "<&" else 1)
-            text = r.target.text
-            state = fds.get(int(text), piped) if text.isdigit() else piped
+            state = _copied_state(r.target.text, fds, known, base)
         elif r.op in ("<", "<>") and r.target is not None:
-            fd, state = _fd_number(r, 0), piped
+            fd, state = _fd_number(r, 0), _file_state(r.target, fds, known, base, ctx)
         else:
             continue
-        if fd is not None:
-            fds[fd] = state
+        if fd == "?" and fds.get("?") and not state:
+            continue  # a named descriptor may be any from 10 up: a later one never clears what an earlier one set
+        fds[fd] = state
     return fds
 
 
-def stdin_piped(redirects, piped: bool) -> bool:
-    """Whether standard input is still the pipe (`piped`) after `redirects`. Under a pipe only a heredoc or a
-    here-string replaces it (the last fd 0 redirection wins): a file may be the pipe itself (`/dev/stdin`,
-    `/dev/fd/0`, a descriptor copy), so `<` and `<>` never do. `0<&N` copies a descriptor made by `N<&0`."""
-    return _fd_states(redirects, piped)[0]
+def stdin_state(redirects, base, ctx: StdinContext = NO_CONTEXT):
+    """The state of standard input after `redirects`. Under a pipe only a heredoc or a here-string replaces it (the
+    last fd 0 redirection wins): a file may be the pipe itself, so `<` and `<>` never do."""
+    return fd_states(redirects, base, ctx)[0]
 
 
-def fd_piped(redirects, piped: bool) -> bool:
-    """Whether any descriptor the redirections track is the pipe: what a compound body may read."""
-    return any(_fd_states(redirects, piped).values())
+def fd_state(redirects, base, ctx: StdinContext = NO_CONTEXT):
+    """The first state any descriptor the redirections track has (fd 0 first): what a compound body may read."""
+    fds = fd_states(redirects, base, ctx)
+    return fds[0] or active(fds)
 
 
-def _walk_redirects(redirects, owner: "Site | None", in_compound: bool, fed: bool = False):
-    """`fed`: the command's incoming stdin is a pipe. A target sees only the redirections to its left; a here-string
-    and a heredoc body are expanded before any of them."""
+def exec_fds(redirects, ctx: StdinContext, incoming=None) -> dict:
+    """The descriptors after a bare `exec` with these redirections (the shell itself is rebound): `ctx.fds` with
+    the ones the redirections name replaced. A file replaces what it names; `N<&0` copies `incoming`, the stdin of
+    the command (the state of descriptor 0 in `ctx` when None)."""
+    fds = fd_states(redirects, None, ctx, ctx.fds.get(0) if incoming is None else incoming)
+    out = dict(ctx.fds)
+    for r in redirects:
+        if r.heredoc is not None or r.op in _STDIN_REPLACERS or r.op in ("<", "<>"):
+            default = 0
+        elif r.op in ("<&", ">&"):
+            default = 0 if r.op == "<&" else 1
+        else:
+            continue
+        fd = _fd_number(r, default)
+        if fd in fds:
+            if fd == "?" and out.get("?") and not fds[fd]:
+                continue  # sticky: see `fd_states`
+            out[fd] = fds[fd]
+    return {fd: state for fd, state in out.items() if state}
+
+
+def _walk_redirects(redirects, owner: "Site | None", in_compound: bool, fed, ctx: StdinContext, resolve):
+    """`fed`: the state of the command's incoming stdin. A target sees only the redirections to its left; a
+    here-string and a heredoc body are expanded before any of them."""
     for i, r in enumerate(redirects):
-        state = fed if (r.heredoc is not None or r.op == "<<<") else stdin_piped(redirects[:i], fed)
+        state = fed if (r.heredoc is not None or r.op == "<<<") else stdin_state(redirects[:i], fed, ctx)
         if r.target is not None:
             for script, writer in r.target.script_items():
-                yield from _walk(script, False, in_compound, owner, r.target, writer or state)
+                yield from _walk(script, False, in_compound, owner, r.target, PIPED if writer else state, resolve)
         if r.heredoc is not None:
             for part in r.heredoc.expansions:
                 for script, writer in part_script_items(part):
-                    yield from _walk(script, False, in_compound, owner, None, writer or fed)
+                    yield from _walk(script, False, in_compound, owner, None, PIPED if writer else fed, resolve)
 
 
 def _walk(script: Script, top: bool, in_compound: bool, parent: "Site | None", sub_word: "Word | None",
-          piped: bool = False):
-    """`piped`: the script's standard input is the pipe of a stage that holds it. The first stage of a pipeline
-    keeps what the script has; a later stage is fed by the stage before it."""
+          piped=None, resolve=None):
+    """`piped`: the state of the script's standard input (`PIPED`, `DYNAMIC` or None). The first stage of a pipeline
+    keeps what the script has; a later stage is fed by the stage before it. `resolve(offset)`: the `StdinContext`
+    at that offset of the text (the descriptors an earlier `exec` set, the fifos)."""
     for pipeline in script.pipelines:
         stages = len(pipeline.commands)
         for index, cmd in enumerate(pipeline.commands):
-            fed = piped or index > 0
+            fed = PIPED if index > 0 else piped
+            ctx = resolve(cmd.span[0]) if resolve is not None else NO_CONTEXT
             if isinstance(cmd, Simple):
-                site = Site(cmd, top, stages, index, parent, sub_word, in_compound, piped)
+                site = Site(cmd, top, stages, index, parent, sub_word, in_compound, piped, ctx)
                 yield site
                 for word in (*cmd.assignments, *cmd.words):
                     for nested, writer in word.script_items():
-                        yield from _walk(nested, False, in_compound, site, word, writer or fed)
-                yield from _walk_redirects(cmd.redirects, site, in_compound, fed)
+                        yield from _walk(nested, False, in_compound, site, word, PIPED if writer else fed, resolve)
+                yield from _walk_redirects(cmd.redirects, site, in_compound, fed, ctx, resolve)
             else:
                 # a function body has no stdin until it is called; a coproc body always reads its own pipe
-                inner = cmd.kind == "coproc" or (cmd.kind not in _NO_STDIN_KINDS and fd_piped(cmd.redirects, fed))
+                inner = PIPED if cmd.kind == "coproc" else (
+                    None if cmd.kind in _NO_STDIN_KINDS else fd_state(cmd.redirects, fed, ctx))
                 for word in cmd.words:
                     for nested, writer in word.script_items():
-                        yield from _walk(nested, False, True, parent, word, writer or inner)
+                        yield from _walk(nested, False, True, parent, word, PIPED if writer else inner, resolve)
                 for body in cmd.bodies:
-                    yield from _walk(body, False, True, parent, sub_word, inner)
-                yield from _walk_redirects(cmd.redirects, parent, True, fed)
+                    yield from _walk(body, False, True, parent, sub_word, inner, resolve)
+                yield from _walk_redirects(cmd.redirects, parent, True, fed, ctx, resolve)
 
 
 def iter_compounds(script: Script):
@@ -1566,8 +1763,9 @@ def iter_compounds(script: Script):
                             stack.extend(part_scripts(part))
 
 
-def iter_sites(script: Script):
+def iter_sites(script: Script, stdin=None, resolve=None):
     """Yields a `Site` for every simple command of the script, nested scripts included (substitutions, compound
     bodies, heredoc expansions), each with its context. A simple command comes before the commands inside its
-    substitutions."""
-    return _walk(script, True, False, None, None)
+    substitutions. `stdin`: the state of the standard input the script is given (a code string inherits it);
+    `resolve(offset)`: the `StdinContext` of a command at that offset of the text."""
+    return _walk(script, True, False, None, None, stdin, resolve)

@@ -1039,6 +1039,152 @@ class CodeEvaluatingExpansions(unittest.TestCase):
         self.assertTrue(first_words("${(e)X}")[0].dynamic)
 
 
+class StdinNames(unittest.TestCase):
+    """The pure helpers of the stdin state (`stdin_alias`, `normalize_name`, `normalize_path`, `Fifos`, `fd_states`,
+    `stdin_state`, `exec_fds`). Texts are only parsed."""
+
+    def redirects(self, text):
+        return sites(text)[0].cmd.redirects
+
+    def fifos(self, *names, unknown=False):
+        fifos = shell.Fifos()
+        fifos.names.update(names)
+        fifos.unknown = unknown
+        return fifos
+
+    def first_word(self, text, index=1):
+        return sites(text)[0].cmd.words[index]
+
+    # -- normalize_name / normalize_path -------------------------------------------------------------------------
+
+    def test_normalize_name_applies_dots_and_empty_components(self):
+        for text, expected in (
+            ("./a//b/../c", "a/c"), ("..", ".."), ("../..", "../.."), ("a/..", "."), ("/", "/"), ("//a/./b", "/a/b"),
+            ("/..", "/"), ("", "."), ("/a/../../b", "/b"), ("../a/..", ".."),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(shell.normalize_name(text), expected)
+
+    def test_normalize_path_is_none_for_a_relative_path(self):
+        self.assertIsNone(shell.normalize_path("dev/stdin"))
+        self.assertIsNone(shell.normalize_path("../dev/stdin"))
+        self.assertEqual(shell.normalize_path("/dev/./fd//3"), "/dev/fd/3")
+
+    # -- stdin_alias ---------------------------------------------------------------------------------------------
+
+    def test_stdin_alias_names_the_descriptor_of_a_stdin_path(self):
+        for text, expected in (
+            ("/dev/stdin", 0), ("/dev/./stdin", 0), ("/dev//stdin", 0), ("/dev/fd/3", 3), ("/dev//fd/3", 3),
+            ("/proc/self/fd/0", 0), ("/proc/123/fd/5", 5), ("/proc/self/task/7/fd/2", 2), ("/proc/$$/fd/0", 0),
+            ("/a/../../dev/stdin", 0),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(shell.stdin_alias(text), expected)
+
+    def test_stdin_alias_is_none_for_any_other_path(self):
+        for text in ("/dev/null", "/dev/stdout", "/dev/fd/x", "stdin", "dev/stdin", "/tmp/stdin", "/dev/fd/"):
+            with self.subTest(text=text):
+                self.assertIsNone(shell.stdin_alias(text))
+
+    def test_stdin_alias_sees_through_the_root_link_of_proc(self):
+        """User decision 2026-11-18: `/proc/<pid>/root` and `/proc/<pid>/cwd` prefixes are stripped."""
+        for text, expected in (
+            ("/proc/self/root/dev/stdin", 0), ("/proc/self/root/proc/self/fd/0", 0),
+            ("/proc/self/root/dev/fd/3", 3),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(shell.stdin_alias(text), expected)
+
+    # -- Fifos ---------------------------------------------------------------------------------------------------
+
+    def test_an_empty_fifo_set_matches_nothing(self):
+        fifos = shell.Fifos()
+        self.assertFalse(fifos)
+        self.assertFalse(fifos.match(self.first_word("bash p")))
+
+    def test_a_fifo_set_matches_the_normalized_names_it_holds(self):
+        fifos = self.fifos("p", "/tmp/q")
+        self.assertTrue(fifos)
+        for text, expected in (("bash p", True), ("bash ./p", True), ("bash /tmp/./q", True), ("bash other", False)):
+            with self.subTest(text=text):
+                self.assertEqual(fifos.match(self.first_word(text)), expected)
+        self.assertFalse(fifos.match(None))
+
+    def test_a_fifo_set_with_an_unreadable_name_matches_any_word(self):
+        fifos = self.fifos(unknown=True)
+        self.assertTrue(fifos)
+        for text in ("bash other", "bash $f", "bash *.sh"):
+            with self.subTest(text=text):
+                self.assertTrue(fifos.match(self.first_word(text)))
+
+    def test_a_dynamic_or_glob_word_may_name_a_known_fifo(self):
+        fifos = self.fifos("p")
+        for text in ("bash $f", "bash ?", "bash [p]"):
+            with self.subTest(text=text):
+                self.assertTrue(fifos.match(self.first_word(text)))
+
+    # -- fd_states / stdin_state ---------------------------------------------------------------------------------
+
+    def test_a_here_string_and_a_heredoc_replace_the_incoming_state(self):
+        self.assertIsNone(shell.stdin_state(self.redirects("bash <<< x"), shell.PIPED))
+        self.assertIsNone(shell.stdin_state(self.redirects("bash <<E\nx\nE"), shell.PIPED))
+
+    def test_a_file_never_replaces_a_pipe_but_a_process_substitution_replaces_none(self):
+        self.assertEqual(shell.stdin_state(self.redirects("bash < f"), shell.PIPED), shell.PIPED)
+        self.assertIsNone(shell.stdin_state(self.redirects("bash < f"), None))
+        self.assertEqual(shell.stdin_state(self.redirects("bash < <(x)"), None), shell.DYNAMIC)
+
+    def test_a_descriptor_copy_takes_the_state_of_the_source(self):
+        states = shell.fd_states(self.redirects("bash 3<&0"), shell.PIPED)
+        self.assertEqual(states, {0: shell.PIPED, 3: shell.PIPED})
+        ctx = shell.StdinContext({3: shell.DYNAMIC})
+        self.assertEqual(shell.fd_states(self.redirects("bash <&3"), None, ctx)[0], shell.DYNAMIC)
+
+    def test_the_last_redirection_of_descriptor_zero_wins(self):
+        ctx = shell.StdinContext({3: shell.DYNAMIC})
+        self.assertIsNone(shell.stdin_state(self.redirects("bash <&3 <<< x"), None, ctx))
+        self.assertEqual(shell.stdin_state(self.redirects("bash <<< x <&3"), None, ctx), shell.DYNAMIC)
+
+    def test_a_fifo_file_makes_the_descriptor_piped(self):
+        ctx = shell.StdinContext({}, self.fifos("p"))
+        self.assertEqual(shell.stdin_state(self.redirects("bash < p"), None, ctx), shell.PIPED)
+        self.assertIsNone(shell.stdin_state(self.redirects("bash < other"), None, ctx))
+
+    def test_a_stdin_alias_file_after_a_copy_keeps_the_copied_state(self):
+        ctx = shell.StdinContext({3: shell.DYNAMIC})
+        self.assertEqual(shell.stdin_state(self.redirects("bash 0<&3 < /dev/stdin"), None, ctx), shell.DYNAMIC)
+
+    def test_a_descriptor_move_takes_the_state_of_the_source(self):
+        ctx = shell.StdinContext({3: shell.DYNAMIC})
+        self.assertEqual(shell.stdin_state(self.redirects("bash <&3-"), None, ctx), shell.DYNAMIC)
+
+    def test_fd_state_is_the_first_active_descriptor_with_zero_first(self):
+        redirects = self.redirects("bash 3< <(x)")
+        self.assertEqual(shell.fd_state(redirects, None), shell.DYNAMIC)
+        self.assertIsNone(shell.fd_state(self.redirects("bash < f"), None))
+        self.assertEqual(shell.fd_state(self.redirects("bash 3< <(x)"), shell.PIPED), shell.PIPED)
+
+    # -- exec_fds ------------------------------------------------------------------------------------------------
+
+    def test_exec_fds_sets_the_descriptors_the_redirections_name(self):
+        self.assertEqual(shell.exec_fds(self.redirects("exec 3< <(x)"), shell.NO_CONTEXT), {3: shell.DYNAMIC})
+        self.assertEqual(shell.exec_fds(self.redirects("exec < <(x)"), shell.NO_CONTEXT), {0: shell.DYNAMIC})
+
+    def test_exec_fds_keeps_the_descriptors_it_does_not_name_and_drops_the_cleared_ones(self):
+        ctx = shell.StdinContext({3: shell.DYNAMIC})
+        self.assertEqual(shell.exec_fds(self.redirects("exec 4< <(x)"), ctx), {3: shell.DYNAMIC, 4: shell.DYNAMIC})
+        self.assertEqual(shell.exec_fds(self.redirects("exec 3<<< x"), ctx), {})
+
+    def test_exec_fds_of_a_fifo_redirect_is_piped(self):
+        ctx = shell.StdinContext({}, self.fifos("p"))
+        self.assertEqual(shell.exec_fds(self.redirects("exec 3< p"), ctx), {3: shell.PIPED})
+
+    def test_exec_fds_copies_the_state_of_descriptor_zero_from_the_context(self):
+        """Decision G: a copy of stdin (`exec 3<&0`) keeps the state of the descriptor it copies."""
+        ctx = shell.StdinContext({0: shell.PIPED})
+        self.assertEqual(shell.exec_fds(self.redirects("exec 3<&0"), ctx), {0: shell.PIPED, 3: shell.PIPED})
+
+
 def load_tests(loader, tests, pattern):
     """Independent cases: run them in forked workers (see `ForkedSuite`)."""
     return ForkedSuite(tests)

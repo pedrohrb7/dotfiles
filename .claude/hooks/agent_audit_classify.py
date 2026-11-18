@@ -1805,7 +1805,15 @@ _FOREIGN_INTERPRETERS = frozenset({"node", "ruby", "perl", "lua", "luajit", "php
 # SQL / DSL clients: a heredoc or here-string body is a query, not shell (HD4, review fix B2), unless it asks the
 # client to run a command (`_query_escape`).
 _QUERY_CLIENTS = frozenset({"sqlite3", "psql", "mysql", "mariadb", "cypher-shell"})
-_SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "mksh", "ash"})
+_SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "mksh", "ash", "rbash", "rzsh", "yash", "posh", "hush", "sash",
+                     "ksh93", "oksh", "loksh", "osh", "toysh"})
+_VERSIONED_SHELL = re.compile(r"(bash|zsh)[0-9][0-9.]*")  # `bash5`, `zsh5.9`
+# Shells with another grammar (fish, csh, tcsh): they read stdin as code, but their `-c` strings are never parsed as bash.
+_OTHER_SHELLS = frozenset({"fish", "csh", "tcsh"})
+# Programs that read a script of shell lines from stdin (`at`, `batch`, `parallel` with no command) and the launchers
+# whose first operand names an applet (`busybox sh`, `busybox env sh`).
+_STDIN_LINE_READERS = frozenset({"at", "batch", "parallel"})
+_APPLET_LAUNCHERS = frozenset({"busybox", "toybox"})
 # The heads `_classify_segment` and its regexes (TEST_RUNNERS, LOAD_RUNNERS, LINT, TYPECHECK) look for. `mvnw` and
 # `gradlew` are left out on purpose: `./mvnw` is matched with its `./`.
 _CLASSIFIED_HEADS = frozenset(
@@ -1815,7 +1823,7 @@ _CLASSIFIED_HEADS = frozenset(
     "stylua treefmt tsc mypy pyright k6 artillery locust jmeter vegeta ab wrk".split())
 # N2: every program name the hook's tables use, computed from them (wrappers, sinks, shells and interpreters,
 # classified heads, direct binaries, path tools), so a path-prefixed program is recognized by its last component.
-KNOWN_HEADS = frozenset(_WRAPPERS) | frozenset(_LAUNCHERS) | _PLAIN_PREFIXES | {"repeat", "timeout", "eval", "trap", "su"} | _SHELLS \
+KNOWN_HEADS = frozenset(_WRAPPERS) | frozenset(_LAUNCHERS) | _PLAIN_PREFIXES | {"repeat", "timeout", "eval", "trap", "su"} | _SHELLS | _OTHER_SHELLS | _STDIN_LINE_READERS | _APPLET_LAUNCHERS \
     | _SINK_HEADS | _FOREIGN_INTERPRETERS | _QUERY_CLIENTS | _CLASSIFIED_HEADS | DIRECT_BINARIES | _PATH_TOOLS
 
 
@@ -3052,8 +3060,8 @@ _STDIN_DATA = frozenset(
     "paste column fmt fold nl rev tac sha1sum sha256sum md5sum cksum read mapfile readarray expand unexpand".split())
 _STDIN_PROGRAM_READERS = frozenset({"sed", "awk", "gawk"})  # with `-f` / `--file` their stdin may be the program
 # What may run the text of a here-string handed to a compound (`{ bash; } <<< x`, `f() { sh; }; f <<< x`).
-_STDIN_CODE_READERS = _SHELLS | frozenset({"source", ".", "eval", "xargs", "su", "sudo", "env", "at", "batch", "parallel",
-                                           "exec", "ssh", "script", "coproc"})
+_STDIN_CODE_READERS = _SHELLS | _OTHER_SHELLS | _STDIN_LINE_READERS | _APPLET_LAUNCHERS | frozenset(
+    {"source", ".", "eval", "xargs", "su", "sudo", "env", "exec", "ssh", "script", "coproc"})
 
 
 def _data_reader(readings: Readings) -> bool:
@@ -3083,7 +3091,7 @@ def _compound_reads_code(compound, functions: frozenset) -> bool:
                 return True
             for start, text in zip(readings.starts, readings.texts):
                 head = _head_of(text).rsplit("/", 1)[-1]
-                if head in _STDIN_CODE_READERS or head in functions or (
+                if head in _STDIN_CODE_READERS or _VERSIONED_SHELL.fullmatch(head) or head in functions or (
                         start < len(words) and _head_is_dynamic(words[start])):
                     return True
     return False
@@ -3400,13 +3408,15 @@ def _level_b(reason: str) -> Analysis:
 
 
 def _code_text(text: str, categories: list[str], flags: list[str], reasons: set[str], _depth: int,
-               budget, code: bool = False, env=None, fn=None, same_shell: bool = False) -> None:
+               budget, code: bool = False, env=None, fn=None, same_shell: bool = False, stdin=None) -> None:
     """Classify a text the command runs as shell (a heredoc body, a code argument) as a command of its own, one
     level deeper; what it finds joins the outer result. More than MAX_CODE_DEPTH levels deep (X2): level B.
     `code`: the text is a code argument, so a command name made by an expansion is level B (X3). `env`: the
     values of the variables of the outer text, which go down (V3). `fn`: the functions of the outer text (name ->
     whether the body may read code from stdin), which the same shell, or a child of it, can call. `same_shell`: the
-    text runs in the current shell (`eval`, `trap`, `source`), so a function it defines outlives it."""
+    text runs in the current shell (`eval`, `trap`, `source`), so a function it defines outlives it. `stdin`: the
+    `StdinContext` of the command that runs it: the standard input it is given (a pipe, a process substitution, an
+    `exec` redirect), and the fifos of the outer text."""
     if not text.strip():
         return
     if _depth >= MAX_CODE_DEPTH:
@@ -3414,7 +3424,8 @@ def _code_text(text: str, categories: list[str], flags: list[str], reasons: set[
         flags.append("unclassified_command")
         reasons.add("nested_shell_depth")
         return
-    sub = analyze_command(text, _depth + 1, env, budget, code, _cwd=False, _fn=fn, _same=same_shell)  # (the cwd of a nested text is not known)
+    sub = analyze_command(text, _depth + 1, env, budget, code, _cwd=False, _fn=fn, _same=same_shell,
+                          _stdin=stdin)  # (the cwd of a nested text is not known)
     categories.extend(sub.categories)
     flags.extend(sub.flags)
     reasons.update(sub.uncertainty)
@@ -3422,10 +3433,9 @@ def _code_text(text: str, categories: list[str], flags: list[str], reasons: set[
 
 # X1-X6: arguments that run code. `CodeArg.text` is the shell text to classify one level deeper; `None` is a
 # form whose code cannot be known, level B with `reason`.
-CodeArg = namedtuple("CodeArg", "text reason")
+CodeArg = namedtuple("CodeArg", "text reason signals", defaults=(None,))  # signals: the traps of a trap action
 MAX_CODE_ARGS = 16  # code arguments of one simple command; more is level B (`analysis_budget`)
 _SHELL_VALUE_LONG = frozenset({"--rcfile", "--init-file"})
-_STDIN_FILES = frozenset({"/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"})
 _DYNAMIC_PART_KINDS = shell.DYNAMIC_KINDS
 _EXPANSION = re.compile(r"[$`]")
 
@@ -3514,14 +3524,40 @@ def _shell_operands(tokens: list[str], i: int) -> tuple[str, int]:
     return seen, i
 
 
+def _site_fds(site) -> dict:
+    """The state of each descriptor the redirections of the command name, and of fd 0: the incoming stdin (the pipe of a
+    stage after the first, the state the walk gave it, or what an `exec` set) after the redirections, left to right."""
+    ctx = site.ctx or shell.NO_CONTEXT
+    base = shell.PIPED if site.stage > 0 else (site.stdin or ctx.fds.get(0))
+    return shell.fd_states(site.cmd.redirects, base, ctx)
+
+
+def _site_stdin(site) -> "str | None":
+    """What a reader of the stdin of this command gets (`piped_shell`, `dynamic_code`) or None."""
+    return _site_fds(site)[0]
+
+
+def _stdin_context(site, state: "str | None" = None, replace: bool = False) -> "shell.StdinContext":
+    """The stdin context a code string run by this command gets: its descriptors (after its redirections) and fifos.
+    `state` replaces the state of descriptor 0 when `replace`."""
+    ctx = site.ctx or shell.NO_CONTEXT
+    fds = {fd: st for fd, st in {**ctx.fds, **_site_fds(site)}.items() if st}
+    if replace:
+        fds.pop(0, None)
+        if state:
+            fds[0] = state
+    return shell.StdinContext(fds, ctx.fifos)
+
+
 def _stdin_code(site) -> list[CodeArg]:
     """A shell that reads its program from stdin: the here-string is the code (X1); a heredoc is read by the
     heredoc rules; a process substitution is code of unknown reach (X5), also after an earlier `< file`; and when
-    standard input is still a pipe (X4) the program is unknown, `piped_shell`: the stage of a pipeline that is not
-    the first, or a command inside a compound or substitution fed by one (`Site.piped`). The redirections are read
-    left to right (`shell.stdin_piped`): under a pipe only a heredoc or a here-string replaces it, the last fd 0 one
-    winning, and a file (`<`, `<>`, any target), `<&0`, a copy of the pipe or `<&-` keep it. The code found in a
-    here-string or process substitution is reported as well."""
+    standard input is still a source the hook cannot read (X4) the program is unknown: a pipe (the stage of a pipeline
+    that is not the first, or a command inside a compound or substitution fed by one, `Site.stdin`), `piped_shell`; a
+    process substitution or an `exec` redirect from one, `dynamic_code`; a named pipe the text creates. The
+    redirections are read left to right (`shell.fd_states`): under a pipe only a heredoc or a here-string replaces
+    it, the last fd 0 one winning, and a file (`<`, `<>`, any target), `<&0`, a copy of the pipe or `<&-` keep it.
+    The code found in a here-string or process substitution is reported as well."""
     out: list[CodeArg] = []
     for redirect in site.cmd.redirects:
         if redirect.op == "<<<" and redirect.target is not None:
@@ -3533,19 +3569,50 @@ def _stdin_code(site) -> list[CodeArg]:
             break
         if redirect.heredoc is not None:
             break
-    if shell.stdin_piped(site.cmd.redirects, site.stage > 0 or site.piped):
-        out.append(CodeArg(None, "piped_shell"))
+    state = _site_stdin(site)
+    if state:
+        out.append(CodeArg(None, state))
     return out
 
 
 def _first_operand_code(site, tokens: list[str], i: int, words: list) -> list[CodeArg]:
-    """A shell reader (`source`, `.`) whose operand is the program: `<(...)` is X5, a stdin file is X4. `words`
-    are the words of the command (None for one made of a value)."""
+    """A shell reader (`source`, `.`, a shell with a script file) whose operand is the program: `<(...)` is X5, and
+    the operand is a path (`_path_code`). `words` are the words of the command (None for one made of a value)."""
     if i >= len(tokens):
         return []
-    if i < len(words) and words[i] is not None and any(part.kind == "procsub_in" for part in words[i].parts):
+    word = words[i] if i < len(words) else None
+    if word is not None and any(part.kind == "procsub_in" for part in word.parts):
         return [CodeArg(None, "dynamic_code")]
-    return _stdin_code(site) if tokens[i] in _STDIN_FILES else []
+    return _path_code(site, tokens[i], word)
+
+
+def _path_code(site, text: str, word) -> list[CodeArg]:
+    """The code a shell reads from the path `text` (the word `word`, None for a value). A path that names stdin or a
+    descriptor (`/dev/./stdin`, `/proc/$$/fd/0`, `/dev/fd/3`, a relative one that goes up, `~user/..`, through
+    `/proc/<pid>/root`) is that descriptor, X4; a named pipe of the text is a pipe; when the text changes directory or
+    makes links a relative path may be any file, so it is stdin; under an active state (a pipe, a process
+    substitution, an `exec`) an operand with an expansion, a glob or `~user` may be any of them. A plain file is not
+    read."""
+    alias = shell.stdin_alias(text)
+    if alias == 0:
+        return _stdin_code(site)
+    fds = _site_fds(site)
+    ctx = site.ctx or shell.NO_CONTEXT
+    if alias is not None:
+        state = shell.descriptor(alias, fds, ctx.fds, fds[0])
+        return [CodeArg(None, state)] if state else []
+    if (ctx.fifos.match(word) if word is not None else ctx.fifos.match_text(text)):
+        return [CodeArg(None, shell.PIPED)]
+    if ctx.moved and not text.startswith(("/", "~")):
+        out = _stdin_code(site)  # (after a `cd` or a link a relative name may be any descriptor: `source 3`)
+        state = fds[0] or shell.active(ctx.fds, fds)
+        return out if out or not state else [CodeArg(None, state)]
+    tilde_user = text.startswith("~") and text[1:2] not in ("", "/")
+    if tilde_user or (word is not None and (word.dynamic or word.has_glob)):
+        state = fds[0] or shell.active(ctx.fds, fds)
+        if state:
+            return [CodeArg(None, state)]
+    return []
 
 
 def _shell_code(site, tokens: list[str], p: int, words: list, fed: bool = False) -> list[CodeArg]:
@@ -3554,15 +3621,43 @@ def _shell_code(site, tokens: list[str], p: int, words: list, fed: bool = False)
     nothing runs (`zsh -n`, `bash -n` only parse). `fed`: an `xargs` runs it, so a `-c` with no operand gets the
     code from the words xargs reads: unknown (X5)."""
     seen, i = _shell_operands(tokens, p + 1)
+    rc: list[CodeArg] = []  # the file `--rcfile` / `--init-file` makes the shell read first
+    for k in range(p + 1, min(i, len(tokens))):
+        name, eq, value = tokens[k].partition("=")
+        if name in _SHELL_VALUE_LONG:
+            rc.extend(_path_code(site, value, None) if eq else _first_operand_code(site, tokens, k + 1, words))
     if "c" in seen:
         if i < len(tokens):
-            return [CodeArg(tokens[i], None)]
-        return [CodeArg(None, "dynamic_code")] if fed else []
+            return rc + [CodeArg(tokens[i], None)]
+        return rc + ([CodeArg(None, "dynamic_code")] if fed else [])
     if "n" in seen:
-        return []
+        return rc
     if i < len(tokens) and "s" not in seen:
-        return _first_operand_code(site, tokens, i, words)
-    return _stdin_code(site)
+        return rc + _first_operand_code(site, tokens, i, words)
+    return rc + _stdin_code(site)
+
+
+def _other_shell_code(site, tokens: list[str], p: int, words: list) -> list[CodeArg]:
+    """`fish`, `csh`, `tcsh`: not bash, so a code string (`-c`, `-C`, `--command`, `--init-command`) is never parsed
+    as bash and is code of unknown reach, `dynamic_code`. A script file is read as a path; with none the stdin is the
+    program."""
+    rest = tokens[p + 1:]
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--":
+            i += 1
+            break
+        if tok.startswith("--"):
+            if tok.startswith(("--command", "--init-command")):
+                return [CodeArg(None, "dynamic_code")]
+        elif tok.startswith("-") and len(tok) > 1:
+            if any(c in tok[1:] for c in "cC"):
+                return [CodeArg(None, "dynamic_code")]
+        else:
+            break
+        i += 1
+    return _first_operand_code(site, tokens, p + 1 + i, words) if i < len(rest) else _stdin_code(site)
 
 
 def _env_code(tokens: list[str], p: int) -> list[CodeArg]:
@@ -3621,13 +3716,165 @@ def _su_code(tokens: list[str], p: int) -> list[CodeArg]:
 
 
 def _trap_code(tokens: list[str], p: int) -> list[CodeArg]:
-    """`trap ACTION SIGNAL...`: ACTION is code, except for `-l`, `-p` and `-` (reset)."""
+    """`trap ACTION SIGNAL...`: ACTION is code, except for `-l`, `-p` and `-` (reset). The signals go with it: the
+    context the action fires in depends on them (`trap_stdin`)."""
     i = p + 1
     if i < len(tokens) and tokens[i] in {"-l", "-p", "-"}:
         return []
     if i < len(tokens) and tokens[i] == "--":
         i += 1
-    return [CodeArg(tokens[i], None)] if i < len(tokens) else []
+    return [CodeArg(tokens[i], None, tuple(tokens[i + 1:]))] if i < len(tokens) else []
+
+
+def _exit_signal(name: str) -> bool:
+    """`EXIT` or `0` (zsh and bash), with or without `SIG`: the trap fires where it was set, when that shell ends."""
+    return name.upper() in ("EXIT", "0", "SIGEXIT")
+
+
+# `parallel`: its options that take a value and those that do not. An option outside both makes the command line
+# unreadable (under a stdin state it is read as code).
+_PARALLEL_VALUE = frozenset({
+    "-j", "--jobs", "-n", "--max-args", "-N", "-a", "--arg-file", "-S", "--sshlogin", "-d", "--delimiter", "-L",
+    "--max-lines", "-P", "-I", "--replace", "-E", "--eof", "--env", "--tmpdir", "--timeout", "--halt", "--colsep",
+    "--joblog", "--results", "--workdir", "--retries", "--delay", "--load", "--memfree", "--sshloginfile",
+    "--transferfile", "--tf", "--return", "--basefile", "--bf", "--header", "--tagstring", "--shuf", "--sqlmaster",
+    "-l", "--max-replace-args", "-m", "--arg-file-sep", "--argsep", "--plus"})
+_PARALLEL_FLAGS = frozenset({
+    "-k", "--keep-order", "-v", "--verbose", "-X", "-u", "--ungroup", "--group", "--tag", "--dry-run", "--pipe",
+    "--pipepart", "--nonall", "--bar", "--progress", "--eta", "-q", "--quote", "--no-notice", "-0", "--null",
+    "--link", "--xapply", "--line-buffer", "--lb", "-t", "--trim", "--will-cite", "--citation", "--silent",
+    "--semaphore", "--sem", "-x", "--round-robin", "--files", "--tty", "--fg", "--bg", "--onall", "--shellquote"})
+_PARALLEL_SHORT = frozenset(f[1] for f in _PARALLEL_FLAGS if len(f) == 2)
+_PARALLEL_SHORT_VALUE = frozenset(f[1] for f in _PARALLEL_VALUE if len(f) == 2 and f != "-I")
+
+
+def _parallel_cluster(tok: str) -> int:
+    """Words a bundled short cluster takes (0: not readable): flag letters, then at most one value option whose value is
+    the rest of the cluster or the next word. `I` and `i` (a replacement string) and unknown letters are not readable."""
+    for j, c in enumerate(tok[1:], 1):
+        if c in _PARALLEL_SHORT:
+            continue
+        return (1 if tok[j + 1:] else 2) if c in _PARALLEL_SHORT_VALUE else 0
+    return 1
+
+
+_PARALLEL_CUSTOM = ("--argsep", "--arg-sep", "--arg-file-sep", "--argfilesep", "--replace", "--rpl")
+_PARALLEL_SEPARATORS = frozenset({":::", "::::", ":::+", "::::+"})
+# `at`, `batch`: options that take a value, and those that list, remove or print jobs instead of reading one.
+_AT_VALUE = frozenset("qft")
+_AT_LISTING = frozenset("ldrcV")
+
+
+def _parallel_arguments(tokens: list[str], words: list, start: int) -> "tuple[list[int], bool]":
+    """The `:::` arguments from `tokens[start]`: the indexes of the literal ones (no expansion, glob, brace or process
+    substitution), and whether some argument is not (a `::::` file, an expansion): its value is unknown."""
+    literal: list[int] = []
+    unknown = False
+    kind = None
+    for i in range(start, len(tokens)):
+        if tokens[i] in _PARALLEL_SEPARATORS:
+            kind = tokens[i]
+            unknown = unknown or kind.startswith("::::")
+            continue
+        word = words[i] if i < len(words) else None
+        if kind is None or kind.startswith("::::"):
+            continue
+        if word is None or word.dynamic or word.has_glob or word.has_brace \
+                or any(part.kind == "procsub_in" for part in word.parts):
+            unknown = True
+        else:
+            literal.append(i)
+    return literal, unknown
+
+
+def _parallel_code(site, tokens: list[str], p: int, words: list) -> list[CodeArg]:
+    """`parallel [OPTIONS] [COMMAND [ARGS]] [::: ARGS]`: with no command the lines of stdin (or the words after `:::`)
+    are the commands: a literal argument is code of its own, one level down, the others `dynamic_code`. A command that
+    reads code (a shell, `eval`, `{}`) is fed those words: a literal one is read as a shell operand (a script name, or
+    a path that names stdin), the others are `dynamic_code`; a shell with `-c STRING` runs the string. An option that
+    is not known leaves the command line unreadable: under a stdin state it is code of unknown reach."""
+    rest = tokens[p + 1:]
+    if any(t.startswith(_PARALLEL_CUSTOM) or (t.startswith("-I") and not t.startswith("--")) for t in rest):
+        return [CodeArg(None, "dynamic_code")]  # a custom separator or replacement string: the line is unreadable
+    i, unknown = 0, False
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--":
+            i += 1
+            break
+        if tok in _PARALLEL_SEPARATORS or not tok.startswith("-") or tok == "-":
+            break
+        name, eq, _ = tok.partition("=")
+        if name in _PARALLEL_VALUE:
+            i += 1 if eq else 2
+        elif name in _PARALLEL_FLAGS:
+            i += 1
+        elif not tok.startswith("--") and tok[:2] in _PARALLEL_VALUE:  # `-j4`
+            i += 1
+        elif not tok.startswith("--") and (step := _parallel_cluster(tok)):  # `-kv`, `-kj4`, `-kj 4`
+            i += step
+        else:  # an option outside the tables (a cluster with a value option, `-i`, an abbreviation): unreadable
+            return [CodeArg(None, "dynamic_code")]
+    cut = next((k for k in range(i, len(rest)) if rest[k] in _PARALLEL_SEPARATORS), len(rest))
+    command, has_args = rest[i:cut], cut < len(rest)
+    base = p + 1
+    literal, dynamic = _parallel_arguments(tokens, words, base + cut) if has_args else ([], False)
+    if not command:
+        if not has_args:
+            return _stdin_code(site)
+        out = [CodeArg(tokens[j], None) for j in literal]
+        return out + ([CodeArg(None, "dynamic_code")] if dynamic or not literal else [])
+    head = _program_name(command[0])
+    if head in _STDIN_CODE_READERS or _VERSIONED_SHELL.fullmatch(head) or head.startswith("{"):
+        if "-c" in command[1:]:
+            k = command.index("-c", 1)
+            if k + 1 < len(command):
+                return [CodeArg(command[k + 1], None)]
+        out = [CodeArg(None, "dynamic_code")] if dynamic else []
+        fed_code = head.startswith("{") or head == "eval" or (  # the arguments are the code
+            "-c" in command[1:] and command.index("-c", 1) + 1 >= len(command))
+        if has_args and fed_code:
+            out.append(CodeArg(None, "dynamic_code"))
+        elif has_args:
+            for j in literal:  # (a descriptor name is stdin of a child of parallel: unknown reach)
+                out += [CodeArg(None, "dynamic_code")] if shell.stdin_alias(tokens[j]) is not None \
+                    else _first_operand_code(site, tokens, j, words)
+        return out + _stdin_code(site)
+    return _stdin_code(site) if unknown else []
+
+
+def _at_code(site, tokens: list[str], p: int, words: list) -> list[CodeArg]:
+    """`at` and `batch` read the job from stdin, unless `-f FILE` gives one (a file that names stdin, or `-`, is stdin)
+    or an option lists, removes or prints jobs. An option letter that takes a value (`-q`, `-f`, `-t`) takes the rest
+    of its cluster (`-qc` is queue `c`)."""
+    rest = tokens[p + 1:]
+    source = None  # where `-f` names its file: the text of the cluster, or the index of the next word
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--":
+            break
+        if not tok.startswith("-") or tok == "-":
+            i += 1  # (getopt permutes: the time may come before the options)
+            continue
+        step = 1
+        for j, c in enumerate(tok[1:], 1):
+            if c in _AT_LISTING:
+                return []
+            if c in _AT_VALUE:
+                attached = tok[j + 1:]
+                if c == "f":
+                    source = attached if attached else p + 2 + i
+                step = 1 if attached else 2
+                break
+        i += step
+    if source is None:
+        return _stdin_code(site)
+    if isinstance(source, str):
+        return _stdin_code(site) if source == "-" else _path_code(site, source, None)
+    if source >= len(tokens) or tokens[source] == "-":
+        return _stdin_code(site)
+    return _first_operand_code(site, tokens, source, words)
 
 
 def _mise_code(tokens: list[str], p: int) -> list[CodeArg]:
@@ -3804,8 +4051,14 @@ def _position_code(site, tokens: list[str], p: int, name: str, starts: list[int]
     """The code arguments of the program named `name` at `tokens[p]`; `starts` are the positions where its
     wrapped command can start (when it is a wrapper); `fed`: an `xargs` of the prefix chain runs it."""
     n = len(tokens)
-    if name in _SHELLS:
+    if name in _SHELLS or _VERSIONED_SHELL.fullmatch(name):
         return _shell_code(site, tokens, p, words, fed)
+    if name in _OTHER_SHELLS:
+        return _other_shell_code(site, tokens, p, words)
+    if name == "parallel":
+        return _parallel_code(site, tokens, p, words)
+    if name in _STDIN_LINE_READERS:
+        return _at_code(site, tokens, p, words)
     if name == "emulate":
         return _emulate_code(tokens, p)
     if name in {"mapfile", "readarray"}:
@@ -3840,14 +4093,16 @@ def _position_code(site, tokens: list[str], p: int, name: str, starts: list[int]
     return out
 
 
-def _code_args(site, tokens: list[str], words: "list | None" = None) -> list[CodeArg]:
+def _code_args(site, tokens: list[str], words: "list | None" = None, memo: "dict | None" = None) -> list[CodeArg]:
     """X1-X6: every argument of the simple command that runs code, at every program of its prefix chain
     (`sudo -u x bash -c ...`), once each. A code string that holds a replacement string of an enclosing `xargs`
     is made at run time (X3). More than MAX_CODE_ARGS: one level B entry and no more. `words`: the words of
-    `tokens` when a value took the place of one (None entries), else those of the site."""
+    `tokens` when a value took the place of one (None entries), else those of the site. `memo`: the prefix search
+    by `(words, position)`, shared by the calls of one text."""
     n = len(tokens)
     if words is None:
         words = site.cmd.words
+    key = tuple(tokens) if memo is not None else ()
     found: list[CodeArg] = []
     keys: set = set()
     seen: set[int] = set()
@@ -3858,13 +4113,20 @@ def _code_args(site, tokens: list[str], words: "list | None" = None) -> list[Cod
             continue
         seen.add(p)
         name = _program_name(tokens[p])
-        starts = [s for s in _prefix_steps(tokens, p) if s != p]
-        for text, reason in _position_code(site, tokens, p, name, starts, words, fed):
+        steps = memo.get((key, p)) if memo is not None else None
+        if steps is None:
+            steps = _prefix_steps(tokens, p)
+            if memo is not None:
+                memo[(key, p)] = steps
+        starts = [s for s in steps if s != p]
+        if name in _APPLET_LAUNCHERS and p + 1 < n and not tokens[p + 1].startswith("-") and p + 1 not in starts:
+            starts.append(p + 1)  # `busybox env sh`: the first operand is an applet, a program of its own
+        for text, reason, signals in _position_code(site, tokens, p, name, starts, words, fed):
             if text is not None and any(r in text for r in replace):
                 text, reason = None, "dynamic_code"
-            if (text, reason) not in keys:
-                keys.add((text, reason))
-                found.append(CodeArg(text, reason))
+            if (text, reason, signals) not in keys:
+                keys.add((text, reason, signals))
+                found.append(CodeArg(text, reason, signals))
         if len(found) > MAX_CODE_ARGS:
             return found[:MAX_CODE_ARGS] + [CodeArg(None, "analysis_budget")]
         for s in reversed(starts):
@@ -3915,7 +4177,7 @@ def _receiver_heads(site, readings: Readings) -> "list[str] | None":
             if expanded is None:
                 return None
             heads.extend(expanded)
-        elif word.dynamic:
+        elif word.dynamic or word.has_glob:  # (`[s]ource`, `sourc?`: any program of the directory)
             return None
     return heads
 
@@ -4544,15 +4806,17 @@ class _Run:
 
     __slots__ = ("command", "depth", "outer_env", "budget", "code", "script", "categories", "flags", "reasons",
                  "has_dollar", "funcs", "forwarded", "raws", "_values", "_views", "_names", "fwd_spans", "in_fwd",
-                 "cwd", "_repo_aliases", "_moved", "outer_fn", "_verdicts")
+                 "cwd", "_repo_aliases", "_moved", "outer_fn", "_verdicts", "_fn_spans", "steps")
 
     def __init__(self, command: str, depth: int, outer_env, budget, code: bool, script, cwd=None, outer_fn=None):
         self.command = command
         self.outer_fn = outer_fn or {}  # the functions of the enclosing texts: name -> may read code from stdin
         self._verdicts: list = []  # `function_verdicts`, computed when a call needs it
+        self._fn_spans = None  # the spans of the function definitions, read when a trap needs them
         # the cwd of the tool call (the hook registers it); None: the process's; False: a nested text (not known)
         self.cwd = cwd if cwd is not None else RESOLVERS.get("cwd")
         self._moved: list = []  # `cwd_moved`, computed when needed
+        self.steps: dict = {}  # the prefix search of `_code_args`, by words: the two walks of one text share it
         self._repo_aliases: list = []  # the aliases of the repo (`_read_repo_git_aliases`), read once, when needed
         self.depth = depth
         self.outer_env = outer_env  # the values of the variables of the outer text (V3)
@@ -4648,13 +4912,14 @@ class _Run:
             view = self._views[pos] = self.values().at(pos)
         return view
 
-    def code_text(self, text: str, env, code: bool = True, named: bool = True, same_shell: bool = False) -> None:
+    def code_text(self, text: str, env, code: bool = True, named: bool = True, same_shell: bool = False,
+                  stdin=None) -> None:
         """`named`: the text is a string a nested shell reads (not the source of a function body, which is in this
-        text with its quotes)."""
+        text with its quotes). `stdin`: the `StdinContext` of the command that runs it (the text inherits it)."""
         if named and self.funcs and _mentions(text, self.funcs):
             self.block("dynamic_code")  # a nested shell that names a forwarding function: `export -f f; bash -c 'f x'`
         _code_text(text, self.categories, self.flags, self.reasons, self.depth, self.budget, code, env,
-                   self.function_verdicts(), same_shell)
+                   self.function_verdicts(), same_shell, stdin)
 
     def forwarded_misuse(self, tokens: list[str], readings: Readings) -> None:
         """D1: a forwarding function named where it is not called with its arguments in view (`xargs f`, `eval f x`,
@@ -4709,8 +4974,26 @@ class _Run:
             self.function_call(site, readings, True)  # the program is an expansion: it may name any function
         if head_unresolved:
             self.block("dynamic_code")
+        state = _site_stdin(site)
+        if state and any(s < len(words) and words[s] is not None and words[s].has_glob for s in readings.starts):
+            self.block(state)  # a program name that is a glob (`/bin/[c]at`) may be any program, a shell reading that stdin
         for v_tokens, v_words, v_readings in variants:
             self.variant(site, v_tokens, v_words, v_readings, env, from_variant)
+
+    def resolved(self, site, tokens: list[str]) -> "tuple[list, _Values]":
+        """The `(tokens, words)` readings of a command after the values the text assigns and the expansions that may
+        be empty (the ones `simple` classifies), and the values."""
+        words = list(site.cmd.words)
+        env = self.view_at(site.cmd.span[0]) if self.has_dollar else _NO_VALUES
+        variants, _, _ = self.head_variants(tokens, words, _token_readings(tokens), env)
+        return [(v_tokens, v_words) for v_tokens, v_words, _ in variants], env
+
+    def head_readings(self, site, tokens: list[str]) -> list:
+        """The `(tokens, words)` readings of a command whose program is an expansion with known values."""
+        words = list(site.cmd.words)
+        env = self.view_at(site.cmd.span[0]) if self.has_dollar else _NO_VALUES
+        variants, _, from_variant = self.head_variants(tokens, words, _token_readings(tokens), env)
+        return [(v_tokens, v_words) for v_tokens, v_words, _ in variants] if from_variant else []
 
     def head_variants(self, tokens: list[str], words: list, readings: Readings, env: "_Values") -> "tuple[list, bool, bool]":
         """N6/V2: the readings of the command with its program made by a brace expansion or by a variable of known
@@ -4773,7 +5056,7 @@ class _Run:
         for reason in sorted(alias_reasons):
             self.block(reason)
         for code in alias_code:
-            self.code_text(code, env if "$" in code else None)
+            self.code_text(code, env if "$" in code else None, stdin=_stdin_context(site))
         for a_tokens, a_words, a_readings in arg_variants:
             if (from_variant or len(arg_variants) > 1) and not self.charge(VARIANT_COST):
                 break
@@ -4846,14 +5129,14 @@ class _Run:
                     self.block("dynamic_code")
                     continue
                 text = _positional_text(body, args, tokens[s + 1:], marks)
-                self.code_text(text, env if "$" in text else None, named=False)
+                self.code_text(text, env if "$" in text else None, named=False, stdin=_stdin_context(site))
 
     def code_arguments(self, site, tokens: list[str], words: list, env: "_Values", readings: Readings) -> None:
         """X1-X6: the code the arguments of the command run, classified one level deeper."""
         cmd = site.cmd
         heads = {_program_name(tokens[s]) for s in readings.starts if s < len(tokens)}
         same_shell = bool(heads & _SAME_SHELL_LOADERS)  # what these run lives on in this shell
-        for text, reason in _code_args(site, tokens, words):
+        for text, reason, signals in _code_args(site, tokens, words, self.steps):
             texts = None if text is None else (_expand_values(text, env) if self.has_dollar else [text])
             if texts is None:  # unknown code (X3/X5), or more than MAX_VALUE_CANDIDATES values (V4)
                 self.block(reason or "dynamic_code")
@@ -4862,7 +5145,59 @@ class _Run:
             for code in texts:
                 if len(texts) > 1 and not self.charge(VARIANT_COST):
                     break
-                self.code_text(code, inner if "$" in code else None, same_shell=same_shell)
+                self.code_text(code, inner if "$" in code else None, same_shell=same_shell,
+                               stdin=self.trap_stdin(site, signals))
+
+    def trap_stdin(self, site, signals) -> "shell.StdinContext":
+        """The stdin context a code string gets. A trap action fires where the signal does: EXIT where the trap was
+        set (the state of this command), any other signal, `DEBUG`, `ERR` or `RETURN` anywhere in the text, so its
+        stdin is a source the hook cannot read (`dynamic_code`)."""
+        if signals is None:
+            return _stdin_context(site)
+        if all(_exit_signal(sig) for sig in signals):
+            if self.in_function(site):  # it fires when the shell ends, whatever called the function
+                return _stdin_context(site, shell.DYNAMIC, True)
+            ctx = _stdin_context(site)  # where it was set, or what an `exec` after it left stdin
+            for fd, state in (site.ctx or shell.NO_CONTEXT).end.items():
+                ctx.fds.setdefault(fd, state)
+            return ctx
+        return _stdin_context(site, shell.DYNAMIC, True)
+
+    def in_function(self, site) -> bool:
+        """The command sits in the body of a function the text defines."""
+        if self._fn_spans is None:
+            self._fn_spans = [c.span for c in shell.iter_compounds(self.script) if c.kind == "function"]
+        return any(lo <= site.cmd.span[0] < hi for lo, hi in self._fn_spans)
+
+    def zsh_hooks(self, site, tokens: list[str]) -> None:
+        """zsh runs some functions by itself (`_IMPLICIT_FUNCTIONS`, `TRAP<SIG>`, the `*_functions` arrays, what
+        `add-zsh-hook` registers): one that may read code is `dynamic_code`. `functions[NAME]=BODY` and
+        `functions -c SRC NAME` define one without the `name() {}` form."""
+        ctx = site.ctx or shell.NO_CONTEXT
+        for word in site.cmd.assignments:
+            text = word.text
+            found = _FUNCTIONS_SUBSCRIPT.match(text)
+            if found and _hook_name(found.group(1)):
+                self.code_text(found.group(2), None, stdin=shell.StdinContext({0: shell.DYNAMIC}, ctx.fifos))
+                continue
+            found = _HOOK_ARRAY.match(text)
+            if found:
+                self.hook_functions(found.group(2).strip("()").split())
+        k = _plain_head(tokens)
+        if k >= len(tokens):
+            return
+        rest = tokens[k + 1:]
+        if tokens[k] == "add-zsh-hook" and "-d" not in rest:
+            args = [t for t in rest if not t.startswith("-")]
+            if len(args) >= 2:
+                self.hook_functions(args[1:])
+        elif tokens[k] == "functions" and len(rest) >= 3 and rest[0] == "-c" and _hook_name(rest[2]):
+            self.hook_functions(rest[1:2])
+
+    def hook_functions(self, names: list[str]) -> None:
+        verdicts = self.function_verdicts()
+        if any(verdicts.get(name) for name in names):
+            self.block("dynamic_code")
 
     def compound_procsub_stdin(self) -> None:
         """`{ bash; } < <(x)`: a compound with a `<(...)` on any input descriptor (it may be copied to stdin) that may read code from it reads code
@@ -4894,8 +5229,282 @@ class _Run:
         return Analysis(sorted(set(self.categories)) or ["other"], sorted(set(self.flags)), sorted(self.reasons))
 
 
+# Functions the shell calls by itself: bash `command_not_found_handle`; zsh `command_not_found_handler`, `chpwd`,
+# `precmd`, `preexec`, `periodic`, `zshexit`, and `TRAP<SIG>` (any name that starts with `TRAP`).
+_IMPLICIT_FUNCTIONS = frozenset({"command_not_found_handle", "command_not_found_handler", "chpwd", "precmd", "preexec",
+                                 "periodic", "zshexit"})
+_FUNCTIONS_SUBSCRIPT = re.compile(r"functions\[([^\]]+)\]\+?=(.*)", re.S)  # zsh: `functions[NAME]=BODY`
+_HOOK_ARRAY = re.compile(r"(chpwd|precmd|preexec|periodic|zshexit|zshaddhistory)_functions(?:\[[^\]]*\])?\+?=(.*)", re.S)
+
+
+def _hook_name(name: str) -> bool:
+    """A function the shell calls by itself."""
+    return name in _IMPLICIT_FUNCTIONS or (name.startswith("TRAP") and len(name) > 4)
+
+
+def _plain_head(tokens: list[str]) -> int:
+    """The index of the first word that is not a plain prefix (`builtin`, `command`, `noglob`, ...)."""
+    k = 0
+    while k < len(tokens) and (tokens[k] in _PLAIN_PREFIXES or tokens[k] == "command"):
+        k += 1
+        if tokens[k - 1] == "command":
+            while k < len(tokens) and (tokens[k] == "--" or re.fullmatch(r"-p+", tokens[k])):
+                k += 1
+    return k
+
+
+def _fifo_operands(tokens: list[str], words: list, fifos: "shell.Fifos") -> bool:
+    """`mkfifo [-m MODE] NAME...` and `mknod [-m MODE] NAME p` (bare, at the head): the names are named pipes of the
+    text; a name that is an expansion makes every file a possible one. True when the command is one of them."""
+    k = _plain_head(tokens)
+    name = tokens[k] if k < len(tokens) else ""
+    if name not in ("mkfifo", "mknod"):
+        return False
+    operands: list = []
+    i = k + 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            operands.extend(range(i + 1, len(tokens)))
+            break
+        if tok in ("-m", "--mode"):
+            i += 2
+            continue
+        if not tok.startswith("-") or tok == "-":
+            operands.append(i)
+        i += 1
+    if name == "mknod":
+        kind = words[operands[1]] if len(operands) > 1 and operands[1] < len(words) else None
+        if len(operands) < 2 or (tokens[operands[1]] != "p" and not (kind is not None and kind.dynamic)):
+            return True
+        operands = operands[:1]
+    for i in operands:
+        word = words[i] if i < len(words) else None
+        if word is None or word.dynamic or word.has_glob:
+            fifos.unknown = True
+        else:
+            fifos.names.add(shell.normalize_name(tokens[i]))
+    return True
+
+
+# What a bare `exec` takes as options before it has a command: `-c`, `-l`, `-a NAME`, `--`.
+_MOVING_HEADS = frozenset({"mv", "ln", "link", "cp", "rename", "install"})
+_CHANGING_HEADS = frozenset({"cd", "pushd", "popd", "chdir", "ln", "link"})
+
+
+def _bare_exec(site, tokens: list[str]) -> bool:
+    """A command that only rebinds the descriptors of the shell: `exec` (also behind `command`, `builtin`, ..., or as
+    an expansion that may be it: `$e < <(x)`) with redirections and no program, after its options."""
+    if not site.cmd.redirects:
+        return False
+    k = _plain_head(tokens)
+    if k >= len(tokens):
+        return False
+    if tokens[k] != "exec":
+        word = site.cmd.words[k] if k < len(site.cmd.words) else None
+        return k + 1 == len(tokens) and word is not None and word.dynamic
+    i = k + 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            i += 1
+            break
+        if not tok.startswith("-") or tok == "-":
+            break
+        i += 2 if tok.startswith("-") and not tok.startswith("--") and tok.endswith("a") else 1
+    # what is left may all expand to nothing (`exec ${e:-}`, `exec $unset`): then it is bare
+    words = site.cmd.words
+    return all(j < len(words) and words[j] is not None and words[j].dynamic for j in range(i, len(tokens)))
+
+
+_EXPANSION = re.compile(r"\$\{[^}]*\}|\$[A-Za-z_]\w*")
+
+
+def _changes_directory(site, tokens: list[str], k: int, nested: bool) -> bool:
+    """The command is a `cd`, `pushd`, `ln`...: by its literal program, or an expansion that, with the empty ones
+    removed, is one (in nested text, any other expansion in the program is unknown, so it may be)."""
+    if k >= len(tokens):
+        return False
+    if tokens[k].rsplit("/", 1)[-1] in _CHANGING_HEADS:
+        return True
+    words = site.cmd.words
+    if k < len(words) and words[k].dynamic:
+        return nested or _EXPANSION.sub("", tokens[k]).rsplit("/", 1)[-1] in _CHANGING_HEADS
+    return False
+
+
+# The programs `_position_code` reads code arguments of (a word that names none of them has no code to find).
+_CODE_PROGRAMS = (_SHELLS | _OTHER_SHELLS | _STDIN_LINE_READERS | _SAME_SHELL_LOADERS
+                  | frozenset({"parallel", "su", "env", "mise", "nvim", "sudo", "git", "watch", "."}))
+
+
+def _site_code_facts(site, tokens: list[str], depth: int, budget, fifos, memo: dict, resolve=None) -> bool:
+    """What the code a command runs does to the text around it: the code positions are the `CodeArg` texts of
+    `_code_args` (a `-c` string, the words of `eval`, a `trap` action, a here-string, `mapfile -C`, the literals after
+    `parallel :::`), the shell code of the `!` aliases of git, plus the heredoc body of a shell or a loader, never a
+    file operand or a script argument. A command with an expansion is read as the main pass reads it:
+    `resolve(site, tokens)` gives its readings with the known values and the empty expansions applied (the program
+    may be `$s` with `s=sh`, `${S:-sh}`). See `_nested_facts`. True when it changes the directory or makes a link in
+    this shell."""
+    words = site.cmd.words
+    expansion = resolve is not None and any(w.dynamic for w in words)
+    if not expansion and not any(
+            (name := _program_name(t)) in _CODE_PROGRAMS or _VERSIONED_SHELL.fullmatch(name) for t in tokens):
+        return False  # (no word names a program that takes code: the search through the prefixes is skipped)
+    env = _NO_VALUES
+    variants = [(tokens, list(words))]
+    if expansion and resolve is not None:
+        variants, env = resolve(site, tokens)
+    moved = unknown_same = False
+    for v_tokens, v_words in variants:
+        k = _plain_head(v_tokens)
+        head = v_tokens[k].rsplit("/", 1)[-1] if k < len(v_tokens) else ""
+        same = head in _SAME_SHELL_LOADERS
+        texts, unknown = [], False
+        for arg in _code_args(site, v_tokens, v_words, memo):
+            if arg.text is not None:
+                texts.append(arg.text)
+            elif arg.reason == "dynamic_code":
+                unknown = True  # the code itself is made at run time
+        if same or head in _SHELLS or head in _OTHER_SHELLS or _VERSIONED_SHELL.fullmatch(head):
+            texts.extend(r.heredoc.body for r in site.cmd.redirects if r.heredoc is not None)
+        for s_at, name in enumerate(v_tokens):
+            if _program_name(name) != "git":
+                continue
+            args = v_tokens[s_at + 1:]
+            cmd_s, unreadable = _wrapper_assignments(site.cmd, v_tokens, v_words, s_at)
+            if any(t == "-c" or t.startswith("--config-env") for t in args) or _has_git_config_names(cmd_s, env):
+                pairs, more = _git_config_pairs(cmd_s, args, env)
+                unknown = unknown or more or unreadable
+                texts.extend(value[1:] for key, value in pairs if key.lower().startswith("alias.")
+                             and value.startswith("!"))
+            break
+        if unknown:
+            fifos.unknown = True
+        moved = _nested_facts(texts, depth, budget, fifos, same, memo) or (unknown and same) or moved
+    return moved
+
+
+def _nested_facts(texts: list[str], depth: int, budget, fifos, same: bool, memo: dict) -> bool:
+    """What code strings do to the text around them, found by parsing them (the resolved words, not the raw text)
+    through the code they run in turn, up to `MAX_CODE_DEPTH` (what lies deeper is level B by itself): the fifos they
+    make go to `fifos` (a fifo made by a child exists for the parent too), and the result says whether they change
+    the directory or make a link in this shell (`same`: run by a loader, not by a child). A string that does not
+    parse or goes past the limits makes every file a possible fifo, and counts as moving."""
+    moved = False
+    if depth >= MAX_CODE_DEPTH:
+        return False
+    for text in texts:
+        if not text.strip():
+            continue
+        try:
+            budget.charge(TEXT_COST)
+            script = shell.parse(text, budget)
+        except (shell.ShellError, shell.NestingTooDeep, shell.BudgetExceeded):
+            fifos.unknown = True
+            moved = moved or same
+            continue
+        for site in shell.iter_sites(script):
+            tokens = [w.text for w in site.cmd.words]
+            k = _plain_head(tokens)
+            if not _fifo_operands(tokens, site.cmd.words, fifos) and _mentions_fifo_maker(site, tokens):
+                fifos.unknown = True
+            if k < len(tokens) and k < len(site.cmd.words) and site.cmd.words[k].dynamic:
+                fifos.unknown = True  # the program is an expansion: it may be a fifo maker
+            if same and _changes_directory(site, tokens, k, True):
+                moved = True
+            if _site_code_facts(site, tokens, depth + 1, budget, fifos, memo) and same:
+                moved = True
+    return moved
+
+
+def _mentions_fifo_maker(site, tokens: list[str]) -> bool:
+    """A word of the command (or its redirection targets and heredoc bodies) holds the name `mkfifo` or `mknod`."""
+    if any("mkfifo" in t or "mknod" in t for t in tokens):
+        return True
+    for redirect in site.cmd.redirects:
+        text = redirect.target.text if redirect.target is not None else ""
+        if redirect.heredoc is not None:
+            text += redirect.heredoc.body
+        if "mkfifo" in text or "mknod" in text:
+            return True
+    return False
+
+
+def _stdin_facts(sites: list, outer, heads=None, depth: int = 0, budget=None, memo=None, resolve=None):
+    """What the text says about stdin outside one command, read from the words of its commands: its `Fifos` (the bare
+    `mkfifo`/`mknod` names, also as a program an expansion resolves to (`heads(site, tokens)` gives those readings);
+    any other form in which one of those names appears, or a `mv`/`ln` that may move a fifo, makes every file a
+    possible one), whether it changes directory or makes links (`moved`), and the bare `exec` sites. The enclosing
+    text's fifos and flags come first."""
+    fifos = shell.Fifos()
+    moved = False
+    if outer is not None:
+        fifos.names.update(outer.fifos.names)
+        fifos.unknown = outer.fifos.unknown
+        moved = outer.moved
+    mentioned = moving = False
+    execs = []
+    for site in sites:
+        tokens = [w.text for w in site.cmd.words]
+        k = _plain_head(tokens)
+        head = tokens[k] if k < len(tokens) else ""
+        made = _fifo_operands(tokens, site.cmd.words, fifos)
+        if not made and heads is not None and k < len(site.cmd.words) and site.cmd.words[k].dynamic:
+            for v_tokens, v_words in heads(site, tokens):
+                made = _fifo_operands(v_tokens, v_words, fifos) or made
+        if not made and head in _CHANGING_HEADS:
+            moved = True
+        if _site_code_facts(site, tokens, depth, budget, fifos, memo if memo is not None else {}, resolve):
+            moved = True  # `eval cd /dev/fd`: the text it runs changes this shell's directory, wherever it comes
+        if k < len(site.cmd.words) and site.cmd.words[k].dynamic:
+            bare_head = _EXPANSION.sub("", tokens[k]).rsplit("/", 1)[-1]  # the program once empty expansions are gone
+            if bare_head in ("mkfifo", "mknod"):
+                fifos.unknown = True
+            elif bare_head in _CHANGING_HEADS:
+                moved = True
+        if not made and _mentions_fifo_maker(site, tokens):
+            mentioned = True
+        if head in _MOVING_HEADS:
+            moving = True
+        if _bare_exec(site, tokens):
+            execs.append(site)
+    if mentioned or (moving and fifos.names):
+        fifos.unknown = True
+    return fifos, moved, execs
+
+
+def _stdin_resolver(sites: list, execs: list, fifos, moved: bool, outer):
+    """`StdinContext`s of the text: one before any `exec`, one after each bare `exec` that changes the descriptors
+    (in the order of the text, whatever encloses it: a subshell, an `if`, a function body: over-approximated). Returns
+    `(resolve, first, last)`: `resolve(offset)` gives the context at an offset of the text."""
+    first = shell.StdinContext(dict(outer.fds) if outer is not None else {}, fifos, moved)
+    contexts, ends = [first], []
+    current = first
+    for site in sorted(execs, key=lambda site: site.cmd.span[0]):
+        incoming = shell.PIPED if site.stage > 0 else (site.stdin or current.fds.get(0))
+        fds = shell.exec_fds(site.cmd.redirects, current, incoming)
+        if fds != current.fds:
+            current = shell.StdinContext(fds, fifos, moved)
+            contexts.append(current)
+            ends.append(site.cmd.span[1])
+    for context in contexts:
+        context.end = current.fds
+    def resolve(offset: int) -> "shell.StdinContext":
+        lo, hi = 0, len(ends)  # (the number of ends at or before the offset: a binary search)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if ends[mid] <= offset:
+                lo = mid + 1
+            else:
+                hi = mid
+        return contexts[lo]
+
+    return resolve, first, current
+
+
 def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _code: bool = False,
-                    cwd: "str | None" = None, _cwd=None, _fn=None, _same: bool = False) -> Analysis:
+                    cwd: "str | None" = None, _cwd=None, _fn=None, _same: bool = False, _stdin=None) -> Analysis:
     """Classify a Bash command: categories, flags and the reasons of any parser uncertainty (spec
     audit-hook-hardening, section 3; audit-shell-lexer, section 4.1). The command is read by the shell parser, and
     every simple command of the tree is classified by its readings. Uncertainty never becomes an allow:
@@ -4906,7 +5515,8 @@ def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _cod
     string (V2). `_budget` is the character budget shared by every parse of one analysis (nested texts);
     `_code`: the text is a code argument, where a command name made by an expansion is level B
     (`dynamic_code`, X3); outside one, it is level A (`dynamic_command`, N6) only for a name the text does not
-    assign (the environment's); a name the text assigns whose value it cannot give is level B (B1)."""
+    assign (the environment's); a name the text assigns whose value it cannot give is level B (B1). `_stdin`: the
+    `StdinContext` of the command that runs this text as code (the standard input it inherits)."""
     command = command or ""
     if len(command) > MAX_COMMAND_LEN:  # checked before any regex or parse touches the text
         return Analysis(["other"], ["command_too_long"], [])
@@ -4921,13 +5531,30 @@ def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _cod
     except shell.ShellError:  # does not close, or is outside the subset: never read as a guess (S3)
         return _level_b("lex_error")
     run = _Run(command, _depth, _env, budget, _code, script, cwd if _cwd is None else _cwd, _fn)
-    if "command_not_found_handle" in run.functions():  # (the parsed names: `command_not_found_\<newline>handle`)
-        if run.function_verdicts().get("command_not_found_handle"):
-            run.block("dynamic_code")  # bash calls it for any unknown command, with whatever stdin that has
+    hooks = _IMPLICIT_FUNCTIONS & run.functions()  # (the parsed names: `command_not_found_\<newline>handle`)
+    hooks = hooks | {name for name in run.functions() if name.startswith("TRAP") and name[4:]}
+    if hooks:
+        verdicts = run.function_verdicts()
+        if any(verdicts.get(name) for name in hooks):
+            run.block("dynamic_code")  # the shell calls it by itself, with whatever stdin it has then
     if _same and _function_readers(script):
         run.block("dynamic_code")  # `eval 'f() { bash; }'`: the function exists in the text that ran it, not seen here
+    initial = _stdin.fds.get(0) if _stdin else None
+    sites = list(shell.iter_sites(script, initial))
+    fifos, moved, execs = _stdin_facts(sites, _stdin, run.head_readings, _depth, budget, run.steps, run.resolved)
+    resolve, first, last = _stdin_resolver(sites, execs, fifos, moved, _stdin)
+    if execs or fifos or (_stdin is not None and (_stdin.fds or _stdin.fifos)):
+        sites = list(shell.iter_sites(script, initial, resolve))  # compounds read the context at their offset
+    else:
+        for site in sites:
+            site.ctx = first
+    if _same and moved and not (_stdin is not None and _stdin.moved) and _stdin is not None \
+            and (_stdin.fds or _stdin.fifos):
+        run.block("dynamic_code")  # `eval 'cd /dev/fd'`: a relative name may be a descriptor after it, not seen outside
+    if _same and last.fds != first.fds:
+        run.block("dynamic_code")  # `eval 'exec < <(x)'`: the descriptors it sets outlive the string, not seen here
     items = []
-    for site in shell.iter_sites(script):
+    for site in sites:
         tokens = [w.text for w in site.cmd.words]
         items.append((site, tokens, _token_readings(tokens)))
     if _code_evaluation(command, script, run.values):  # the shell evaluates text as code where no command is written
@@ -4938,6 +5565,7 @@ def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _cod
     grouped = _grouped_commands(script) if has_heredoc and not disqualified else ()
     for site, tokens, readings in items:
         run.simple(site, tokens, readings)
+        run.zsh_hooks(site, tokens)
         if has_heredoc:
             _heredoc_code(site, readings, run.categories, run.flags, run.reasons, disqualified, _depth, budget,
                           run.view_at, id(site.cmd) in grouped, run.functions,
