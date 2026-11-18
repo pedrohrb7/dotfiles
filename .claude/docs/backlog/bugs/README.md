@@ -56,9 +56,17 @@ Confirmed bugs that need fixing, one file per bug.
 | [agent-audit: the stdin facts pass lacks function positional values and exported GIT_CONFIG_*](2026-11-18-audit-stdin-facts-pass-diverges.md) | medium | Open |
 | [agent-audit: a code string registered by complete -C or bind -x is not read as code](2026-11-18-audit-code-string-registered-by-complete-bind.md) | medium | Open |
 | [agent-audit: _brace_words keeps the empty alternative ({git,} push passes)](2026-11-18-audit-brace-empty-alternative.md) | high | Open |
-| [agent-audit: the GNU parallel command line is not classified or read as code](2026-11-18-audit-parallel-command-line-not-read-as-code.md) | medium | Open |
+| [agent-audit: the GNU parallel command line is not classified or read as code](2026-11-18-audit-parallel-command-line-not-read-as-code.md) | high | Fixed |
 | [agent-audit: zsh function table misses hook installation shapes and the functions parameter](2026-11-18-audit-zsh-hook-installation-shapes.md) | medium | Open |
 | [agent-audit: BASH_ENV is not modeled (a stdin or process-substitution file is sourced by bash)](2026-11-18-audit-bash-env-not-modeled.md) | high | Open |
 | [agent-audit: env -C / --chdir is not counted as a directory change](2026-11-18-audit-env-chdir-not-a-directory-change.md) | medium | Open |
 | [agent-audit: stdin alias `..` order, and fifo movers and link makers inside wrappers or variable heads are not resolved](2026-11-18-audit-stdin-alias-fifo-movers-and-dotdot.md) | medium | Open |
 | [agent-audit: a backtick in a `<&` target and a dynamic attached `at -f$s` value are not resolved](2026-11-18-audit-stdin-dynamic-fd-and-at-file-value.md) | low | Open |
+| [agent-audit: fish/csh/tcsh option scan stops at the value of a value-taking option](2026-11-18-audit-fish-csh-option-scan-stops-at-value.md) | medium | Fixed |
+| [agent-audit: at -V is treated as listing but still reads the job from stdin](2026-11-18-audit-at-version-option-listing.md) | medium | Fixed |
+| [agent-audit: duplicate `_EXPANSION` breaks `_head_is_dynamic` for double-quoted path heads (fail open)](2026-11-18-audit-duplicate-expansion-regex-head-dynamic.md) | high | Fixed |
+| [agent-audit: `$_` is read as an environment name although the same text sets it](2026-11-19-audit-dollar-underscore-read-as-env-name.md) | medium | Open |
+| [agent-audit: `hash` rebinding a program name is not modeled](2026-11-19-audit-hash-rebinds-program-name.md) | high | Open |
+| [agent-audit: the program of `find -exec` / `-execdir` / `-ok` is not classified](2026-11-19-audit-find-exec-not-classified.md) | high | Open |
+| [agent-audit: `export "$(cat f)"` (dynamic export) passes](2026-11-19-audit-export-dynamic-name.md) | medium | Open |
+| [agent-audit: unquoted data in arithmetic or name-taking builtins can run a subscript substitution](2026-11-19-audit-arithmetic-subscript-substitution.md) | medium | Open |

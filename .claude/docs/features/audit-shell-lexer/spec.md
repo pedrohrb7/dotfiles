@@ -1468,3 +1468,21 @@ Lacunas que o log registra como não modeladas ou fora do escopo desta rodada. V
 **Não muda:** os níveis A e B, o conjunto de motivos, a classificação sem stdin ativo e `agent-audit.json`.
 
 **Testes:** `test_command_positions.py` (`StdinOtherSources`, `StdinOtherSourcesRound2` a `Round7`, `PipeReceivers` ajustada) e `test_shell_lexer.py` (`StdinNames`). A suite tem 1101 tests.
+
+## Adendo 2026-11-19 - regressão do regex, lista de permissão do parallel, opções de fish/csh/tcsh e at -V
+
+**Motivo.** Bugs `2026-11-18-audit-duplicate-expansion-regex-head-dynamic`, `2026-11-18-audit-parallel-command-line-not-read-as-code` (parte "Seen again"), `2026-11-18-audit-fish-csh-option-scan-stops-at-value` e `2026-11-18-audit-at-version-option-listing` (backlog), corrigidos numa rodada de cinco passos. **Estende o Adendo 2026-11-18 (2)**. Decisões do usuário (2026-11-19).
+
+**Regra nova** (`agent_audit_classify.py`):
+
+- **Regex de expansão.** Um segundo `_EXPANSION` redefinia o primeiro e `_head_is_dynamic` usava o padrão errado. O que remove expansões que podem sumir passa a ser `_STRIPPABLE_EXPANSION`. Substituição (`$(...)`, crase) depois de prefixo literal de caminho (`/usr/$(x)`) é nível B (`dynamic_code`): `_head_unsafe` junta as partes em ordem e a substituição é nível B quando uma `/` literal a precede e nenhuma a segue (era nível A em 571d2b8; aceito por falhar fechado).
+- **`parallel` como lista de permissão.** Limpo só quando: toda opção é conhecida (só opções que certamente exigem valor; opção de valor opcional ou incerta, como `-l`, falha fechada; `-m`, `--plus`, `--shuf` são flags); o modelo (palavras do comando juntas) é lido como código shell com apenas as strings de substituição exatas como marcadores (`{}`, `{.}`, `{/}`...; as de `--plus` só com `--plus`); todo ponto de comando do modelo tem programa literal que não é shell, leitor de código, `eval`/`source`, envoltório ou prefixo (`nohup`, `nice`, `timeout`, `env`, `sudo`, `xargs`, `command`, `exec`, `stdbuf`, `time`...), e marcador ou expansão nunca fica em posição de programa; o comando composto é classificado normalmente (as flags propagam: `parallel git ::: push` vale `git <desconhecido>`).
+- **Casos que bloqueiam.** `{=` antes do primeiro `:::`; marcador em qualquer contexto de aspas (`'...'`, `$'...'`, `"..."` em qualquer profundidade, operandos de `${...}`, `$"..."`, heredoc sem aspas) a não ser que toda fonte seja palavra literal após `:::` só com `[-_.+A-Za-z0-9/]`; `-S`/`--sshlogin` só com listas simples de hosts (host e usuário começam por alfanumérico ou `_`), `--sshloginfile`/`--slf` é `dynamic_code`; `PARALLEL` ou `PARALLEL_SHELL` atribuída, exportada, passada por `env` ou definida por `read`/`printf -v` em qualquer ponto do texto (`_sets_parallel_vars`, sobre-aproximação). Sem comando: `:::` literais seguem classificados um nível abaixo; `::::`, `-a` e stdin são `dynamic_code`. Substitui as decisões anteriores: `parallel bash ::: a.sh` e `parallel nice gzip ::: a` passam a bloquear.
+- **fish, csh e tcsh.** A leitura de opções não para mais no primeiro valor. Tabelas por shell (`_FISH_*`, `_CSH_*`): opções de valor consomem o valor, opções longas aceitam prefixo (prefixo ambíguo ou de opção de comando vale como código), `-Dnome=valor` em csh/tcsh. Opção fora da tabela é `dynamic_code`. `-s` e um `-` solto em csh/tcsh leem o script do stdin.
+- **`at -V`.** `V` sai de `_AT_LISTING`: `at -V` imprime a versão e ainda lê o job do stdin.
+
+**Falsos positivos aceitos:** `parallel bash ::: a.sh` e `parallel nice gzip ::: a`; `{...}` numa string `-c` do parallel (inclusive `${HOME}`) e `awk '{print $1}'` num modelo do parallel; `-T` e `-S` do tcsh; atribuição de `PARALLEL` em qualquer ponto do texto.
+
+**Não muda:** os níveis A e B, o conjunto de motivos, a classificação sem esses programas e `agent-audit.json`.
+
+**Testes:** `test_command_positions.py`. A suite tem 1145 tests.

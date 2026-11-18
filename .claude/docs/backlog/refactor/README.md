@@ -46,3 +46,4 @@ Planned refactors that aren't urgent bugs but are worth doing deliberately, one 
 | [agent-audit: nvim vim.cmd / nvim_command executing ex commands with a bang are not modeled](2026-11-14-audit-nvim-vim-cmd-bang.md) | Proposed |
 | [agent-audit: _prefix_steps evaluated twice per site](2026-11-14-audit-prefix-steps-evaluated-twice.md) | Proposed |
 | [agent-audit: derive the stdin facts from the main analysis (second pass to a fixed point), high priority](2026-11-18-audit-stdin-facts-from-main-analysis.md) | Proposed |
+| [agent-audit: parallel option tables not checked option by option against man parallel](2026-11-19-audit-parallel-options-table-check.md) | Proposed |

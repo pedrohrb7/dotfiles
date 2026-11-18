@@ -38,3 +38,7 @@ Source: automated security review of commit 5a47cc4 (feature audit-shell-lexer),
 ## Seen again (2026-11-18)
 
 Source: fix bug-audit-pipe-procsub-stdin-family, reviewers. Same-text alias as a pipe receiver: `alias g=bash; echo x | g` passes. Trap actions with stdin context are in [the trap stdin bug](../bugs/2026-11-18-audit-trap-action-stdin-context.md).
+
+## Seen again (2026-11-19)
+
+Source: agent run: fix bug-audit-regex-and-tables-46ae3a7, out_of_scope_collected (pre-existing). Unverified: zsh may expand an alias defined on an earlier line of the same -c string (`alias g=sh` newline `echo x | g`).

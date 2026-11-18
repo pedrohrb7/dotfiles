@@ -36,3 +36,7 @@ The canary does not reach git fed by xargs: `echo fast-import | xargs git` and `
 Source: agent run: fix of audit-git-config-keys-run-commands, out_of_scope_issues.
 
 `find . -exec|-execdir git commit|push|<alias> ... \;` classifies as `other` with only deny_token_unmatched; commits and pushes through `find -exec` are not asked. Same root cause (`find -exec` is a launcher outside the table); the impact is a missed `git_commit`/push ask, so consider prioritizing `find -exec` over the metrics-driven rule. Pre-existing.
+
+## Seen again (2026-11-19)
+
+Source: agent run: fix bug-audit-regex-and-tables-46ae3a7, out_of_scope_collected (pre-existing). Unmodeled wrappers: `setsid`, `doas`, `chrt`, `taskset`, `flock`, `chroot`, `unbuffer`, `strace`, `sem` (parallel alias). `setsid sh -c 'git push'`, `doas sh -c ...` and `echo x | setsid sh clean` pass. `find -exec` is now its own bug: [find exec](../bugs/2026-11-19-audit-find-exec-not-classified.md).

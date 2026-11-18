@@ -369,15 +369,19 @@ class WrappersAndProgramNames(unittest.TestCase):
         self.assertNotIn("mvnw", classifier.KNOWN_HEADS)
 
     def test_the_programs_left_out_of_the_table_are_not_wrappers_but_the_canary_records_them(self):
-        """User decision 5: doas, setsid, flock, chrt, taskset, find -exec and parallel are not wrappers here, so
-        the command is not classified; spec section 8 relies on the canary to make them visible in the metrics."""
+        """User decision 5: doas, setsid, flock, chrt, taskset and find -exec are not wrappers here, so the command
+        is not classified; spec section 8 relies on the canary to make them visible in the metrics."""
         for command in (f"doas {RESTART}", f"setsid {RESTART}", f"flock /tmp/l {RESTART}",
-                        f"find . -exec {RESTART} ;", f"parallel {RESTART}", f"chrt 1 {RESTART}",
-                        f"taskset 1 {RESTART}"):
+                        f"find . -exec {RESTART} ;", f"chrt 1 {RESTART}", f"taskset 1 {RESTART}"):
             with self.subTest(command=command):
                 result = analyze(command)
                 self.assertNotIn(LIFECYCLE, result.flags)
                 self.assertIn("deny_token_unmatched", result.uncertainty)
+
+    def test_parallel_classifies_its_template_as_the_command(self):
+        """Edited by the parallel allow-list decision (2026-11-19): `parallel` was among the programs left out of
+        the table; its template is now classified, so the restart is seen."""
+        self.assertIn(LIFECYCLE, analyze(f"parallel {RESTART}").flags)
 
 
 class GitSubcommand(unittest.TestCase):
@@ -1648,12 +1652,16 @@ class ReviewFixB2(unittest.TestCase):
 
     def test_the_canary_sees_a_program_reached_through_xargs_without_a_literal_verb(self):
         for command in (f"echo {self.RESTART} x | xargs docker", "echo push | xargs git", "echo x | xargs -n1 docker",
-                        "find . -exec git status \\;", "parallel docker ::: x", "echo x | sudo xargs git",
-                        "echo x | xargs docker compose"):
+                        "find . -exec git status \\;", "echo x | sudo xargs git", "echo x | xargs docker compose"):
             with self.subTest(command=command):
                 result = analyze(command)
                 self.assertIn("deny_token_unmatched", result.uncertainty, command)
                 self.assertNotIn("unclassified_command", result.flags)  # a record, never a decision (user decision)
+
+    def test_parallel_with_a_program_and_no_verb_is_blocked_by_the_allow_list(self):
+        """Edited by the parallel allow-list decision (2026-11-19): `parallel docker ::: x` was asserted to be only
+        a canary record; the composed command is now classified (`docker <unknown>`), which blocks it."""
+        self.assertTrue(analyze("parallel docker ::: x").flags)
 
     def test_the_canary_is_quiet_when_nothing_is_fed(self):
         for command in ("docker ps", "git status", "echo docker | cat", "xargs echo", "find . -name x"):
@@ -2964,12 +2972,14 @@ class StdinOtherSourcesRound3(unittest.TestCase):
 
     # -- 6. false positives --------------------------------------------------------------------------------------
 
-    def test_parallel_running_a_shell_on_literal_script_names_is_clean(self):
+    def test_parallel_running_a_shell_on_literal_script_names_is_blocked(self):
+        """Edited by the parallel allow-list decision (2026-11-19): a shell is not an allowed program, so these
+        three texts, clean before, now block."""
         for command in (
             "parallel bash ::: a.sh b.sh", "parallel -j2 bash ::: test1.sh test2.sh", "parallel bash {} ::: a.sh",
         ):
             with self.subTest(command=command):
-                self.assertNotBlocked(command)
+                self.assertBlocked(command)
 
     def test_parallel_literal_arguments_are_classified_as_commands_one_level_down(self):
         for command in ("parallel ::: 'make a' 'make b'", "parallel -j2 ::: 'echo a' 'echo b'"):
@@ -3201,6 +3211,347 @@ class StdinOtherSourcesRound7(unittest.TestCase):
         for command in ("s=sh; $s -c 'make'", "${S:-sh} -c 'npm test'", "g=git; $g status"):
             with self.subTest(command=command):
                 self.assertNotBlocked(command)
+
+
+class AuditRegexAndTables46ae3a7(unittest.TestCase):
+    """Bugs of run audit-regex-and-tables-46ae3a7: a module-level regex bound twice, `parallel` code strings and
+    wrappers, the option tables of fish, csh and tcsh, and the `at` listing options. Nothing runs; the text only
+    reaches `analyze`."""
+
+    PUSH_TEXT = "git pu" + "sh"
+
+    def assertBlocked(self, command, reason=None):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        if reason is not None:
+            self.assertIn(reason, result.uncertainty, command)
+
+    def assertFlagged(self, command):
+        self.assertTrue(analyze(command).flags, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def each(self, commands, reason=None):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    def each_flagged(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFlagged(command)
+
+    def each_clean(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- 1. the regex bound twice --------------------------------------------------------------------------------
+
+    def test_a_program_head_that_expands_a_positional_or_a_command_substitution_is_dynamic_code(self):
+        self.each(('"/usr/bin/$1" re""start x', "bash -c '\"/usr/bin/$(printf docker)\" re\"\"start x'"), "dynamic_code")
+
+    def test_a_program_head_with_a_backtick_substitution_is_blocked(self):
+        self.assertBlocked('"/usr/bin/`printf docker`" re""start x')
+
+    def test_a_program_head_with_a_plain_variable_stays_level_a(self):
+        self.assertNotBlocked('"/usr/bin/$D" re""start x')
+
+    def test_the_empty_able_expansion_heads_of_round_4_stay_blocked(self):
+        self.each(("mk${HOME:+}fifo p; bash < p", "exec 3< <(x); c${HOME:+}d /dev/fd; bash < 3"))
+
+    def test_the_expansion_pattern_is_bound_once_in_the_classifier_module(self):
+        import re
+        with open(classifier.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertEqual(len(re.findall(r"^_EXPANSION\s*=", source, re.MULTILINE)), 1)
+
+    # -- 2. parallel ---------------------------------------------------------------------------------------------
+
+    def test_parallel_with_a_replacement_string_in_a_shell_code_string_fails_closed(self):
+        self.each_flagged((
+            "parallel sh -c {} ::: '" + self.PUSH_TEXT + "'", "parallel sh -c '{}' ::: a",
+            "parallel bash -c '{.}' ::: a", "echo x | parallel sh -c {}",
+        ))
+
+    def test_parallel_through_a_wrapper_that_runs_a_shell_under_a_pipe_fails_closed(self):
+        self.each_flagged((
+            "echo x | parallel nohup sh", "echo x | parallel timeout 5 bash", "echo x | parallel nice -n 5 sh",
+            "echo x | parallel nohup timeout 5 sh -c {}",
+        ))
+
+    def test_parallel_cases_that_are_already_blocked_stay_blocked(self):
+        self.each_flagged((
+            "parallel sh -c 'echo {}; " + self.PUSH_TEXT + "' ::: a", "echo x | parallel env A=1 bash",
+            "parallel -m sh -c {} ::: x",
+        ))
+
+    def test_parallel_with_the_plus_option_and_a_known_command_is_clean(self):
+        self.each_clean(("parallel --plus echo {} ::: a",))
+
+    def test_parallel_with_known_commands_stays_clean(self):
+        """`parallel -m echo ::: a` is clean today only by accident; the outcome is still the decision."""
+        self.each_clean((
+            "parallel -m echo ::: a", "parallel gzip ::: a b", "ls | parallel -j4 gzip", "parallel -kj4 echo ::: a",
+        ))
+
+    def test_parallel_with_a_shell_or_a_wrapper_as_the_program_is_blocked(self):
+        """Edited by the parallel allow-list decision (2026-11-19): `parallel bash ::: a.sh b.sh` and
+        `echo x | parallel timeout 5 gzip` were asserted clean here."""
+        self.each(("parallel bash ::: a.sh b.sh", "echo x | parallel timeout 5 gzip"))
+
+    # -- 3. fish, csh and tcsh -----------------------------------------------------------------------------------
+
+    def test_fish_options_with_values_and_long_option_prefixes_make_the_code_dynamic(self):
+        self.each((
+            "fish -d 3 -c '" + self.PUSH_TEXT + "'", "fish -o out -c x", "fish -f qmark-noglob -c x",
+            "fish -p prof -c x", "fish --comm='" + self.PUSH_TEXT + "'", "fish --init=x", "fish --frobnicate",
+        ), "dynamic_code")
+
+    def test_fish_csh_and_tcsh_forms_already_dynamic_code_stay_blocked(self):
+        self.each((
+            "fish --command 'x'", "fish -dX -c x", "fish -ic x", "csh -Z -c x", "tcsh --nope -c x",
+        ), "dynamic_code")
+
+    def test_fish_csh_and_tcsh_running_a_script_file_are_clean(self):
+        self.each_clean(("fish script.fish", "fish -n script.fish", "csh script.csh", "fish -d 3 script.fish"))
+
+    def test_fish_after_a_pipe_stays_piped_code(self):
+        self.assertBlocked("echo x | fish", "piped_shell")
+
+    # -- 4. at ---------------------------------------------------------------------------------------------------
+
+    def test_at_and_batch_with_the_version_option_still_read_the_pipe(self):
+        self.each((
+            "echo x | at -V now", "echo x | at now -V", "echo x | batch -V", "echo x | at -Vf /dev/stdin now",
+        ), "piped_shell")
+
+    def test_at_with_a_file_or_a_listing_option_is_clean(self):
+        self.each_clean((
+            "echo x | at -V -f job.sh now", "at -l", "at -d 3", "at -r 3", "at -c 3", "echo x | at now -f job.sh",
+        ))
+
+
+class AuditRegexAndTables46ae3a7Round2(unittest.TestCase):
+    """Round 2 of run audit-regex-and-tables-46ae3a7: `parallel` replacement strings in programs, code strings and
+    shell options, wrappers with no program, a path prefix before a substitution, csh and tcsh reading stdin. Nothing
+    runs; the text only reaches `analyze`."""
+
+    def assertBlocked(self, command, reason=None):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        if reason is not None:
+            self.assertIn(reason, result.uncertainty, command)
+
+    def assertFlagged(self, command):
+        self.assertTrue(analyze(command).flags, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def each(self, commands, reason=None):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    def each_flagged(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFlagged(command)
+
+    def each_clean(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_parallel_with_a_replacement_string_in_the_program_fails_closed(self):
+        self.each_flagged((
+                'parallel {}sh ::: ba', 'echo ba | parallel {}sh', 'parallel {}.sh ::: a',
+                'parallel /usr/bin/{} re""start x ::: docker', 'parallel nohup {1} {2} ::: git ::: pu""sh',
+                'parallel nice {} ::: bash', 'echo \'git pu""sh\' | parallel nohup {} ::: sh',
+        ))
+
+    def test_parallel_with_a_replacement_string_in_a_shell_code_string_fails_closed(self):
+        self.each_flagged((
+                'parallel sh -c {-1} ::: \'git pu""sh\'', 'parallel sh -c {+.} ::: x',
+                "parallel sh -c '{=1=}' ::: x", "parallel sh -c 'echo {= $_ = 1 =}' ::: a",
+                "parallel --plus sh -c 'echo {+/}' ::: a", "parallel echo '{=qx(id)=}' ::: a",
+        ))
+
+    def test_parallel_with_shell_option_clusters_before_the_code_string_fails_closed(self):
+        self.each_flagged((
+                'parallel sh -ec \'git pu""sh\' ::: a', 'parallel sh -xc {} ::: x',
+                'parallel sh -c -- \'git pu""sh\' ::: a',
+        ))
+
+    def test_parallel_with_a_wrapper_and_no_program_fails_closed(self):
+        self.each_flagged((
+                'echo x | parallel nohup', 'echo x | parallel nice', 'echo x | parallel timeout 5',
+                'echo \'git pu""sh\' | parallel nohup ::: sh', 'echo x | parallel nice ::: sh',
+                'echo x | parallel -- nohup',
+        ))
+
+    def test_a_path_prefix_before_a_substitution_in_the_head_is_level_b(self):
+        self.each((
+                '"/usr/bin/"$(printf docker) re""start x', '/usr/bin/"$(printf docker)" re""start x',
+                '$\'/usr/bin/\'$(printf docker) re""start x', '"/usr/bin/"`printf docker` re""start x',
+                '"$(a)/bin/$(a)" x',
+        ))
+
+    def test_a_head_made_of_substitutions_that_only_change_directory_or_print_is_not_unclassified(self):
+        self.assertNotBlocked('"$(cd /tmp; pwd)$(x)" y')
+
+    def test_csh_and_tcsh_reading_the_script_from_stdin_are_piped_code(self):
+        self.each((
+                'echo \'git pu""sh\' | csh -s script', 'echo x | tcsh -s x', 'echo x | csh -fs x',
+                'echo x | tcsh -', 'echo x | tcsh - x',
+        ), "piped_shell")
+
+    def test_everyday_parallel_fish_csh_and_substitution_heads_stay_clean(self):
+        self.each_clean((
+                'parallel -j4 gzip ::: a.log', 'ls | parallel -k gzip',
+                'parallel --plus echo {} ::: a', 'fish script.fish', 'csh script.csh', '"$HOME/bin/tool" arg',
+                './bin/$(uname -m)/tool', '$(which python) x.py',
+        ))
+
+
+class ParallelAllowList(unittest.TestCase):
+    """Decision 2026-11-19 (run audit-regex-and-tables-46ae3a7): `parallel` is clean only when every option is known
+    and the composed command, with `{...}` replaced by a placeholder, has literal programs that are not shells, code
+    readers, wrappers or prefixes; literal `:::` arguments are classified one level down; anything else is
+    dynamic code. Nothing runs; the text only reaches `analyze`."""
+
+    PUSH_TEXT = "git pu" + "sh"
+
+    def assertFlagged(self, command):
+        self.assertTrue(analyze(command).flags, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def each_flagged(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFlagged(command)
+
+    def each_clean(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_a_known_program_with_known_options_and_templates_is_clean(self):
+        self.each_clean((
+                'parallel gzip ::: a b', "parallel 'gzip {}' ::: a", "parallel -j4 'gzip {}' ::: a",
+                "parallel 'echo {}' ::: a", "parallel 'cd {} && make' ::: a b", 'parallel mv {} {.}.bak ::: a.txt',
+                'ls | parallel -k gzip', 'parallel -kj4 echo ::: a', 'parallel --plus echo {} ::: a',
+                "parallel --plus echo '{/x y/z}' ::: a", "parallel ::: 'make a' 'make b'", "parallel echo ::: '{='",
+                'parallel -a f gzip',
+        ))
+
+    def test_a_shell_as_the_program_is_blocked(self):
+        self.each_flagged((
+                'parallel bash ::: a.sh', 'parallel sh -c {} ::: x', "parallel fish -c {} ::: 'git pu''sh'",
+                'parallel csh -c {} ::: x', 'parallel su -c {} ::: x', 'parallel tcsh -fc {} ::: x',
+                'parallel fish -C {} ::: x',
+        ))
+
+    def test_a_wrapper_as_the_program_is_blocked(self):
+        self.each_flagged((
+                'parallel nice gzip ::: a', 'parallel nohup {} ::: bash', 'parallel -X -a f nohup',
+                'parallel -N2 --arg-file f nohup', 'parallel -a f nohup sh',
+        ))
+
+    def test_eval_as_the_program_is_blocked(self):
+        self.each_flagged((
+                'parallel eval ::: x',
+        ))
+
+    def test_a_replacement_string_in_a_program_position_is_blocked(self):
+        self.each_flagged((
+                'parallel {}sh ::: ba', "parallel '{} x' ::: a",
+        ))
+
+    def test_a_replacement_in_a_shell_code_string_perl_code_an_unknown_option_or_an_unknown_subcommand_is_blocked(self):
+        self.each_flagged((
+                "parallel --plus sh -c '{/x y/z}' ::: x", "parallel echo '{=qx(id)=}' ::: a",
+                'parallel --frobnicate gzip ::: a', "parallel git ::: pu''sh", "parallel 'gzip {} | bash' ::: a",
+        ))
+
+    def test_a_command_substitution_inside_a_replacement_brace_group_is_blocked(self):
+        """The placeholder must not swallow a brace group that holds a substitution."""
+        self.each_flagged((
+            "parallel 'echo {$(" + "git pu\"\"sh" + ")}' ::: a", "parallel echo '{`git pu\"\"sh`}' ::: a",
+            "parallel 'echo {<(git pu\"\"sh)}' ::: a", "parallel 'echo {a$(id)}' ::: a",
+        ))
+
+    def test_real_replacement_strings_and_a_braced_variable_stay_clean(self):
+        self.each_clean((
+            "parallel 'gzip {}' ::: a", "parallel mv {} {.}.bak ::: a.txt",
+            "parallel 'echo {/} {//} {/.} {#} {%} {1} {-1}' ::: a", "parallel --plus echo '{/x y/z}' ::: a",
+            "parallel 'echo ${HOME}' ::: a",
+        ))
+
+    def test_a_replacement_string_in_double_quotes_or_a_heredoc_with_a_dynamic_source_is_blocked(self):
+        """A `{}` inside double quotes or an unquoted heredoc body is expanded by the shell; with a source parallel
+        cannot read (::::, -a, stdin, a substitution in a literal argument) it is dynamic code."""
+        self.each_flagged((
+                'parallel \'echo "{}"\' :::: f', 'echo x | parallel \'echo "{}"\'',
+                'parallel -a f \'X="{}"; echo $X\'', 'parallel echo \\"{}\\" :::: f',
+                "parallel 'cat <<E\n{}\nE' :::: f", 'parallel \'echo "{}"\' ::: \'$(git pu""sh)\'',
+        ))
+
+    def test_a_code_block_in_an_option_value_is_blocked(self):
+        self.each_flagged((
+                "parallel --tagstring '{=system(q(id))=}' --tag gzip ::: a",
+                "parallel --results '{=qx(id)=}' gzip ::: a", "parallel --workdir '{=qx(id)=}' gzip ::: a",
+                "parallel --return '{=qx(id)=}' gzip ::: a",
+        ))
+
+    def test_an_sshlogin_that_is_not_a_plain_host_list_is_blocked(self):
+        self.each_flagged((
+                "parallel -S 'ssh -o ProxyCommand=sh h' gzip ::: a",
+                "parallel --sshlogin 'ssh -oProxyCommand=sh h' gzip ::: a", 'parallel --sshloginfile f gzip ::: a',
+        ))
+
+    def test_quoted_replacements_with_a_literal_source_and_plain_sshlogins_stay_clean(self):
+        self.each_clean((
+                'parallel \'convert "{}" "{.}.png"\' ::: a.jpg', 'parallel -S host1,2/user@host2:22 gzip ::: a',
+                'parallel -S : gzip ::: a', "parallel echo ::: '{='", 'parallel \'echo "{}"\' ::: plain',
+        ))
+
+    def test_a_replacement_in_any_quoting_context_needs_a_source_of_safe_literal_words(self):
+        """Decision 2026-11-19: a marker inside single quotes, `$'...'`, double quotes (at any depth) or a heredoc is
+        dynamic code unless every source is a literal `:::` word of only [-_.+A-Za-z0-9/]."""
+        self.each_flagged((
+                'parallel "echo \'{}\'" ::: \'a;git pu""sh;b\'', 'parallel "echo \'{}\'" :::: f',
+                'echo x | parallel "echo \'{}\'"', 'parallel "echo \\$\'{}\'" ::: \'a;b\'',
+                'parallel \'echo "{}"\' ::: \'x" ; git pu""sh ; echo "\'', 'parallel \'echo "${x:-{}}"\' :::: f',
+                'parallel \'echo "{}"\' ::: \'a b\'',
+        ))
+
+    def test_an_sshlogin_host_or_user_that_does_not_start_with_an_alphanumeric_is_blocked(self):
+        self.each_flagged((
+                'parallel -S -Ff gzip ::: a', 'parallel --sshlogin=-Ff gzip ::: a', 'parallel -S 1/-Ff gzip ::: a',
+                'parallel -S h,-Ff gzip ::: a', 'parallel -kS -Ff gzip ::: a', 'parallel -S -u@h gzip ::: a',
+        ))
+
+    def test_the_parallel_and_parallel_shell_variables_in_the_text_are_blocked(self):
+        self.each_flagged((
+                "PARALLEL='--tag' parallel gzip ::: a", "PARALLEL=--plus parallel '{%x} y' :::: f",
+                'export PARALLEL=--plus; parallel gzip ::: a', 'env PARALLEL=--plus parallel gzip ::: a',
+                'PARALLEL_SHELL=sh parallel gzip ::: a',
+        ))
+
+    def test_safe_literal_sources_plain_sshlogins_and_plain_templates_stay_clean(self):
+        self.each_clean((
+                'parallel \'convert "{}" "{.}.png"\' ::: a.jpg', 'parallel \'echo "{}"\' ::: plain-file_1.txt',
+                'parallel "echo \'{}\'" ::: a/b.c', 'parallel -S host1,2/user@host2:22 gzip ::: a',
+                'parallel -S : gzip ::: a', "parallel 'gzip {}' ::: a", "parallel 'cd {} && make' ::: a b",
+        ))
+
+    def test_a_literal_argument_with_no_command_is_classified_one_level_down(self):
+        self.assertIn("git_push", analyze("parallel ::: '" + self.PUSH_TEXT + "'").flags)
 
 
 def load_tests(loader, tests, pattern):

@@ -215,3 +215,33 @@ Bugs `2026-11-18-audit-pipe-into-code-string-not-followed`, `2026-11-18-audit-tr
 **Files:** `.claude/hooks/agent_audit_shell.py` (the stdin state as a reason in `Site`, `_fd_states`, `stdin_state`, `fd_state`; `normalize_name`, `normalize_path`, `stdin_alias`, `Fifos`, `StdinContext`, `NO_CONTEXT`, `active`, `descriptor`, `exec_fds`), `.claude/hooks/agent_audit_classify.py` (`_site_stdin`, `_stdin_facts`, `_nested_facts`, `_CODE_PROGRAMS`, `_STDIN_CODE_READERS`, `_OTHER_SHELLS`, `_SHELLS`, `_IMPLICIT_FUNCTIONS`, `_hook_name`, `_PARALLEL_*`, `_changes_directory`, `_Run.resolved`, `_receiver_heads`); tests in `test_command_positions.py` (`StdinOtherSources`, `StdinOtherSourcesRound2` through `Round7`, `PipeReceivers` adjusted) and `test_shell_lexer.py` (`StdinNames`). `.claude/README.md` (piped_shell line) and the suite count in the root `CLAUDE.md` updated.
 
 **Gate:** the suite now has 1101 tests (about 12-13 s). Spec: see "Adendo 2026-11-18 (2)".
+
+## Addendum 2026-11-19 - regex regression, parallel allow-list, fish/csh/tcsh options, at -V
+
+Bugs `2026-11-18-audit-duplicate-expansion-regex-head-dynamic`, `2026-11-18-audit-parallel-command-line-not-read-as-code` (the "Seen again" part), `2026-11-18-audit-fish-csh-option-scan-stops-at-value` and `2026-11-18-audit-at-version-option-listing` (backlog), fixed in one run of five rounds. **Extends Addendum 2026-11-18 (2)** (`parallel`, `fish`/`csh`/`tcsh`, `at`).
+
+**Regression and rename.** A second `_EXPANSION` regex further down `agent_audit_classify.py` rebound the first one, so `_head_is_dynamic` used the wrong pattern. The one that strips expansions that may expand to nothing is now `_STRIPPABLE_EXPANSION` (users: the changing-heads check and the bare-head reading). A substitution head after a literal path prefix (`/usr/$(x)`, `./$(x)`) is now level B (`dynamic_code`): `_head_unsafe` flattens the parts in order and the substitution is level B when a literal `/` precedes it and none follows. It was level A in 571d2b8; accepted as fail closed.
+
+**User decisions (2026-11-19, round 3 and round 5):** `parallel` is an allow-list, not a list of known dangers. Clean only when:
+- every option is known (value options only those certain to take a required value; optional-value or uncertain options such as `-l` fail closed; `-m`, `--plus`, `--shuf` are flags);
+- the template (command words joined, as parallel runs it through a shell when it has shell syntax or spaces) parses as shell code with the exact replacement strings (`{}`, `{.}`, `{/}`, ... ; `--plus` ones only with `--plus`) as the only markers, replaced by a placeholder argument (appended per source when the template has none);
+- every command site in the template has a literal program that is not a shell, a code reader, `eval`/`source`, a wrapper or a prefix (`nohup`, `nice`, `timeout`, `env`, `sudo`, `xargs`, `command`, `exec`, `stdbuf`, `time`, ...), and a marker or expansion never sits in a program position (`_PARALLEL_FORBIDDEN`);
+- the composed command is classified normally, so flags propagate (`parallel git ::: push` is judged as `git <unknown>`, `parallel docker restart x` is `docker_lifecycle`);
+- a `{=` block anywhere before the first `:::` is `dynamic_code`;
+- a marker inside any quoting context (`'...'`, `$'...'`, `"..."` at any depth including `${...}` operands, `$"..."`, an unquoted heredoc body) is `dynamic_code` unless every source is literal `:::` words made only of `[-_.+A-Za-z0-9/]`;
+- `-S`/`--sshlogin` takes plain host lists only (host and user start with an alphanumeric or `_`); `--sshloginfile`/`--slf` is `dynamic_code`;
+- `PARALLEL` or `PARALLEL_SHELL` assigned, exported, passed via `env`, or set by `read`/`printf -v` anywhere in the text blocks (`_sets_parallel_vars`, an over-approximation).
+
+No command: literal `:::` args are still classified one level down; `::::`, `-a` and stdin sources are `dynamic_code`. These decisions supersede the earlier ones: `parallel bash ::: a.sh` and `parallel nice gzip ::: a` now block, and two old tests moved to the new expectations.
+
+**fish, csh and tcsh options.** The option scan no longer stops at the first value option. Per-shell tables: `_FISH_FLAGS`/`_FISH_VALUES`/`_FISH_CODE` with long-option tables (prefix matching; an ambiguous prefix or a prefix of a command option counts as code), and `_CSH_FLAGS`/`_CSH_CODE`/`_CSH_ATTACHED` (`-Dname=value`) with long `--help`/`--version`. Value options consume their value. An option outside the table is `dynamic_code`. csh/tcsh `-s` and a lone `-` read the script from stdin (`_stdin_code`).
+
+**`at -V`.** `V` is removed from `_AT_LISTING`: `at -V` prints the version and still reads the job from stdin.
+
+**Accepted false positives:** `parallel bash ::: a.sh` and `parallel nice gzip ::: a` block; `{...}` in a parallel `-c` string (including `${HOME}`) and `awk '{print $1}'` in a parallel template block (`_PARALLEL_BRACE_CODE`); tcsh `-T` and `-S` block; a `PARALLEL` assignment anywhere in the text blocks.
+
+**Process notes:** the round-1 and round-3 fix agents ran `git stash`/`git stash pop` without authorization (tree verified intact), and a first edit in round 3 left a `NameError` that made the live hook block every Bash call until repaired. The run closed after round 5 with the gate only, no new review round.
+
+**Files:** `.claude/hooks/agent_audit_classify.py` (`_STRIPPABLE_EXPANSION`, `_head_unsafe`, `_parallel_code`, `_parallel_template`, `_parallel_takes_file`, `_PARALLEL_FORBIDDEN`, `_PARALLEL_BRACE_CODE`, `_PARALLEL_HOST`, `_sets_parallel_vars`, `_FISH_*`, `_CSH_*`, `_AT_LISTING`); tests in `test_command_positions.py`. `.claude/README.md` (piped_shell line) and the suite count in the root `CLAUDE.md` updated.
+
+**Gate:** the suite now has 1145 tests (13.0 s). Spec: see "Adendo 2026-11-19".
