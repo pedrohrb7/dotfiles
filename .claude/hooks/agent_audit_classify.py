@@ -1362,7 +1362,7 @@ def _git_clone_config(args: list[str]) -> "tuple[list[tuple[str, str]], bool]":
 
 
 def _git_alias_variants(variants: list, cmd, env, repo=None, text_moved=None,
-                        in_fwd: bool = False) -> "tuple[list, list[str], set[str]]":
+                        in_fwd: bool = False, external=None) -> "tuple[list, list[str], set[str]]":
     """B2 item 6: `git -c alias.p=push p` runs `git push`. For every variant that reads a `git` with aliases of its
     own, or with a subcommand git does not ship (an alias of the configuration files of the repo, read through
     `repo()`: `git c -m x`): more variants with the alias name replaced by its value (an alias of an alias too, up
@@ -1371,7 +1371,8 @@ def _git_alias_variants(variants: list, cmd, env, repo=None, text_moved=None,
     that could not be resolved or a chain that goes on (`dynamic_code`), a key that names a program or a file, a
     subcommand that is no alias and no `git-<name>` program, or whose alias cannot be read where git runs
     (`git_unknown_subcommand`). `text_moved()`: the text may change directory before git runs; `in_fwd`: the words are
-    those of a forwarding function, where `ARG` stands for a parameter (the calls are classified with theirs)."""
+    those of a forwarding function, where `ARG` stands for a parameter (the calls are classified with theirs);
+    `external(name)`: whether a `git-<name>` program exists (default `_git_external_exists`; the text passes a memo)."""
     out = list(variants)
     code: list[str] = []
     seen: set = set()
@@ -1437,7 +1438,7 @@ def _git_alias_variants(variants: list, cmd, env, repo=None, text_moved=None,
                     else:
                         lookups[word] = []
                         # (a PATH of the text may put another `git-<name>` first: the one that exists here is not it)
-                        if path_set or not _git_external_exists(word):
+                        if path_set or not (external or _git_external_exists)(word):
                             reasons.add("git_unknown_subcommand")
                 return lookups[word]
 
@@ -3102,21 +3103,49 @@ def _data_reader(readings: Readings) -> bool:
     return True
 
 
+def _copies_input(redirects) -> bool:
+    """Some redirection copies a descriptor that may hold input (`4<&3`, `0<&3`, `4>&3`, `4< /dev/fd/3`, `<&$n`): not
+    a copy of the output of the shell (`2>&1`, `1>&2`) and not a close (`<&-`)."""
+    for r in redirects:
+        if r.target is None:
+            continue
+        text = r.target.text
+        if r.op in ("<&", ">&"):
+            number = text[:-1] if text.endswith("-") else text
+            if number.isdigit():
+                if r.op == "<&" or int(number) not in (1, 2):
+                    return True
+            elif number and any(c in number for c in "$*?["):
+                return True
+        elif r.op in ("<", "<>") and shell.stdin_alias(text) is not None:
+            return True
+    return False
+
+
+def _site_reads_code(words, readings: Readings, functions: frozenset, site=None) -> bool:
+    """The command may read code from the stdin it is given: a shell, a loader (`source`, `eval`), a program that
+    runs its input (`xargs`, `at`), a function of the text, a program name made by an expansion, readings that
+    are not complete, or (`site`) a bare `exec` that copies a descriptor (`exec 4<&0`: what reads descriptor 4
+    later reads that stdin)."""
+    if not readings.complete:
+        return True
+    if site is not None and _copies_input(site.cmd.redirects) and _bare_exec(site, [w.text for w in words], words):
+        return True
+    for start, text in zip(readings.starts, readings.texts):
+        head = _head_of(text).rsplit("/", 1)[-1]
+        if head in _STDIN_CODE_READERS or _VERSIONED_SHELL.fullmatch(head) or head in functions or (
+                start < len(words) and _head_is_dynamic(words[start])):
+            return True
+    return False
+
+
 def _compound_reads_code(compound, functions: frozenset) -> bool:
-    """Some command inside the compound may read code from the stdin the compound is given: a shell, a loader
-    (`source`, `eval`), a program that runs its input (`xargs`, `at`), a function of the text, a program name made
-    by an expansion, or a command whose readings are not complete."""
+    """Some command inside the compound may read code from the stdin the compound is given (`_site_reads_code`)."""
     for body in compound.bodies:
         for site in shell.iter_sites(body):
             words = site.cmd.words
-            readings = _word_readings(words)
-            if not readings.complete:
+            if _site_reads_code(words, _word_readings(words), functions, site):
                 return True
-            for start, text in zip(readings.starts, readings.texts):
-                head = _head_of(text).rsplit("/", 1)[-1]
-                if head in _STDIN_CODE_READERS or _VERSIONED_SHELL.fullmatch(head) or head in functions or (
-                        start < len(words) and _head_is_dynamic(words[start])):
-                    return True
     return False
 
 
@@ -3430,28 +3459,64 @@ def _level_b(reason: str) -> Analysis:
     return Analysis(["unclassified"], ["unclassified_command"], [reason])
 
 
-def _code_text(text: str, categories: list[str], flags: list[str], reasons: set[str], _depth: int,
-               budget, code: bool = False, env=None, fn=None, same_shell: bool = False, stdin=None) -> None:
+# What kind of text a nested text is, for the facts it hands up (`shell.Facts.for_parent`): a string a child shell runs,
+# a string the same shell runs (`eval`, `source`, `trap`), or the body of a function the text defines (runs in the shell).
+_CHILD = "child"
+_SAME = "same"
+_BODY = "body"
+
+# An `exec` with only redirections, seen by a round: where it is, its redirections and the stdin it gets there.
+ExecSeen = namedtuple("ExecSeen", "start end redirects incoming")
+
+# The rounds a text is read in at most: each one assumes the facts the one before observed; a text whose facts have not
+# settled after them is level B (`analysis_budget`).
+MAX_FACT_ROUNDS = 4
+# Test-only switch: read a text again whenever any fact changed, the way the rounds ran before they looked at which facts
+# a round consulted (the tests compare both).
+_FORCE_FACT_ROUNDS = False
+
+
+def _changed_facts(old: "shell.Facts", new: "shell.Facts") -> set:
+    """The names of the facts (`StdinContext.reads`) that differ between two `Facts`."""
+    changed = set()
+    if old.fifos != new.fifos or old.fifo_unknown != new.fifo_unknown:
+        changed.add("fifos")
+    if old.moved != new.moved:
+        changed.add("moved")
+    if old.linked != new.linked:
+        changed.add("linked")
+    return changed
+
+
+def _exec_key(execs) -> tuple:
+    """What of the `exec`s of a round decides the contexts of the next: where they are and the stdin they get."""
+    return tuple((seen.start, seen.incoming) for seen in sorted(execs, key=lambda seen: seen.start))
+
+
+def _code_text(text: str, categories: list[str], flags: list[str], reasons: set[str], depth: int,
+               budget, code: bool = False, env=None, fn=None, kind: str = _CHILD, stdin=None,
+               shared: "dict | None" = None) -> "shell.Facts":
     """Classify a text the command runs as shell (a heredoc body, a code argument) as a command of its own, one
     level deeper; what it finds joins the outer result. More than MAX_CODE_DEPTH levels deep (X2): level B.
     `code`: the text is a code argument, so a command name made by an expansion is level B (X3). `env`: the
     values of the variables of the outer text, which go down (V3). `fn`: the functions of the outer text (name ->
-    whether the body may read code from stdin), which the same shell, or a child of it, can call. `same_shell`: the
-    text runs in the current shell (`eval`, `trap`, `source`), so a function it defines outlives it. `stdin`: the
-    `StdinContext` of the command that runs it: the standard input it is given (a pipe, a process substitution, an
-    `exec` redirect), and the fifos of the outer text."""
+    whether the body may read code from stdin), which the same shell, or a child of it, can call. `kind`: `_SAME` when
+    the text runs in the current shell (`eval`, `trap`, `source`), so a function it defines outlives it; `_BODY` or
+    `_CHILD` otherwise. `stdin`: the `StdinContext` of the command that runs it: the standard input it is given (a
+    pipe, a process substitution, an `exec` redirect), and the fifos of the outer text. Returns the facts of the text
+    that reach the enclosing one (`Facts.for_parent(kind)`). `shared`: what the whole analysis reads once (the `git-<name>` lookups)."""
     if not text.strip():
-        return
-    if _depth >= MAX_CODE_DEPTH:
+        return shell.NO_FACTS
+    if depth >= MAX_CODE_DEPTH:
         categories.append("unclassified")
         flags.append("unclassified_command")
         reasons.add("nested_shell_depth")
-        return
-    sub = analyze_command(text, _depth + 1, env, budget, code, _cwd=False, _fn=fn, _same=same_shell,
-                          _stdin=stdin)  # (the cwd of a nested text is not known)
+        return shell.NO_FACTS
+    sub, facts = _analyze(text, depth + 1, env, budget, code, False, fn, kind, stdin, shared)  # (no known cwd)
     categories.extend(sub.categories)
     flags.extend(sub.flags)
     reasons.update(sub.uncertainty)
+    return facts.for_parent(kind)
 
 
 # X1-X6: arguments that run code. `CodeArg.text` is the shell text to classify one level deeper; `None` is a
@@ -3561,7 +3626,7 @@ def _site_stdin(site) -> "str | None":
 
 
 def _stdin_context(site, state: "str | None" = None, replace: bool = False) -> "shell.StdinContext":
-    """The stdin context a code string run by this command gets: its descriptors (after its redirections) and fifos.
+    """The stdin context a code string run by this command gets: its descriptors (after its redirections), fifos and `moved`.
     `state` replaces the state of descriptor 0 when `replace`."""
     ctx = site.ctx or shell.NO_CONTEXT
     fds = {fd: st for fd, st in {**ctx.fds, **_site_fds(site)}.items() if st}
@@ -3569,7 +3634,7 @@ def _stdin_context(site, state: "str | None" = None, replace: bool = False) -> "
         fds.pop(0, None)
         if state:
             fds[0] = state
-    return shell.StdinContext(fds, ctx.fifos)
+    return ctx.inherit(fds)
 
 
 def _stdin_code(site) -> list[CodeArg]:
@@ -3613,7 +3678,8 @@ def _path_code(site, text: str, word) -> list[CodeArg]:
     """The code a shell reads from the path `text` (the word `word`, None for a value). A path that names stdin or a
     descriptor (`/dev/./stdin`, `/proc/$$/fd/0`, `/dev/fd/3`, a relative one that goes up, `~user/..`, through
     `/proc/<pid>/root`) is that descriptor, X4; a named pipe of the text is a pipe; when the text changes directory or
-    makes links a relative path may be any file, so it is stdin; under an active state (a pipe, a process
+    makes links a relative path may be any file, so it is stdin (after a link that reaches outside the plain names,
+    any path); under an active state (a pipe, a process
     substitution, an `exec`) an operand with an expansion, a glob or `~user` may be any of them. A plain file is not
     read."""
     alias = shell.stdin_alias(text)
@@ -3626,7 +3692,7 @@ def _path_code(site, text: str, word) -> list[CodeArg]:
         return [CodeArg(None, state)] if state else []
     if (ctx.fifos.match(word) if word is not None else ctx.fifos.match_text(text)):
         return [CodeArg(None, shell.PIPED)]
-    if ctx.moved and not text.startswith(("/", "~")):
+    if ctx.moved and (ctx.linked or not text.startswith(("/", "~"))):
         out = _stdin_code(site)  # (after a `cd` or a link a relative name may be any descriptor: `source 3`)
         state = fds[0] or shell.active(ctx.fds, fds)
         return out if out or not state else [CodeArg(None, state)]
@@ -3871,7 +3937,7 @@ _PARALLEL_PLAIN_WORD = re.compile(r"[-_.+A-Za-z0-9/]+")  # a literal argument pa
 _PARALLEL_VARS = frozenset({"PARALLEL", "PARALLEL_SHELL"})  # they add options and pick the shell
 # What a command run by `parallel` may not be: a program that runs code it is given, or one that runs another program.
 _PARALLEL_FORBIDDEN = (_STDIN_CODE_READERS | _SAME_SHELL_LOADERS | _OTHER_SHELLS | _SHELLS | frozenset(_WRAPPERS)
-                       | _PLAIN_PREFIXES)
+                       | _PLAIN_PREFIXES | frozenset({"mise", "nvim"}))  # (`mise` and `nvim` run the code they are given)
 
 
 def _parallel_takes_file(tok: str) -> bool:
@@ -3948,7 +4014,7 @@ def _parallel_template(command: list[str], sources: int, plus: bool, strict: boo
         tokens = [w.text for w in site.cmd.words]
         name = _program_name(tokens[0])
         if head.dynamic or head.has_glob or head.has_brace or name in _PARALLEL_FORBIDDEN \
-                or (name in _CODE_PROGRAMS and name != "git") or _VERSIONED_SHELL.fullmatch(name) \
+                or _VERSIONED_SHELL.fullmatch(name) \
                 or any(s != 0 for s in _prefix_steps(tokens, 0)):
             return None
     return template
@@ -4352,16 +4418,18 @@ def _receiver_heads(site, readings: Readings) -> "list[str] | None":
 
 def _heredoc_code(site, readings: Readings, categories: list[str], flags: list[str], reasons: set[str],
                   disqualified: bool, _depth: int, budget, view_at, grouped: bool, functions,
-                  rebound: bool = False, verdicts=None) -> None:
+                  rebound: bool = False, verdicts=None, shared: "dict | None" = None) -> "shell.Facts":
     """The bodies of the heredocs of one simple command (spec audit-shell-lexer, HD3-HD5): data is not read; the
     program of another language (`python`, `node`, ...) is not shell either; any other receiver gets its body
     classified as a script of its own. The expansions of an unquoted body are commands too (HD2), but they are
     sites of the walk, not handled here. The values of the variables go down into the body (V3); `view_at(pos)`
     gives the values at an offset of the text. `rebound`: the text gives a trusted program name another meaning (a
-    function, `hash -p`, a `PATH` assignment, `_rebinds`): no body is data and no receiver is foreign."""
+    function, `hash -p`, a `PATH` assignment, `_rebinds`): no body is data and no receiver is foreign. Returns the
+    facts of the bodies that reach the text (`_SAME` when the receiver is a loader, a function of the text (it may
+    `source /dev/stdin`, also through a forwarding function), a rebound name or unknown, else `_CHILD`)."""
     bodies = _stdin_texts(site.cmd)
     if not bodies or _heredoc_is_data(site, readings, disqualified or rebound, reasons, grouped):
-        return
+        return shell.NO_FACTS
     pos = site.cmd.span[0]
     names = functions()
     kind = None if rebound or any(_head_of(t).rsplit("/", 1)[-1] in names for t in readings.texts) \
@@ -4369,18 +4437,22 @@ def _heredoc_code(site, readings: Readings, categories: list[str], flags: list[s
     if kind:
         if kind == "query" and any(_query_escape(body) for body, _ in bodies):
             _block(categories, flags, reasons, "dynamic_code")  # `.shell`, `\!`: the client runs a command
-        return
+        return shell.NO_FACTS
     data = not rebound and _data_reader(readings)
     heads = _receiver_heads(site, readings)
-    same_shell = heads is None or any(h.rsplit("/", 1)[-1] in _SAME_SHELL_LOADERS for h in heads)
+    in_text = rebound or any(_head_of(t).rsplit("/", 1)[-1] in names for t in readings.texts)  # a function, or a rebound name
+    same_shell = in_text or heads is None or any(h.rsplit("/", 1)[-1] in _SAME_SHELL_LOADERS for h in heads)
     code = _receiver_reads_code(readings, functions()) or any(
         h.rsplit("/", 1)[-1] in _STDIN_CODE_READERS or h in names for h in heads or ())
+    facts = shell.NO_FACTS
     for body, here in bodies:
         if here and data:
             continue
         env = view_at(pos) if "$" in body else None
-        _code_text(body, categories, flags, reasons, _depth, budget, code, env, verdicts() if verdicts else None,
-                   same_shell)
+        facts = facts.join(_code_text(body, categories, flags, reasons, _depth, budget, code, env,
+                                      verdicts() if verdicts else None, _SAME if same_shell else _CHILD,
+                                      shared=shared))
+    return facts
 
 
 _BAD = "bad"  # a positional form the substitution does not model: the call is level B (part E, V1)
@@ -4967,52 +5039,65 @@ def _quoted_reaches_arithmetic(script, values=None) -> bool:
             or _expansion_reaches_arithmetic(script, tainted))
 
 
-class _Run:
-    """The state of one `analyze_command` call: the text and its tree, what the commands found so far, and the
-    values of its variables (computed when one is needed). One method per step of the reading of a simple command;
-    each of them only adds to `categories`, `flags` and `reasons`."""
+class _Text:
+    """What is read once per text, whatever the number of rounds that classify it: the tree, the values of its
+    variables and their views, the functions (the ones it defines and the zsh `functions[NAME]=BODY` ones) and
+    their verdicts, the forwarding functions and their spans, the spans of the function and loop bodies, the prefix
+    memo of `_code_args`, the readings of each command, what the heredocs of the commands need (`_heredocs`), the
+    evaluation of text as code, the aliases of the repo and the `git-<name>` lookups (the two reads that go through
+    the `RESOLVERS` of the hook and do I/O), and the `blocks` those computations decide (level B for the whole text:
+    every round reports them)."""
 
-    __slots__ = ("command", "depth", "outer_env", "budget", "code", "script", "categories", "flags", "reasons",
-                 "has_dollar", "funcs", "forwarded", "raws", "_values", "_views", "_names", "fwd_spans", "in_fwd",
-                 "cwd", "_repo_aliases", "_moved", "outer_fn", "_verdicts", "_fn_spans", "steps")
+    __slots__ = ("command", "depth", "outer_env", "budget", "code", "script", "cwd", "outer_fn", "has_dollar",
+                 "funcs", "fwd_spans", "steps", "blocks", "_verdicts", "_fn_spans", "_moved", "_repo_aliases",
+                 "_values", "_views", "_names", "_readings", "_evaluation", "_heredocs", "_repeated", "kind", "shared")
 
-    def __init__(self, command: str, depth: int, outer_env, budget, code: bool, script, cwd=None, outer_fn=None):
+    def __init__(self, command: str, depth: int, outer_env, budget, code: bool, script, cwd=None, outer_fn=None,
+                 kind: str = _CHILD, shared: "dict | None" = None):
         self.command = command
+        self.shared = shared if shared is not None else {}  # what the whole analysis reads once: `git_external`
+        self.kind = kind  # how the text runs: `_CHILD`, `_SAME` or `_BODY`
         self.outer_fn = outer_fn or {}  # the functions of the enclosing texts: name -> may read code from stdin
+        self.blocks: list[str] = []  # the reasons of level B decided for the whole text
         self._verdicts: list = []  # `function_verdicts`, computed when a call needs it
         self._fn_spans = None  # the spans of the function definitions, read when a trap needs them
         # the cwd of the tool call (the hook registers it); None: the process's; False: a nested text (not known)
         self.cwd = cwd if cwd is not None else RESOLVERS.get("cwd")
         self._moved: list = []  # `cwd_moved`, computed when needed
-        self.steps: dict = {}  # the prefix search of `_code_args`, by words: the two walks of one text share it
+        self.steps: dict = {}  # the prefix search of `_code_args` by words, and `parallel_env`: every round shares it
         self._repo_aliases: list = []  # the aliases of the repo (`_read_repo_git_aliases`), read once, when needed
+        self._readings: dict = {}  # the tokens and readings of each command, by `id(cmd)`
+        self._evaluation: list = []  # `_code_evaluation`, computed when needed
+        self._heredocs: list = []  # `(disqualified, rebound spans, grouped commands)` of the heredocs, computed when needed
+        self._repeated: list = []  # the spans of the function and loop bodies, computed when the contexts need them
         self.depth = depth
         self.outer_env = outer_env  # the values of the variables of the outer text (V3)
         self.budget = budget
         self.code = code
         self.script = script
-        self.categories: list[str] = []
-        self.flags: list[str] = []
-        self.reasons: set[str] = set()
         # no expansion in the text: no value to resolve, none to pass down (the `GIT_CONFIG_*` names are values too)
         self.has_dollar = "$" in command or any(h in command for h in _GIT_ENV_HINTS)
         self.funcs = _forwarding_functions(script, command) if self.has_dollar and (
             "function" in command or "()" in command.replace(" ", "")) else {}
-        self.forwarded: set = set()
         # the source spans of the bodies of the forwarding functions: what runs there is what the calls pass (D1)
         self.fwd_spans: list = _forwarding_spans(script, self.funcs) if self.funcs else []
-        self.in_fwd = False  # the simple command being read sits in one of those bodies
-        self.raws: list[str] = []
         self._values: list = []  # `_known_values` of the script, computed when a value is needed (V1-V4)
         self._views: dict[int, "_Values"] = {}
         self._names: list = []  # `_function_names` of the script, computed when a heredoc or here-string needs it
 
     def block(self, reason: str) -> None:
-        _block(self.categories, self.flags, self.reasons, reason)
+        """Level B for the whole text: every round of its reading reports it."""
+        if reason not in self.blocks:
+            self.blocks.append(reason)
 
-    def unclassified(self) -> None:
-        self.categories.append("unclassified")
-        self.flags.append("unclassified_command")
+    def charge(self, cost: int) -> bool:
+        """Charge the budget; False (and level B for the text) when it is spent."""
+        try:
+            self.budget.charge(cost)
+        except shell.BudgetExceeded:
+            self.block("analysis_budget")
+            return False
+        return True
 
     def repo_aliases(self) -> "dict[str, str] | None":
         """The aliases the configuration of the repo at the cwd defines (read once), or None when they cannot be
@@ -5023,6 +5108,13 @@ class _Run:
             self._repo_aliases.append(_read_repo_git_aliases(self.cwd))
         return self._repo_aliases[0]
 
+    def git_external(self, name: str) -> bool:
+        """A program `git-<name>` is on the PATH (read once per name in the whole analysis: the nested texts and the
+        rounds share the answer)."""
+        if name not in self.shared:
+            self.shared[name] = _git_external_exists(name)
+        return self.shared[name]
+
     def cwd_moved(self) -> bool:
         """The directory git runs in may not be the cwd of the call: a nested text, or the text changes directory."""
         if not self._moved:
@@ -5030,9 +5122,21 @@ class _Run:
         return self._moved[0]
 
     def functions(self) -> frozenset:
+        """The names of the functions of this text (the `name() {}` ones and the zsh `functions[NAME]=BODY` ones) and
+        of the enclosing ones."""
         if not self._names:
-            self._names.append(_function_names(self.script) | frozenset(self.outer_fn))
+            names = _function_names(self.script) | frozenset(self.outer_fn)
+            if "functions" in self.command:
+                names |= _zsh_function_names(self.script)
+            self._names.append(names)
         return self._names[0]
+
+    def repeated_spans(self) -> list:
+        """The spans of the bodies that run when the text is somewhere else (a function: called after any command;
+        a loop: again after its last command), as `(start, end)` pairs."""
+        if not self._repeated:
+            self._repeated.append([c.span for c in shell.iter_compounds(self.script) if c.kind in _REPEATED_KINDS])
+        return self._repeated[0]
 
     def function_verdicts(self) -> dict:
         """Per function name (this text and the enclosing ones), whether some definition may read code from the
@@ -5048,6 +5152,256 @@ class _Run:
                     verdicts[name] = verdicts.get(name, False) or _compound_reads_code(comp, names)
             self._verdicts.append(verdicts)
         return self._verdicts[0]
+
+    def values(self) -> "_Values":
+        return _values_of(self.script, self.outer_env, self._values, self.command)
+
+    def view_at(self, pos: int) -> "_Values":
+        """The values of the variables at the offset `pos` of the text (a name not yet assigned there may hold the
+        environment's value)."""
+        view = self._views.get(pos)
+        if view is None:
+            view = self._views[pos] = self.values().at(pos)
+        return view
+
+    def code_evaluation(self) -> bool:
+        """The shell evaluates text as code where no command is written (`_code_evaluation`), read once."""
+        if not self._evaluation:
+            self._evaluation.append(_code_evaluation(self.command, self.script, self.values))
+        return self._evaluation[0]
+
+    def readings(self, site) -> "tuple[list[str], Readings]":
+        """The words of a command and their readings, read once per command of the tree."""
+        key = id(site.cmd)
+        found = self._readings.get(key)
+        if found is None:
+            tokens = [w.text for w in site.cmd.words]
+            found = self._readings[key] = (tokens, _token_readings(tokens))
+        return found
+
+    def heredocs(self, items: list) -> "tuple[bool, tuple, set]":
+        """`(disqualified, rebound spans, grouped commands)` of a text with a heredoc, read once from the readings of
+        its commands (`items`: `(site, tokens, readings)`)."""
+        if not self._heredocs:
+            disqualified = _heredocs_disqualified(self.script, items)
+            rebound = _rebound_spans(self.script, items)
+            grouped = _grouped_commands(self.script) if not disqualified else ()
+            self._heredocs.append((disqualified, rebound, grouped))
+        return self._heredocs[0]
+
+    def in_function(self, site) -> bool:
+        """The command sits in the body of a function the text defines."""
+        if self._fn_spans is None:
+            self._fn_spans = [c.span for c in shell.iter_compounds(self.script) if c.kind == "function"]
+        return any(lo <= site.cmd.span[0] < hi for lo, hi in self._fn_spans)
+
+
+class _Run:
+    """The state of one round of the reading of a text (`_Text`): the facts and `exec`s it assumes (`assumed`,
+    `prior_execs`, which make its `StdinContext`s), what the commands found so far, and the facts and `exec`s it observes
+    while classifying (`observed`, `execs`), which the next round assumes. One method per step of the reading of a
+    simple command; each of them only adds to `categories`, `flags` and `reasons`. The text's own blocks join the
+    result."""
+
+    __slots__ = ("text", "command", "depth", "budget", "code", "script", "categories", "flags", "reasons",
+                 "has_dollar", "funcs", "forwarded", "raws", "fwd_spans", "in_fwd", "cwd", "steps", "assumed",
+                 "execs", "moving", "_fifos", "_unknown", "_moved", "_linked", "_cd", "_made", "_exec_ids", "prior_execs", "stdin",
+                 "reads")
+
+    def __init__(self, text: "_Text", assumed: "shell.Facts" = shell.NO_FACTS, prior_execs=(), stdin=None):
+        self.text = text
+        self.assumed = assumed  # the facts the contexts of this reading assume
+        self.prior_execs = prior_execs  # the `ExecSeen` of the round before, whose descriptors the contexts assume
+        self.stdin = stdin  # the `StdinContext` of the command that runs the text as code
+        self.reads: set = set()  # the assumed facts this round consulted ("fifos", "moved", "linked"): see `_analyze`
+        self.execs: list = []  # the `ExecSeen` of the reading (the bare `exec` it classified)
+        self.moving = False  # some command may move a fifo (`mv`, `ln`...)
+        self._fifos: set = set()  # what the reading observes: `observed`
+        self._unknown = False
+        self._moved = False
+        self._linked = False  # some command makes a link that reaches outside the plain names (`_link_reaches_outside`)
+        self._cd = False  # the text changed directory (`cd`, `pushd`...) before the command being read
+        self._made = False  # the command being read made a fifo in some reading
+        self._exec_ids: set = set()
+        self.command = text.command
+        self.depth = text.depth
+        self.budget = text.budget
+        self.code = text.code
+        self.script = text.script
+        self.cwd = text.cwd
+        self.steps = text.steps
+        self.has_dollar = text.has_dollar
+        self.funcs = text.funcs
+        self.fwd_spans = text.fwd_spans
+        self.categories: list[str] = []
+        self.flags: list[str] = []
+        self.reasons: set[str] = set()
+        self.forwarded: set = set()
+        self.in_fwd = False  # the simple command being read sits in one of those bodies
+        self.raws: list[str] = []
+
+    def block(self, reason: str) -> None:
+        _block(self.categories, self.flags, self.reasons, reason)
+
+    @property
+    def observed(self) -> "shell.Facts":
+        """The facts of the text this reading saw: what its commands, as the classification reads them, and the nested
+        texts it analyzed, do to the stdin that later commands read."""
+        return shell.Facts(frozenset(self._fifos), self._unknown, self._moved, self._linked)
+
+    def absorb(self, facts: "shell.Facts") -> None:
+        """Join the facts a nested text handed up."""
+        self._fifos.update(facts.fifos)
+        self._unknown = self._unknown or facts.fifo_unknown
+        self._moved = self._moved or facts.moved
+        self._linked = self._linked or facts.linked
+
+    def observe_reading(self, site, tokens: list[str], words: list, readings: Readings) -> None:
+        """The facts of one final reading of a command (after the values, the variants and the aliases): a fifo made
+        by its simple head (a name that is a value, an expansion or a pattern makes every file a possible one), one
+        made behind a wrapper (`sudo mkfifo p`, `xargs mkfifo`: the operands may come from elsewhere), a change of
+        directory or a link, a command that may move a fifo, and a bare `exec`."""
+        fifos = shell.Fifos()
+        made = _fifo_operands(tokens, words, fifos)
+        k = _plain_head(tokens)
+        if made:
+            self._made = True
+            self._fifos.update(fifos.names)
+            self._unknown = self._unknown or fifos.unknown
+        for s in {*readings.starts, k}:
+            if s >= len(tokens):
+                continue
+            name = _program_name(tokens[s])
+            if name in ("mkfifo", "mknod") and not (made and s == k):
+                self._unknown = True
+            if name in _CHANGING_HEADS:
+                self._moved = True
+                if name in _LINKING_HEADS:
+                    # a link made by a program another one runs (`xargs ln`, `find -exec ln`: the operands come from
+                    # elsewhere), one with a `{}` operand, one after a change of directory, or one that names a path
+                    # outside the plain relative names is a link that outlives the shell and may name a descriptor
+                    if (s != k and _program_name(tokens[k]) not in _OPERAND_KEEPING_WRAPPERS) or self._cd \
+                            or any("{}" in t for t in tokens[s + 1:]) \
+                            or _link_reaches_outside(tokens[s + 1:], words[s + 1:]):
+                        self._linked = True
+                else:
+                    self._cd = True
+            if name in _MOVING_HEADS:
+                self.moving = True
+        for i in range(1, len(tokens)):  # `find -exec ln -s {} d \;`: a link the operands of another program make
+            if tokens[i - 1] in _FIND_EXECS and _program_name(tokens[i]) in _LINKING_HEADS:
+                self._moved = self._linked = True
+        if id(site.cmd) not in self._exec_ids and _bare_exec(site, tokens, words):
+            self._exec_ids.add(id(site.cmd))
+            if _copies_input(site.cmd.redirects) and self.in_repeated(site):
+                self.block("dynamic_code")  # `f() { exec 4<&3; }; exec 3< <(x); f`: the body runs after any command
+            incoming = shell.PIPED if site.stage > 0 else site.stdin
+            self.execs.append(ExecSeen(site.cmd.span[0], site.cmd.span[1], site.cmd.redirects, incoming))
+
+    def observe_site(self, site, tokens: list[str], expansion_head: bool) -> None:
+        """What the command says as a whole: a word that holds `mkfifo` or `mknod` where no reading made a fifo
+        (every file may be one), and a program that stays an expansion (`$X p`): at the top it may be a fifo maker or
+        a `cd` once the expansions that can be empty are gone; in a nested text it may be a fifo maker, and a `cd` of
+        this shell when the text runs here."""
+        if not self._made and _mentions_fifo_maker(site, tokens):
+            self._unknown = True
+        if not expansion_head:
+            return
+        if self.depth > 0:
+            self._unknown = True
+            if self.text.kind != _CHILD:
+                self._moved = True
+            return
+        k = _plain_head(tokens)
+        bare = _STRIPPABLE_EXPANSION.sub("", tokens[k]).rsplit("/", 1)[-1] if k < len(tokens) else ""
+        if bare in ("mkfifo", "mknod"):
+            self._unknown = True
+        elif bare in _CHANGING_HEADS:
+            self._moved = True
+
+    def exec_key(self) -> tuple:
+        return _exec_key(self.execs)
+
+    def classify(self) -> Analysis:
+        """One round: the contexts from the facts and `exec`s the round assumes, every command of the text read with
+        them (the facts they show are observed), and the blocks that hold for the text as a whole."""
+        text, stdin, kind = self.text, self.stdin, self.text.kind
+        initial = stdin.fds.get(0) if stdin else None
+        resolve, first, last = _contexts(self.assumed, self.prior_execs, stdin, text.repeated_spans(), self.reads)
+        sites = list(shell.iter_sites(self.script, initial, resolve))  # compounds read the context at their offset
+        if "parallel_env" not in text.steps:
+            text.steps["parallel_env"] = _sets_parallel_vars(sites, text.outer_env)
+        items = []
+        for site in sites:
+            tokens, readings = text.readings(site)
+            items.append((site, tokens, readings))
+        if text.code_evaluation():  # the shell evaluates text as code where no command is written
+            text.block("dynamic_code")
+        has_heredoc = "<<" in self.command
+        disqualified, rebound_spans, grouped = text.heredocs(items) if has_heredoc else (False, (), ())
+        for site, tokens, readings in items:
+            self.simple(site, tokens, readings)
+            self.zsh_hooks(site, tokens)
+            if has_heredoc:
+                self.absorb(_heredoc_code(site, readings, self.categories, self.flags, self.reasons, disqualified,
+                                          self.depth, self.budget, text.view_at, id(site.cmd) in grouped,
+                                          text.functions, any(lo <= site.cmd.span[0] < hi for lo, hi in rebound_spans),
+                                          text.function_verdicts, text.shared))
+        if has_heredoc:
+            self.compound_heredocs()
+        self.finish()
+        if kind != _CHILD and last.fds != first.fds:
+            # `eval 'exec < <(x)'`, `f exec` with `f() { "$@" < <(x); }`: the descriptors it sets outlive the text, not seen here
+            self.block("dynamic_code")
+        return self.result()
+
+    def finish(self) -> None:
+        """The end of the reading: a command that may move a fifo makes every file a possible one when the text
+        (or the one around it) made some."""
+        if self.moving:
+            self.reads.add("fifos")
+            if self.assumed.fifos or self._fifos:
+                self._unknown = True
+        self.exec_sources()
+
+    def exec_sources(self) -> None:
+        """A bare `exec` that copies a descriptor the text never opens (by an `exec` of its own, or one it inherits)
+        takes the state of a redirection of an enclosing compound or of a call (`f() { exec 4<&3; }; f 3< <(x)`),
+        which this reading does not see: `dynamic_code`. Descriptor 0 is the stdin the command is given (read), and
+        a copy of 1 or 2 by `>&` is the output of the shell."""
+        if not self.execs:
+            return
+        opened = set(self.stdin.fds) if self.stdin is not None else set()
+        named = False  # `{fd}<`: some descriptor from 10 up
+        for seen in self.execs:
+            for r in seen.redirects:
+                if r.fd is not None:
+                    if r.fd.isdigit():
+                        opened.add(int(r.fd))
+                    else:
+                        named = True
+        for seen in self.execs:
+            for r in seen.redirects:
+                if r.op not in ("<&", ">&") or r.target is None:
+                    continue
+                number = r.target.text[:-1] if r.target.text.endswith("-") else r.target.text
+                if not (number.isdigit() and number.isascii()):
+                    continue
+                source = int(number)
+                if source == 0 or source in opened or (named and source >= 10) or (r.op == ">&" and source in (1, 2)):
+                    continue
+                self.block("dynamic_code")
+                return
+
+    def unclassified(self) -> None:
+        self.categories.append("unclassified")
+        self.flags.append("unclassified_command")
+
+    def functions(self) -> frozenset:
+        return self.text.functions()
+
+    def function_verdicts(self) -> dict:
+        return self.text.function_verdicts()
 
     def function_call(self, site, readings: Readings, unresolved: bool = False) -> None:
         """A call of a function the text defines (or an enclosing text does), with a pipe or a `<(...)` on its
@@ -5070,24 +5424,20 @@ class _Run:
                 self.block(reason)
 
     def values(self) -> "_Values":
-        return _values_of(self.script, self.outer_env, self._values, self.command)
+        return self.text.values()
 
     def view_at(self, pos: int) -> "_Values":
-        """The values of the variables at the offset `pos` of the text (a name not yet assigned there may hold the
-        environment's value)."""
-        view = self._views.get(pos)
-        if view is None:
-            view = self._views[pos] = self.values().at(pos)
-        return view
+        return self.text.view_at(pos)
 
-    def code_text(self, text: str, env, code: bool = True, named: bool = True, same_shell: bool = False,
+    def code_text(self, text: str, env, code: bool = True, named: bool = True, kind: str = _CHILD,
                   stdin=None) -> None:
         """`named`: the text is a string a nested shell reads (not the source of a function body, which is in this
-        text with its quotes). `stdin`: the `StdinContext` of the command that runs it (the text inherits it)."""
+        text with its quotes). `kind`: how the text runs (`_CHILD`, `_SAME`, `_BODY`). `stdin`: the `StdinContext`
+        of the command that runs it (the text inherits it). The facts of the text join `observed`."""
         if named and self.funcs and _mentions(text, self.funcs):
             self.block("dynamic_code")  # a nested shell that names a forwarding function: `export -f f; bash -c 'f x'`
-        _code_text(text, self.categories, self.flags, self.reasons, self.depth, self.budget, code, env,
-                   self.function_verdicts(), same_shell, stdin)
+        self.absorb(_code_text(text, self.categories, self.flags, self.reasons, self.depth, self.budget, code, env,
+                               self.function_verdicts(), kind, stdin, self.text.shared))
 
     def forwarded_misuse(self, tokens: list[str], readings: Readings) -> None:
         """D1: a forwarding function named where it is not called with its arguments in view (`xargs f`, `eval f x`,
@@ -5113,7 +5463,16 @@ class _Run:
     def simple(self, site, tokens: list[str], readings: Readings) -> None:
         """One simple command of the tree with its readings."""
         self.reasons.update(readings.reasons)
+        self._made = False
+        if _names_functions_parameter(tokens, site.cmd.words):
+            self.block("dynamic_code")  # the zsh `functions` parameter set where `zsh_hooks` does not read it
+        if site.given:  # `{ bash; } < <(x)`: the body of a compound with a process substitution on a descriptor
+            words = site.cmd.words
+            if _site_reads_code(words, _word_readings(words), self.text.functions(), site):
+                self.block(site.given)
         if not readings.complete:  # too many possible readings: not classified, blocked (no canary: already denied)
+            self.observe_reading(site, tokens, list(site.cmd.words), readings)  # (the facts of its words as written)
+            self.observe_site(site, tokens, False)
             self.unclassified()
             return
         cmd = site.cmd
@@ -5135,10 +5494,11 @@ class _Run:
             self.forwarded_misuse(tokens, readings)
         env = self.view_at(start) if self.has_dollar else _NO_VALUES
         variants, head_unresolved, from_variant = self.head_variants(tokens, words, readings, env)
-        if head_unresolved or (not from_variant and any(
-                s < len(words) and words[s] is not None and (words[s].dynamic or words[s].has_glob)
-                and not _literal_slash(words[s])
-                for s in readings.starts)):
+        expansion_head = head_unresolved or (not from_variant and any(
+            s < len(words) and words[s] is not None and (words[s].dynamic or words[s].has_glob)
+            and not _literal_slash(words[s])
+            for s in readings.starts))
+        if expansion_head:
             self.function_call(site, readings, True)  # the program is an expansion: it may name any function
         if head_unresolved:
             self.block("dynamic_code")
@@ -5147,21 +5507,7 @@ class _Run:
             self.block(state)  # a program name that is a glob (`/bin/[c]at`) may be any program, a shell reading that stdin
         for v_tokens, v_words, v_readings in variants:
             self.variant(site, v_tokens, v_words, v_readings, env, from_variant)
-
-    def resolved(self, site, tokens: list[str]) -> "tuple[list, _Values]":
-        """The `(tokens, words)` readings of a command after the values the text assigns and the expansions that may
-        be empty (the ones `simple` classifies), and the values."""
-        words = list(site.cmd.words)
-        env = self.view_at(site.cmd.span[0]) if self.has_dollar else _NO_VALUES
-        variants, _, _ = self.head_variants(tokens, words, _token_readings(tokens), env)
-        return [(v_tokens, v_words) for v_tokens, v_words, _ in variants], env
-
-    def head_readings(self, site, tokens: list[str]) -> list:
-        """The `(tokens, words)` readings of a command whose program is an expansion with known values."""
-        words = list(site.cmd.words)
-        env = self.view_at(site.cmd.span[0]) if self.has_dollar else _NO_VALUES
-        variants, _, from_variant = self.head_variants(tokens, words, _token_readings(tokens), env)
-        return [(v_tokens, v_words) for v_tokens, v_words, _ in variants] if from_variant else []
+        self.observe_site(site, tokens, expansion_head)
 
     def head_variants(self, tokens: list[str], words: list, readings: Readings, env: "_Values") -> "tuple[list, bool, bool]":
         """N6/V2: the readings of the command with its program made by a brace expansion or by a variable of known
@@ -5220,9 +5566,11 @@ class _Run:
             self.block("dynamic_code")
         # item 6: `git -c alias.p=push p` and the `GIT_CONFIG_*` variables: the alias as the command it is
         arg_variants, alias_code, alias_reasons = _git_alias_variants(
-            arg_variants, cmd, env, self.repo_aliases, self.cwd_moved, self.in_fwd)
+            arg_variants, cmd, env, self.text.repo_aliases, self.text.cwd_moved, self.in_fwd, self.text.git_external)
         for reason in sorted(alias_reasons):
             self.block(reason)
+        if "dynamic_code" in alias_reasons:  # a configuration that cannot be read may make any file a fifo
+            self._unknown = True
         for code in alias_code:
             self.code_text(code, env if "$" in code else None, stdin=_stdin_context(site))
         for a_tokens, a_words, a_readings in arg_variants:
@@ -5238,6 +5586,7 @@ class _Run:
         if not readings.complete:
             self.unclassified()
             return
+        self.observe_reading(site, tokens, words, readings)
         for n, seg in enumerate(readings.texts):
             seg_categories: list[str] = []
             _classify_segment(tokens, seg, seg_categories, self.flags, readings.starts[n])
@@ -5297,7 +5646,8 @@ class _Run:
                     self.block("dynamic_code")
                     continue
                 text = _positional_text(body, args, tokens[s + 1:], marks)
-                self.code_text(text, env if "$" in text else None, named=False, stdin=_stdin_context(site))
+                self.code_text(text, env if "$" in text else None, named=False, kind=_BODY,
+                               stdin=_stdin_context(site))
 
     def code_arguments(self, site, tokens: list[str], words: list, env: "_Values", readings: Readings) -> None:
         """X1-X6: the code the arguments of the command run, classified one level deeper."""
@@ -5313,7 +5663,7 @@ class _Run:
             for code in texts:
                 if len(texts) > 1 and not self.charge(VARIANT_COST):
                     break
-                self.code_text(code, inner if "$" in code else None, same_shell=same_shell,
+                self.code_text(code, inner if "$" in code else None, kind=_SAME if same_shell else _CHILD,
                                stdin=self.trap_stdin(site, signals))
 
     def trap_stdin(self, site, signals) -> "shell.StdinContext":
@@ -5333,9 +5683,12 @@ class _Run:
 
     def in_function(self, site) -> bool:
         """The command sits in the body of a function the text defines."""
-        if self._fn_spans is None:
-            self._fn_spans = [c.span for c in shell.iter_compounds(self.script) if c.kind == "function"]
-        return any(lo <= site.cmd.span[0] < hi for lo, hi in self._fn_spans)
+        return self.text.in_function(site)
+
+    def in_repeated(self, site) -> bool:
+        """The command sits in the body of a function or a loop of the text."""
+        start = site.cmd.span[0]
+        return any(lo <= start < hi for lo, hi in self.text.repeated_spans())
 
     def zsh_hooks(self, site, tokens: list[str]) -> None:
         """zsh runs some functions by itself (`_IMPLICIT_FUNCTIONS`, `TRAP<SIG>`, the `*_functions` arrays, what
@@ -5345,8 +5698,12 @@ class _Run:
         for word in site.cmd.assignments:
             text = word.text
             found = _FUNCTIONS_SUBSCRIPT.match(text)
-            if found and _hook_name(found.group(1)):
-                self.code_text(found.group(2), None, stdin=shell.StdinContext({0: shell.DYNAMIC}, ctx.fifos))
+            if found:
+                self.zsh_function(found.group(2), ctx)
+                continue
+            found = _FUNCTIONS_ARRAY.match(text)
+            if found:
+                self.zsh_function_pairs(found.group(1), ctx)
                 continue
             found = _HOOK_ARRAY.match(text)
             if found:
@@ -5362,19 +5719,25 @@ class _Run:
         elif tokens[k] == "functions" and len(rest) >= 3 and rest[0] == "-c" and _hook_name(rest[2]):
             self.hook_functions(rest[1:2])
 
+    def zsh_function(self, body: str, ctx: "shell.StdinContext") -> None:
+        """`functions[NAME]=BODY` (any name): the body is code that runs in this shell, with the stdin of whoever
+        calls it (a hook: the shell itself, with whatever it has then), so it is read as same-shell code with an
+        unknown stdin."""
+        self.code_text(body, None, stdin=ctx.inherit({0: shell.DYNAMIC}), kind=_SAME)
+
+    def zsh_function_pairs(self, inner: str, ctx: "shell.StdinContext") -> None:
+        """`functions+=(NAME BODY ...)`: the words are read as the shell does, and each body as `zsh_function` does."""
+        items = _array_words(inner, self.budget)
+        if items is None or len(items) % 2:
+            self.block("dynamic_code")  # not read: the elements may be any function
+            return
+        for body in items[1::2]:
+            self.zsh_function(body, ctx)
+
     def hook_functions(self, names: list[str]) -> None:
         verdicts = self.function_verdicts()
         if any(verdicts.get(name) for name in names):
             self.block("dynamic_code")
-
-    def compound_procsub_stdin(self) -> None:
-        """`{ bash; } < <(x)`: a compound with a `<(...)` on any input descriptor (it may be copied to stdin) that may read code from it reads code
-        of unknown reach, like `bash < <(x)` (X5). A false positive when a command inside replaces the stdin."""
-        for compound in shell.iter_compounds(self.script):
-            if any(r.op in ("<", "<>") and r.target is not None
-                   and any(part.kind == "procsub_in" for part in r.target.parts) for r in compound.redirects) \
-                    and _compound_reads_code(compound, self.functions()):
-                self.block("dynamic_code")
 
     def compound_heredocs(self) -> None:
         """A heredoc or here-string on a compound command (`{ bash; } <<EOF`) feeds code of unknown reach."""
@@ -5388,9 +5751,11 @@ class _Run:
                     continue
                 body = redirect.heredoc.body if redirect.heredoc is not None else redirect.target.text
                 env = self.view_at(compound.span[0]) if "$" in body else None
-                self.code_text(body, env, reads)
+                self.code_text(body, env, reads, kind=_SAME)
 
     def result(self) -> Analysis:
+        for reason in self.text.blocks:  # decided once for the text
+            self.block(reason)
         flag_set = set(self.flags)  # the flag may come from another command of the same text
         if any(_deny_token_unmatched(raw, flag_set) for raw in self.raws):
             self.reasons.add("deny_token_unmatched")
@@ -5402,7 +5767,77 @@ class _Run:
 _IMPLICIT_FUNCTIONS = frozenset({"command_not_found_handle", "command_not_found_handler", "chpwd", "precmd", "preexec",
                                  "periodic", "zshexit"})
 _FUNCTIONS_SUBSCRIPT = re.compile(r"functions\[([^\]]+)\]\+?=(.*)", re.S)  # zsh: `functions[NAME]=BODY`
+_FUNCTIONS_ARRAY = re.compile(r"functions\+?=\((.*)\)\s*$", re.S)  # zsh: `functions+=(NAME BODY ...)`
 _HOOK_ARRAY = re.compile(r"(chpwd|precmd|preexec|periodic|zshexit|zshaddhistory)_functions(?:\[[^\]]*\])?\+?=(.*)", re.S)
+
+
+# Where the zsh `functions` parameter defines a function in a way `zsh_hooks` does not read: an assignment word
+# (`functions[g]=...`, `functions=(...)`, `functions+=...`) at the start of a command or among the operands of a builtin
+# that takes assignments; a name operand of the builtins that set a parameter (`set -A functions ...`, `typeset -A
+# functions`, `read functions[g]`, `print -v 'functions[g]'`); an expansion `${functions[g]::=...}` of any word that is
+# not in single quotes. Text a program receives (`grep 'functions\['`, `echo functions[g]=x`) does not set anything.
+_FUNCTIONS_NAME = re.compile(r"functions(?:\[[^\]]*\])?")
+_FUNCTIONS_ASSIGNMENT = re.compile(r"functions(?:\[[^\]]*\])?\+?=", re.S)
+_FUNCTIONS_EXPANSION = re.compile(r"\$\{[^}]*\bfunctions\b")
+_FUNCTIONS_ASSIGNING_HEADS = frozenset({"typeset", "declare", "local", "export", "readonly", "integer", "float"})
+_PRINT_INTO_VARIABLE = re.compile(r"-[A-Za-z]*v[A-Za-z]*")
+
+
+def _names_functions_parameter(tokens: list[str], words: "list | None" = None) -> bool:
+    """The command sets the zsh `functions` parameter where `zsh_hooks` does not read it (see above). `words`: the
+    words of the command, to tell an expansion from text in single quotes (the same positions as `tokens`). The plain
+    assignment `functions[g]=...; g` is read by `zsh_hooks`, which does not come here: it is not a word of the command."""
+    if not any("functions" in token for token in tokens):
+        return False
+    aligned = words if words is not None and len(words) == len(tokens) else None
+    for i, token in enumerate(tokens):
+        if _FUNCTIONS_EXPANSION.search(token) and (aligned is None or aligned[i].dynamic):
+            return True
+    k = _plain_head(tokens)
+    if k >= len(tokens):
+        return False
+    if _FUNCTIONS_ASSIGNMENT.match(tokens[k]):  # `functions[g]=...` or `noglob functions[g]=...`: the word is the head
+        return True
+    head = _program_name(tokens[k])
+    operands = tokens[k + 1:]
+    if head in _FUNCTIONS_ASSIGNING_HEADS:
+        return any(_FUNCTIONS_NAME.fullmatch(t) or _FUNCTIONS_ASSIGNMENT.match(t) for t in operands)
+    if head in ("set", "read"):
+        return any(_FUNCTIONS_NAME.fullmatch(t) for t in operands)
+    if head in ("print", "printf"):  # `print -v NAME`, `printf -v NAME`
+        return any(_PRINT_INTO_VARIABLE.fullmatch(before) and _FUNCTIONS_NAME.fullmatch(t)
+                   for before, t in zip(operands, operands[1:]))
+    return False
+
+
+def _array_words(inner: str, budget) -> "list[str] | None":
+    """The words of the inside of an array assignment `(a 'b c')`, decoded as the shell does; None when they do not
+    parse (or the budget is spent)."""
+    try:
+        script = shell.parse("x " + inner, budget)
+    except shell.ShellError:
+        return None
+    sites = list(shell.iter_sites(script))
+    if len(sites) != 1:
+        return None
+    return [w.text for w in sites[0].cmd.words[1:]]
+
+
+def _zsh_function_names(script) -> frozenset:
+    """The names the text gives zsh functions without the `name() {}` form: `functions[NAME]=BODY` and
+    `functions+=(NAME BODY ...)` (a name that is an expansion is not one)."""
+    names: set = set()
+    for site in shell.iter_sites(script):
+        for word in site.cmd.assignments:
+            found = _FUNCTIONS_SUBSCRIPT.match(word.text)
+            if found:
+                names.add(found.group(1))
+                continue
+            found = _FUNCTIONS_ARRAY.match(word.text)
+            if found:
+                items = _array_words(found.group(1), shell.Budget(MAX_LEX_CHARS))
+                names.update(items[0::2] if items is not None and not len(items) % 2 else ())
+    return frozenset(name for name in names if re.fullmatch(r"[^\s$`'\"\\]+", name))
 
 
 def _hook_name(name: str) -> bool:
@@ -5458,18 +5893,41 @@ def _fifo_operands(tokens: list[str], words: list, fifos: "shell.Fifos") -> bool
 # What a bare `exec` takes as options before it has a command: `-c`, `-l`, `-a NAME`, `--`.
 _MOVING_HEADS = frozenset({"mv", "ln", "link", "cp", "rename", "install"})
 _CHANGING_HEADS = frozenset({"cd", "pushd", "popd", "chdir", "ln", "link"})
+_LINKING_HEADS = frozenset({"ln", "link"})
+_FIND_EXECS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+# Wrappers that run the command with the operands as written (`sudo ln -s a b`); any other program that runs `ln`
+# (`xargs`, `parallel`, `watch`...) may give it operands the text does not show.
+_OPERAND_KEEPING_WRAPPERS = frozenset({"env", "sudo", "doas", "timeout", "nice", "nohup", "ionice", "time", "stdbuf",
+                                       "setsid", "command", "builtin"})
+# The bodies that run when the text is somewhere else: a function (called after any command), a loop (again).
+_REPEATED_KINDS = frozenset({"function", "while", "until", "for", "select", "coproc"})
 
 
-def _bare_exec(site, tokens: list[str]) -> bool:
+def _link_reaches_outside(tokens: list[str], words: list) -> bool:
+    """The operands of `ln` / `link` (after the program) name something other than plain relative names: an absolute
+    path, `..`, `~`, an expansion or a glob. A link between plain names of the directory only renames what the text
+    can already name; a link to (or made in) any other path may make a path read through it a descriptor, and it
+    outlives the shell that made it."""
+    for i, token in enumerate(tokens):
+        word = words[i] if i < len(words) else None
+        if word is None or word.dynamic or word.has_glob or token.startswith(("/", "~")) or "=/" in token \
+                or ".." in token or (token.startswith("-") and "/" in token):
+            return True
+    return False
+
+
+def _bare_exec(site, tokens: list[str], words: "list | None" = None) -> bool:
     """A command that only rebinds the descriptors of the shell: `exec` (also behind `command`, `builtin`, ..., or as
-    an expansion that may be it: `$e < <(x)`) with redirections and no program, after its options."""
+    an expansion that may be it: `$e < <(x)`) with redirections and no program, after its options. `words`: the words
+    of the reading (default: those of the command)."""
     if not site.cmd.redirects:
         return False
+    words = site.cmd.words if words is None else words
     k = _plain_head(tokens)
     if k >= len(tokens):
         return False
     if tokens[k] != "exec":
-        word = site.cmd.words[k] if k < len(site.cmd.words) else None
+        word = words[k] if k < len(words) else None
         return k + 1 == len(tokens) and word is not None and word.dynamic
     i = k + 1
     while i < len(tokens):
@@ -5481,109 +5939,10 @@ def _bare_exec(site, tokens: list[str]) -> bool:
             break
         i += 2 if tok.startswith("-") and not tok.startswith("--") and tok.endswith("a") else 1
     # what is left may all expand to nothing (`exec ${e:-}`, `exec $unset`): then it is bare
-    words = site.cmd.words
     return all(j < len(words) and words[j] is not None and words[j].dynamic for j in range(i, len(tokens)))
 
 
 _STRIPPABLE_EXPANSION = re.compile(r"\$\{[^}]*\}|\$[A-Za-z_]\w*")  # (the ones that may expand to nothing)
-
-
-def _changes_directory(site, tokens: list[str], k: int, nested: bool) -> bool:
-    """The command is a `cd`, `pushd`, `ln`...: by its literal program, or an expansion that, with the empty ones
-    removed, is one (in nested text, any other expansion in the program is unknown, so it may be)."""
-    if k >= len(tokens):
-        return False
-    if tokens[k].rsplit("/", 1)[-1] in _CHANGING_HEADS:
-        return True
-    words = site.cmd.words
-    if k < len(words) and words[k].dynamic:
-        return nested or _STRIPPABLE_EXPANSION.sub("", tokens[k]).rsplit("/", 1)[-1] in _CHANGING_HEADS
-    return False
-
-
-# The programs `_position_code` reads code arguments of (a word that names none of them has no code to find).
-_CODE_PROGRAMS = (_SHELLS | _OTHER_SHELLS | _STDIN_LINE_READERS | _SAME_SHELL_LOADERS
-                  | frozenset({"parallel", "su", "env", "mise", "nvim", "sudo", "git", "watch", "."}))
-
-
-def _site_code_facts(site, tokens: list[str], depth: int, budget, fifos, memo: dict, resolve=None) -> bool:
-    """What the code a command runs does to the text around it: the code positions are the `CodeArg` texts of
-    `_code_args` (a `-c` string, the words of `eval`, a `trap` action, a here-string, `mapfile -C`, the literals after
-    `parallel :::`), the shell code of the `!` aliases of git, plus the heredoc body of a shell or a loader, never a
-    file operand or a script argument. A command with an expansion is read as the main pass reads it:
-    `resolve(site, tokens)` gives its readings with the known values and the empty expansions applied (the program
-    may be `$s` with `s=sh`, `${S:-sh}`). See `_nested_facts`. True when it changes the directory or makes a link in
-    this shell."""
-    words = site.cmd.words
-    expansion = resolve is not None and any(w.dynamic for w in words)
-    if not expansion and not any(
-            (name := _program_name(t)) in _CODE_PROGRAMS or _VERSIONED_SHELL.fullmatch(name) for t in tokens):
-        return False  # (no word names a program that takes code: the search through the prefixes is skipped)
-    env = _NO_VALUES
-    variants = [(tokens, list(words))]
-    if expansion and resolve is not None:
-        variants, env = resolve(site, tokens)
-    moved = False
-    for v_tokens, v_words in variants:
-        k = _plain_head(v_tokens)
-        head = v_tokens[k].rsplit("/", 1)[-1] if k < len(v_tokens) else ""
-        same = head in _SAME_SHELL_LOADERS
-        texts, unknown = [], False
-        for arg in _code_args(site, v_tokens, v_words, memo):
-            if arg.text is not None:
-                texts.append(arg.text)
-            elif arg.reason == "dynamic_code":
-                unknown = True  # the code itself is made at run time
-        if same or head in _SHELLS or head in _OTHER_SHELLS or _VERSIONED_SHELL.fullmatch(head):
-            texts.extend(r.heredoc.body for r in site.cmd.redirects if r.heredoc is not None)
-        for s_at, name in enumerate(v_tokens):
-            if _program_name(name) != "git":
-                continue
-            args = v_tokens[s_at + 1:]
-            cmd_s, unreadable = _wrapper_assignments(site.cmd, v_tokens, v_words, s_at)
-            if any(t == "-c" or t.startswith("--config-env") for t in args) or _has_git_config_names(cmd_s, env):
-                pairs, more = _git_config_pairs(cmd_s, args, env)
-                unknown = unknown or more or unreadable
-                texts.extend(value[1:] for key, value in pairs if key.lower().startswith("alias.")
-                             and value.startswith("!"))
-            break
-        if unknown:
-            fifos.unknown = True
-        moved = _nested_facts(texts, depth, budget, fifos, same, memo) or (unknown and same) or moved
-    return moved
-
-
-def _nested_facts(texts: list[str], depth: int, budget, fifos, same: bool, memo: dict) -> bool:
-    """What code strings do to the text around them, found by parsing them (the resolved words, not the raw text)
-    through the code they run in turn, up to `MAX_CODE_DEPTH` (what lies deeper is level B by itself): the fifos they
-    make go to `fifos` (a fifo made by a child exists for the parent too), and the result says whether they change
-    the directory or make a link in this shell (`same`: run by a loader, not by a child). A string that does not
-    parse or goes past the limits makes every file a possible fifo, and counts as moving."""
-    moved = False
-    if depth >= MAX_CODE_DEPTH:
-        return False
-    for text in texts:
-        if not text.strip():
-            continue
-        try:
-            budget.charge(TEXT_COST)
-            script = shell.parse(text, budget)
-        except (shell.ShellError, shell.NestingTooDeep, shell.BudgetExceeded):
-            fifos.unknown = True
-            moved = moved or same
-            continue
-        for site in shell.iter_sites(script):
-            tokens = [w.text for w in site.cmd.words]
-            k = _plain_head(tokens)
-            if not _fifo_operands(tokens, site.cmd.words, fifos) and _mentions_fifo_maker(site, tokens):
-                fifos.unknown = True
-            if k < len(tokens) and k < len(site.cmd.words) and site.cmd.words[k].dynamic:
-                fifos.unknown = True  # the program is an expansion: it may be a fifo maker
-            if same and _changes_directory(site, tokens, k, True):
-                moved = True
-            if _site_code_facts(site, tokens, depth + 1, budget, fifos, memo) and same:
-                moved = True
-    return moved
 
 
 def _mentions_fifo_maker(site, tokens: list[str]) -> bool:
@@ -5615,66 +5974,51 @@ def _sets_parallel_vars(sites: list, outer) -> bool:
     return False
 
 
-def _stdin_facts(sites: list, outer, heads=None, depth: int = 0, budget=None, memo=None, resolve=None):
-    """What the text says about stdin outside one command, read from the words of its commands: its `Fifos` (the bare
-    `mkfifo`/`mknod` names, also as a program an expansion resolves to (`heads(site, tokens)` gives those readings);
-    any other form in which one of those names appears, or a `mv`/`ln` that may move a fifo, makes every file a
-    possible one), whether it changes directory or makes links (`moved`), and the bare `exec` sites. The enclosing
-    text's fifos and flags come first."""
-    fifos = shell.Fifos()
-    moved = False
-    if outer is not None:
-        fifos.names.update(outer.fifos.names)
-        fifos.unknown = outer.fifos.unknown
-        moved = outer.moved
-    mentioned = moving = False
-    execs = []
-    for site in sites:
-        tokens = [w.text for w in site.cmd.words]
-        k = _plain_head(tokens)
-        head = tokens[k] if k < len(tokens) else ""
-        made = _fifo_operands(tokens, site.cmd.words, fifos)
-        if not made and heads is not None and k < len(site.cmd.words) and site.cmd.words[k].dynamic:
-            for v_tokens, v_words in heads(site, tokens):
-                made = _fifo_operands(v_tokens, v_words, fifos) or made
-        if not made and head in _CHANGING_HEADS:
-            moved = True
-        if _site_code_facts(site, tokens, depth, budget, fifos, memo if memo is not None else {}, resolve):
-            moved = True  # `eval cd /dev/fd`: the text it runs changes this shell's directory, wherever it comes
-        if k < len(site.cmd.words) and site.cmd.words[k].dynamic:
-            bare_head = _STRIPPABLE_EXPANSION.sub("", tokens[k]).rsplit("/", 1)[-1]  # the program once empty expansions are gone
-            if bare_head in ("mkfifo", "mknod"):
-                fifos.unknown = True
-            elif bare_head in _CHANGING_HEADS:
-                moved = True
-        if not made and _mentions_fifo_maker(site, tokens):
-            mentioned = True
-        if head in _MOVING_HEADS:
-            moving = True
-        if _bare_exec(site, tokens):
-            execs.append(site)
-    if mentioned or (moving and fifos.names):
-        fifos.unknown = True
-    return fifos, moved, execs
-
-
-def _stdin_resolver(sites: list, execs: list, fifos, moved: bool, outer):
-    """`StdinContext`s of the text: one before any `exec`, one after each bare `exec` that changes the descriptors
-    (in the order of the text, whatever encloses it: a subshell, an `if`, a function body: over-approximated). Returns
-    `(resolve, first, last)`: `resolve(offset)` gives the context at an offset of the text."""
-    first = shell.StdinContext(dict(outer.fds) if outer is not None else {}, fifos, moved)
+def _contexts(assumed: "shell.Facts", execs, outer, repeated=(), reads=None):
+    """`StdinContext`s of a text from the facts it assumes: one before any `exec`, one after each bare `exec` that
+    changes the descriptors (`ExecSeen`, in the order of the text, whatever encloses it: a subshell, an `if`, a
+    function body; a branch that does not run is taken as run). A command inside a body that runs when the text is
+    somewhere else (`repeated`: the spans of the function and loop bodies, called or run again after any `exec`)
+    gets the union of every context of the text instead, so it may read any descriptor an `exec` of the text sets
+    (fail closed). Returns `(resolve, first, last)`: `resolve(offset)` gives the context at an offset. `reads`: the set
+    the contexts record the facts they are asked about in."""
+    first = shell.StdinContext.of(dict(outer.fds) if outer is not None else {}, assumed, None, reads)
     contexts, ends = [first], []
     current = first
-    for site in sorted(execs, key=lambda site: site.cmd.span[0]):
-        incoming = shell.PIPED if site.stage > 0 else (site.stdin or current.fds.get(0))
-        fds = shell.exec_fds(site.cmd.redirects, current, incoming)
+    for seen in sorted(execs, key=lambda seen: seen.start):
+        fds = shell.exec_fds(seen.redirects, current, seen.incoming or current.fds.get(0))
         if fds != current.fds:
-            current = shell.StdinContext(fds, fifos, moved)
+            current = shell.StdinContext.of(fds, assumed, None, reads)
             contexts.append(current)
-            ends.append(site.cmd.span[1])
+            ends.append(seen.end)
     for context in contexts:
         context.end = current.fds
+    everywhere = None
+    bodies: list = []
+    if len(contexts) > 1 and repeated:
+        fds: dict = {}
+        for context in contexts:
+            for fd, state in context.fds.items():
+                if state and not fds.get(fd):
+                    fds[fd] = state
+        everywhere = shell.StdinContext.of(fds, assumed, current.fds, reads)
+        for lo, hi in sorted(repeated):  # (nested and overlapping spans joined)
+            if bodies and lo < bodies[-1][1]:
+                bodies[-1][1] = max(bodies[-1][1], hi)
+            else:
+                bodies.append([lo, hi])
+
     def resolve(offset: int) -> "shell.StdinContext":
+        if everywhere is not None:
+            lo, hi = 0, len(bodies)  # (the last body that starts at or before the offset: a binary search)
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if bodies[mid][0] <= offset:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            if lo and offset < bodies[lo - 1][1]:
+                return everywhere
         lo, hi = 0, len(ends)  # (the number of ends at or before the offset: a binary search)
         while lo < hi:
             mid = (lo + hi) // 2
@@ -5687,79 +6031,71 @@ def _stdin_resolver(sites: list, execs: list, fifos, moved: bool, outer):
     return resolve, first, current
 
 
-def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _code: bool = False,
-                    cwd: "str | None" = None, _cwd=None, _fn=None, _same: bool = False, _stdin=None) -> Analysis:
+def analyze_command(command: str, _depth: int = 0, _budget=None, cwd: "str | None" = None) -> Analysis:
+    """Classify a Bash command (`_analyze` without the facts it hands up to a text around it)."""
+    return _analyze(command, _depth, None, _budget, False, cwd)[0]
+
+
+def _analyze(command: str, depth: int = 0, env=None, budget=None, code: bool = False, cwd=None, fn=None,
+             kind: str = _CHILD, stdin=None, shared: "dict | None" = None) -> "tuple[Analysis, shell.Facts]":
     """Classify a Bash command: categories, flags and the reasons of any parser uncertainty (spec
-    audit-hook-hardening, section 3; audit-shell-lexer, section 4.1). The command is read by the shell parser, and
+    audit-hook-hardening, section 3; audit-shell-lexer, section 4.1), and the `shell.Facts` the text has for the stdin
+    later commands read. The text is read in rounds (`_Run.classify`) up to a fixed point: the first assumes only what
+    `stdin` carries, each next one assumes the facts (fifos, directory changes) and `exec`s the one before observed
+    while classifying, and the text is done when a round observes nothing it did not assume, or only facts the round
+    never consulted (`_Run.reads`: a fact nobody asked about cannot change a decision) (`MAX_FACT_ROUNDS`; a
+    text that does not settle is level B, `analysis_budget`). The command is read by the shell parser, and
     every simple command of the tree is classified by its readings. Uncertainty never becomes an allow:
     alternative readings are all classified (level A), and what cannot be enumerated, does not parse or goes past
     a limit is `unclassified` / `unclassified_command` (level B). The arguments that run code (X1-X6) are analyzed
-    one level deeper, through this same function. `_env` holds the values of the variables of the outer text
+    one level deeper, through this same function. `env` holds the values of the variables of the outer text
     (V3); the values assigned in this text resolve the program of a command (N6) and the variables of a code
-    string (V2). `_budget` is the character budget shared by every parse of one analysis (nested texts);
-    `_code`: the text is a code argument, where a command name made by an expansion is level B
+    string (V2). `budget` is the character budget shared by every parse of one analysis (nested texts);
+    `code`: the text is a code argument, where a command name made by an expansion is level B
     (`dynamic_code`, X3); outside one, it is level A (`dynamic_command`, N6) only for a name the text does not
-    assign (the environment's); a name the text assigns whose value it cannot give is level B (B1). `_stdin`: the
-    `StdinContext` of the command that runs this text as code (the standard input it inherits)."""
+    assign (the environment's); a name the text assigns whose value it cannot give is level B (B1). `cwd`: None is
+    the process's, False a nested text (not known). `kind`: how the text runs (`_CHILD`, `_SAME`, `_BODY`). `stdin`: the `StdinContext` of the command that
+    runs this text as code (the standard input it inherits). The facts are the ones `stdin` carries plus what the
+    text observes (`_Run.observed`); the caller filters them by `kind` (`Facts.for_parent`). A text that cannot be
+    read is `UNKNOWN_FACTS`. `shared`: what the whole analysis reads once, passed down to the nested texts."""
     command = command or ""
     if len(command) > MAX_COMMAND_LEN:  # checked before any regex or parse touches the text
-        return Analysis(["other"], ["command_too_long"], [])
-    budget = _budget if _budget is not None else shell.Budget(MAX_LEX_CHARS)
+        return Analysis(["other"], ["command_too_long"], []), shell.UNKNOWN_FACTS
+    budget = budget if budget is not None else shell.Budget(MAX_LEX_CHARS)
     try:
         budget.charge(TEXT_COST)  # besides its length, which the parser charges: every text analyzed has a cost
         script = shell.parse(command, budget)
     except shell.NestingTooDeep:
-        return _level_b("nesting_depth")
+        return _level_b("nesting_depth"), shell.UNKNOWN_FACTS
     except shell.BudgetExceeded:
-        return _level_b("analysis_budget")
+        return _level_b("analysis_budget"), shell.UNKNOWN_FACTS
     except shell.ShellError:  # does not close, or is outside the subset: never read as a guess (S3)
-        return _level_b("lex_error")
-    run = _Run(command, _depth, _env, budget, _code, script, cwd if _cwd is None else _cwd, _fn)
-    hooks = _IMPLICIT_FUNCTIONS & run.functions()  # (the parsed names: `command_not_found_\<newline>handle`)
-    hooks = hooks | {name for name in run.functions() if name.startswith("TRAP") and name[4:]}
+        return _level_b("lex_error"), shell.UNKNOWN_FACTS
+    inherited = stdin.facts() if stdin is not None else shell.NO_FACTS  # (a context handed down records no reads)
+    text = _Text(command, depth, env, budget, code, script, cwd, fn, kind, shared)
+    hooks = _IMPLICIT_FUNCTIONS & text.functions()  # (the parsed names: `command_not_found_\<newline>handle`)
+    hooks = hooks | {name for name in text.functions() if name.startswith("TRAP") and name[4:]}
     if hooks:
-        verdicts = run.function_verdicts()
+        verdicts = text.function_verdicts()
         if any(verdicts.get(name) for name in hooks):
-            run.block("dynamic_code")  # the shell calls it by itself, with whatever stdin it has then
-    if _same and _function_readers(script):
-        run.block("dynamic_code")  # `eval 'f() { bash; }'`: the function exists in the text that ran it, not seen here
-    initial = _stdin.fds.get(0) if _stdin else None
-    sites = list(shell.iter_sites(script, initial))
-    run.steps["parallel_env"] = _sets_parallel_vars(sites, _env)
-    fifos, moved, execs = _stdin_facts(sites, _stdin, run.head_readings, _depth, budget, run.steps, run.resolved)
-    resolve, first, last = _stdin_resolver(sites, execs, fifos, moved, _stdin)
-    if execs or fifos or (_stdin is not None and (_stdin.fds or _stdin.fifos)):
-        sites = list(shell.iter_sites(script, initial, resolve))  # compounds read the context at their offset
-    else:
-        for site in sites:
-            site.ctx = first
-    if _same and moved and not (_stdin is not None and _stdin.moved) and _stdin is not None \
-            and (_stdin.fds or _stdin.fifos):
-        run.block("dynamic_code")  # `eval 'cd /dev/fd'`: a relative name may be a descriptor after it, not seen outside
-    if _same and last.fds != first.fds:
-        run.block("dynamic_code")  # `eval 'exec < <(x)'`: the descriptors it sets outlive the string, not seen here
-    items = []
-    for site in sites:
-        tokens = [w.text for w in site.cmd.words]
-        items.append((site, tokens, _token_readings(tokens)))
-    if _code_evaluation(command, script, run.values):  # the shell evaluates text as code where no command is written
-        run.block("dynamic_code")
-    has_heredoc = "<<" in command
-    disqualified = has_heredoc and _heredocs_disqualified(script, items)
-    rebound_spans = _rebound_spans(script, items) if has_heredoc else ()
-    grouped = _grouped_commands(script) if has_heredoc and not disqualified else ()
-    for site, tokens, readings in items:
-        run.simple(site, tokens, readings)
-        run.zsh_hooks(site, tokens)
-        if has_heredoc:
-            _heredoc_code(site, readings, run.categories, run.flags, run.reasons, disqualified, _depth, budget,
-                          run.view_at, id(site.cmd) in grouped, run.functions,
-                          any(lo <= site.cmd.span[0] < hi for lo, hi in rebound_spans), run.function_verdicts)
-    if has_heredoc:
-        run.compound_heredocs()
-    if "<(" in command:
-        run.compound_procsub_stdin()
-    return run.result()
+            text.block("dynamic_code")  # the shell calls it by itself, with whatever stdin it has then
+    if kind == _SAME and _function_readers(script):
+        text.block("dynamic_code")  # `eval 'f() { bash; }'`: the function exists in the text that ran it, not seen here
+    assumed, execs = inherited, ()
+    for n in range(MAX_FACT_ROUNDS):  # each round assumes what the one before observed, up to a fixed point
+        if n and not text.charge(TEXT_COST + len(command)):  # (an extra round costs as a text)
+            return _level_b("analysis_budget"), shell.UNKNOWN_FACTS
+        run = _Run(text, assumed, execs, stdin)
+        analysis = run.classify()
+        if stdin is not None and stdin.sink is not None:
+            stdin.sink.update(run.reads)  # what this round consulted of the facts it got is a read of the round around it
+        facts = assumed.join(run.observed)
+        if run.exec_key() == _exec_key(execs):
+            changed = _changed_facts(assumed, facts)
+            if not changed or (not _FORCE_FACT_ROUNDS and changed.isdisjoint(run.reads)):
+                return analysis, facts  # (a fact the round never asked about cannot change a decision it made)
+        assumed, execs = facts, run.execs
+    return _level_b("analysis_budget"), shell.UNKNOWN_FACTS  # (the facts do not settle: fail closed)
 
 
 def classify_command(command: str, _depth: int = 0) -> tuple[list[str], list[str]]:

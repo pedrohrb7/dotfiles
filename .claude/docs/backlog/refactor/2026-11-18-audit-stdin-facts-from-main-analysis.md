@@ -1,6 +1,6 @@
 # agent-audit: derive the stdin facts from the main analysis (second pass to a fixed point)
 
-- **Status:** Proposed
+- **Status:** Done (2026-11-19, not committed yet; spec [audit-stdin-facts](../../features/audit-stdin-facts/spec.md), log [log.md](../../features/audit-stdin-facts/log.md))
 - **Opened:** 2026-11-18
 - **Scope:** .claude/hooks/agent_audit_shell.py (`_walk`), .claude/hooks/agent_audit_classify.py (`_stdin_facts`, `_nested_facts`, `compound_procsub_stdin`)
 - **Priority:** high
@@ -26,3 +26,7 @@ Linearity and performance of the fixed point (the linearity guard test); fail-cl
 ## Out of scope
 
 New readers or alias forms.
+
+## Outcome
+
+Done 2026-11-19 by feature audit-stdin-facts. The separate facts pass (`_stdin_facts`, `_nested_facts`) is replaced by the main analysis's fixed point (at most 4 rounds, then fail closed), and `compound_procsub_stdin` is unified with the walker through `Site.given`. Accepted false positives are documented in the spec and log.

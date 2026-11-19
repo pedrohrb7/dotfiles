@@ -53,7 +53,7 @@ Confirmed bugs that need fixing, one file per bug.
 | [agent-audit: time and ! after a pipe are not parsed (lex_error, fail closed)](2026-11-18-audit-time-bang-after-pipe-lex-error.md) | low | Open |
 | [agent-audit: a glob receiver head on a heredoc or here-string is not resolved as a possible same-shell loader](2026-11-18-audit-glob-receiver-head-not-same-shell.md) | high | Fixed |
 | [agent-audit: zsh command_not_found_handler is not modeled](2026-11-18-audit-zsh-command-not-found-handler-not-modeled.md) | high | Fixed |
-| [agent-audit: the stdin facts pass lacks function positional values and exported GIT_CONFIG_*](2026-11-18-audit-stdin-facts-pass-diverges.md) | medium | Open |
+| [agent-audit: the stdin facts pass lacks function positional values and exported GIT_CONFIG_*](2026-11-18-audit-stdin-facts-pass-diverges.md) | medium | Fixed |
 | [agent-audit: a code string registered by complete -C or bind -x is not read as code](2026-11-18-audit-code-string-registered-by-complete-bind.md) | medium | Open |
 | [agent-audit: _brace_words keeps the empty alternative ({git,} push passes)](2026-11-18-audit-brace-empty-alternative.md) | high | Open |
 | [agent-audit: the GNU parallel command line is not classified or read as code](2026-11-18-audit-parallel-command-line-not-read-as-code.md) | high | Fixed |

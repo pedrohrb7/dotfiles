@@ -1,7 +1,7 @@
 # audit-stdin-facts - fatos de stdin derivados da própria análise (ponto fixo), sem passada paralela
 
 - **Date:** 2026-11-18
-- **Status:** Approved (2026-11-18, com as respostas da seção Decisões do usuário)
+- **Status:** Implemented (2026-11-19; aprovada em 2026-11-18, com as respostas da seção Decisões do usuário; diferenças da implementação no [Adendo 2026-11-19](#adendo-2026-11-19---implementação))
 - **Source:** [2026-11-18-audit-stdin-facts-from-main-analysis.md](../../backlog/refactor/2026-11-18-audit-stdin-facts-from-main-analysis.md) (refactor sem plan; não há `plan.md` nesta pasta). Fecha o bug [2026-11-18-audit-stdin-facts-pass-diverges.md](../../backlog/bugs/2026-11-18-audit-stdin-facts-pass-diverges.md) e, por decisão do usuário (decisão 6), parte de [2026-11-18-audit-stdin-alias-fifo-movers-and-dotdot.md](../../backlog/bugs/2026-11-18-audit-stdin-alias-fifo-movers-and-dotdot.md)
 - **Implementation log:** [log.md](log.md) (criado pelo `/implement` na primeira task)
 - **Pré-requisito:** o run `fix-bug` de [2026-11-18-audit-duplicate-expansion-regex-head-dynamic.md](../../backlog/bugs/2026-11-18-audit-duplicate-expansion-regex-head-dynamic.md) (que também corrige [parallel-command-line](../../backlog/bugs/2026-11-18-audit-parallel-command-line-not-read-as-code.md), [fish-csh-option-scan](../../backlog/bugs/2026-11-18-audit-fish-csh-option-scan-stops-at-value.md) e [at-version-option-listing](../../backlog/bugs/2026-11-18-audit-at-version-option-listing.md)) entra antes da Task 1; esta spec parte do código e da suite que ele deixar e não refaz nenhuma dessas correções
@@ -304,7 +304,7 @@ Suite `claude-hooks` (tabela `Test suites` do `CLAUDE.md` da raiz): `python3 -I 
 - **Files:** `.claude/hooks/tests/test_stdin_facts.py`
 - **Depends on:** - (o run `fix-bug` do pré-requisito já entrou: a entrada `2026-11-18-audit-duplicate-expansion-regex-head-dynamic.md` está `Fixed`; se não estiver, o `/implement` para e avisa)
 - **Done when:** `test_stdin_facts.py` existe com `load_tests` (`ForkedSuite`), `AcceptedBehaviour` e `ResolverReads` (Testing), todos verdes contra o HEAD de partida (depois do pré-requisito) sem mudar nenhum módulo do hook; suite estreita `-p 'test_stdin_facts.py'` verde; a suite inteira tem os testes do HEAD de partida + os novos.
-- **Status:** pending
+- **Status:** done
 
 ### Task 2 - Valor `Facts` e contexto montado a partir de fatos no parser
 
@@ -312,7 +312,7 @@ Suite `claude-hooks` (tabela `Test suites` do `CLAUDE.md` da raiz): `python3 -I 
 - **Files:** `.claude/hooks/agent_audit_shell.py`, `.claude/hooks/tests/test_shell_lexer.py`
 - **Depends on:** -
 - **Done when:** `Facts`, `NO_FACTS`, `UNKNOWN_FACTS`, `StdinContext.facts()` e `StdinContext.of(...)` existem conforme Design 2; `Fifos`, `fd_states`, `exec_fds` e `StdinContext(...)` sem mudança de API; `FactsValue` verde; `StdinNames`, `PipedStdin` e BIO11 verdes sem edição; o classificador não muda; um Bash comum da sessão não é negado.
-- **Status:** pending
+- **Status:** done
 
 ### Task 3 - Estado por texto (`_Text`) separado do estado por rodada (`_Run`), sem mudança de resultado
 
@@ -320,7 +320,7 @@ Suite `claude-hooks` (tabela `Test suites` do `CLAUDE.md` da raiz): `python3 -I 
 - **Files:** `.claude/hooks/agent_audit_classify.py`
 - **Depends on:** Task 1
 - **Done when:** `_Text` guarda o que Design 4 lista como "uma vez por texto", incluindo `blocks` e os memos de `repo_aliases` e `_git_external_exists`; `_Run` recebe um `_Text`; `analyze_command` ainda usa a passada de fatos; nenhum teste editado; a suite estreita de `test_command_positions.py`, `test_classify.py`, `test_uncertainty.py`, `test_heredoc.py` e `test_stdin_facts.py` verde; os três módulos parseiam.
-- **Status:** pending
+- **Status:** done
 
 ### Task 4 - Observação dos fatos e retorno interno `(Analysis, Facts)`, ainda sem uso
 
@@ -328,7 +328,7 @@ Suite `claude-hooks` (tabela `Test suites` do `CLAUDE.md` da raiz): `python3 -I 
 - **Files:** `.claude/hooks/agent_audit_classify.py`, `.claude/hooks/tests/test_stdin_facts.py`
 - **Depends on:** Task 2, Task 3
 - **Done when:** `_analyze` existe e `analyze_command` delega a ele (assinatura pública de Design 5); `_code_text`, `_heredoc_code` e `_Run.code_text` devolvem ou juntam `Facts` filtrados por `kind` (`_CHILD`, `_SAME`, `_BODY`, tabela de Design 3); `_Run.observe_reading` e a observação por site e por fim de rodada preenchem `run.observed` e `run.execs`; os contextos ainda vêm da passada antiga, então nenhum resultado muda; `ObservedFacts` e `ObservedCoversTheFactsPass` verdes; os testes existentes verdes sem edição.
-- **Status:** pending
+- **Status:** done
 
 ### Task 5 - Ponto fixo com teto de rodadas; a passada antiga deixa de ser chamada
 
@@ -336,7 +336,7 @@ Suite `claude-hooks` (tabela `Test suites` do `CLAUDE.md` da raiz): `python3 -I 
 - **Files:** `.claude/hooks/agent_audit_classify.py`, `.claude/hooks/tests/test_stdin_facts.py`
 - **Depends on:** Task 4
 - **Done when:** `_analyze` itera rodadas conforme Design 4 (`MAX_FACT_ROUNDS = 3`, cobrança por rodada extra, `analysis_budget` no teto), com contextos de `_contexts(assumed, execs, stdin)` e o contexto que desce (`_stdin_context`, `trap_stdin`, `zsh_hooks`) levando `moved` (decisão 1); `_CHANGING_HEADS` e `_MOVING_HEADS` observados em todo início de cada leitura resolvida (decisão 2); `StdinFactsFromAnalysis`, `FactRounds` e `FactsLinearity` verdes; D1-D7 e as linhas da seção 10 conforme a tabela; os testes existentes verdes sem edição; `analyze_command` não chama mais `_stdin_facts` (a função ainda existe só para o diferencial).
-- **Status:** pending
+- **Status:** done
 
 ### Task 6 - Remoção da passada de fatos duplicada e teste de propriedade
 
@@ -344,7 +344,7 @@ Suite `claude-hooks` (tabela `Test suites` do `CLAUDE.md` da raiz): `python3 -I 
 - **Files:** `.claude/hooks/agent_audit_classify.py`, `.claude/hooks/tests/test_stdin_facts.py`
 - **Depends on:** Task 5
 - **Done when:** saem `_stdin_facts`, `_nested_facts`, `_site_code_facts`, `_CODE_PROGRAMS`, `_changes_directory`, `_stdin_resolver`, `_Run.resolved`, `_Run.head_readings` e o bloqueio aninhado de `moved` (decisão 1); a regra de cabeça que fica expansão usa a regex que o run de pré-requisito separou de `_EXPANSION`, sem renomear nem tocar `_EXPANSION` e `_head_is_dynamic` (decisão 5); `ObservedCoversTheFactsPass` sai; `NestedEqualsInline` e `RemovedFactsPass` verdes; nenhuma referência aos nomes removidos no módulo nem nos testes; docstrings de `_analyze`, `_Run` e `StdinContext` descrevem o ponto fixo; os testes existentes verdes sem edição.
-- **Status:** pending
+- **Status:** done
 
 ### Task 7 - `compound_procsub_stdin` unificado com o estado do walker (`Site.given`)
 
@@ -352,7 +352,7 @@ Suite `claude-hooks` (tabela `Test suites` do `CLAUDE.md` da raiz): `python3 -I 
 - **Files:** `.claude/hooks/agent_audit_shell.py`, `.claude/hooks/agent_audit_classify.py`, `.claude/hooks/tests/test_shell_lexer.py`, `.claude/hooks/tests/test_stdin_facts.py`
 - **Depends on:** Task 6
 - **Done when:** `_walk` calcula `given` e `Site.given` existe conforme Design 8 (decisão 3 (b): todo `DYNAMIC` dos redirecionamentos do próprio composto); `_site_reads_code` é usado por `_compound_reads_code` e por `_Run.simple`; `_Run.compound_procsub_stdin` sai; `SiteGiven` e `CompoundGiven` verdes; `PipeReceivers` (inclusive `{ bash <<< x; } < <(y)` e `f() { bash; } < <(x)`), `StdinOtherSources*`, BIO11 e BIO12 verdes sem edição.
-- **Status:** pending
+- **Status:** done
 
 ## Verification
 
@@ -380,3 +380,51 @@ As seis perguntas da versão Draft, respondidas pelo usuário em 2026-11-18, jun
 ## Open questions
 
 Nenhuma em aberto.
+
+## Adendo 2026-11-19 - implementação
+
+Registro do que a implementação mudou em relação ao texto acima, que fica como foi aprovado. Onde houver conflito, vale este adendo. Decisões do usuário de 2026-11-19 (após a Task 7, rodada de correção da revisão e rodada final de falha fechada) estão em [log.md](log.md).
+
+### Mudanças no desenho
+
+- **Teto de rodadas: `MAX_FACT_ROUNDS = 4`** (era 3). "No máximo 2 rodadas" (Design 4) deixa de valer: D3 e D7 levam 3 rodadas e duas formas levam 4 (`mk""fifo p; bash -c 'mv p q'; { exec 3<&0; } < z; cat <&3` é uma delas: o `moved` do texto aninhado chega ao pai uma rodada depois). Um texto que precise de 5 falha fechado em `analysis_budget`. A decisão 4 passa de 3 para 4 rodadas; cada rodada extra segue cobrando `TEXT_COST + len(command)` do `Budget`.
+- **`Facts.linked` e `StdinContext.linked`.** Quarto campo de `Facts` (`linked` implica `moved`): o texto cria um link que alcança fora dos nomes simples. Sobe de um filho (`for_parent(_CHILD)` zera `moved` mas mantém `linked`; `cd` num filho continua local, `ln -s /dev/fd d` num filho persiste). Com `linked`, qualquer caminho absoluto ou com `~` pode ser um descritor (`_path_code`, `_file_state`). Conta como link: `ln` atrás de wrapper que não mantém os operandos como escritos (todos menos `env`, `sudo`, `doas`, `timeout`, `nice`, `nohup`, `ionice`, `time`, `stdbuf`, `setsid`, `command`, `builtin`), `ln` com operando `{}`, `ln` via `find -exec`, e `ln` depois de `cd`/`pushd`/`popd`/`chdir` em qualquer ponto do texto.
+- **Bloqueio de mudança de descritores para `kind != _CHILD`.** O `exec` que muda descritores em texto aninhado do mesmo shell (`_SAME`) e também em corpo de função repassado (`_BODY`) é `dynamic_code` (antes só `_SAME`). Fecha `f() { "$@" 3< <(x); }; f exec; bash <&3`.
+- **Heredoc e here-string para função do texto ou receptor reassociado são `_SAME`** (antes `_CHILD`): `f() { . /dev/stdin; }; f <<<'exec 3< <(x)'; bash <&3`.
+- **`exec` puro que copia descritores.** Um `exec` puro que copia entrada (`exec 4<&3`) é leitor de stdin; a cópia de um descritor que nenhum `exec` do texto abriu (não 0, não `>&1`/`>&2`) é `dynamic_code`; a cópia dentro de corpo de função ou de laço é `dynamic_code` (`_Run.in_repeated`).
+- **Contextos de `exec` unidos para corpos.** Corpo de função e de laço recebe a união de todos os contextos de `exec` do texto, não o da ordem textual: `f() { bash <&3; }; exec 3< <(x); f` e laços deixam de passar.
+- **`functions` do zsh.** `functions[NOME]=CORPO` e `functions+=(NOME CORPO)` de qualquer nome são classificados como `_SAME` e o nome entra em `_Text.functions()`; antes só nomes de hook eram vistos. Qualquer outra menção ao parâmetro `functions` fora do caminho de atribuição lido (`functions[`, `functions=`, `${functions`, o nome solto depois de `set`/`typeset`/`declare`/`local`/`export`/`readonly`/`read`/`print`/`printf`/`integer`/`float`, também atrás de `noglob`) é `dynamic_code` (`_names_functions_parameter`), com a restrição da seção "Convergência e regra restrita" abaixo (texto entre aspas passado a outros programas fica limpo).
+- **`lift` abandonado** (decisão do usuário): `zsh_hooks` e `compound_heredocs` passam `kind=_SAME` como diz Design 3, então disparam os bloqueios do mesmo shell. Três formas passam de limpas a `dynamic_code`: `{ bash; } <<E` com `f() { bash; }` no corpo, `functions[precmd]='exec 3< <(x)'; ls` e `{ bash; } <<<'f() { eval x; }'; f`. Substitui a nota "extra `lift`" do log da Task 4.
+- **`_CODE_PROGRAMS` fundido em `_PARALLEL_FORBIDDEN`** (decisão do usuário); `_CODE_PROGRAMS` não existe mais e o item "Removidos" de Design 5 vale por inteiro. `unknown_code` e `_Text.bare_site` (releitura sem contexto, criada na Task 5 para tornar a observação independente dos fatos assumidos) também saíram, sem mudança de resultado. `_Run.given` virou `_Run.prior_execs`, para não colidir com `Site.given`.
+- **Memo `shared` de `git_external`.** Parâmetro `shared` (dict) passa por `_analyze`, `_code_text` e `_heredoc_code`: `git_external` é lido uma vez por nome em toda a análise, aninhados e rodadas incluídos (`git_aliases` continua com uma leitura). Design 4 só previa o memo por texto.
+- **"`source $f` marca `moved`" deixa de valer.** Design 3 e a lista de limitações (seção 9) diziam que `source $f` sob estado ativo marca `moved` para o texto inteiro. Como a observação de código desconhecido não pode depender do estado assumido, `exec 3< <(x); source $f` não observa fato nenhum (segue bloqueado como `dynamic_code` pela análise principal) e `source $f; ls` fica limpo, como `AcceptedBehaviour` fixa.
+- **Classe da decisão 1.** Além das linhas listadas em Design 10, todo `eval`/`source` de `cd X` sob estado ativo é limpo, igual ao `cd` inline (ex.: `mk""fifo p; eval 'cd b'; bash < q`); o `moved` que desce só pesa para quem lê depois. Aprovado pelo usuário na revisão.
+
+### Falsos positivos e limitações aceitos (adições à seção 9)
+
+Falsos positivos (ficam bloqueados, fixados por teste em `FinalRoundFixes`/`AcceptedBehaviour`):
+
+- `exec 4>&3; ls` e `exec 5<&4; ls` (cópia de descritor nunca aberto, no nível de cima; limpos antes);
+- `functions+=(g)` com número ímpar de elementos (o zsh também falha);
+- `{ exec 4<&3; } 3< z; ls`;
+- `f() { cat; }; f <<E` com definição de função no corpo do heredoc.
+
+Limitação: `f() { exec 4>&1; }; f 1< <(x)` passa.
+
+### Resultados da gate
+
+- Suite `claude-hooks`: 1274 testes, verdes em 3 execuções (uma com `TMPDIR` sob `claude-gate`). Uma falha de tempo isolada de `test_p_hh2` sob carga 8 (2,06 s contra o limite de 2,0 s) passou ao repetir e em outras 6 execuções.
+- Tempo da gate: parede 14,0-14,3 s contra 13,8 s no HEAD na mesma carga (129 testes a mais); CPU `user+sys` 44,8 s contra 42,4 s (+6%). O custo de CPU do `analyze_command` não é aceito: ver "Verificação 3 e 4" abaixo (a primeira medição reprovou, a segunda passou depois da otimização).
+- Revisão: `code-reviewer` e `security-reviewer`, duas rodadas; a rodada final de falha fechada fechou sem nova revisão, por decisão do usuário (orçamento de revisão gasto). Diferencial sobre 6375 literais de teste: 46 diferem, todos linhas da seção 10, decisões registradas ou correções de segurança; só `echo x | eval 'cd /dev/fd'` passa de bloqueado a limpo (aprovado).
+
+### Convergência e regra restrita (decisões do usuário, 2026-11-19, após a Verificação 3 e 4)
+
+- **Uma rodada só repete quando um fato consultado mudou.** `Fifos` e `StdinContext` registram os fatos que a rodada consultou (`reads`: `fifos`, `moved`, `linked`; `moved` e `linked` viram propriedades); contextos aninhados vêm de `StdinContext.inherit(fds)` e as leituras do filho voltam ao pai por `sink`. `_changed_facts` compara o que a rodada observou com o que ela leu; a rodada repete só se um fato lido mudou ou se a chave dos `exec` mudou (mudança de `exec` sempre força nova rodada: leituras de descritor não são rastreadas à parte). Substitui a regra de Design 4 ("repete enquanto observados ∪ assumidos != assumidos"): sem isso, todo `cd`/`pushd`/`popd` marcava `moved` e forçava uma segunda rodada completa. `_FORCE_FACT_ROUNDS` existe só para teste e força a regra antiga; `ReadFactsDecideTheRounds` exige resultado idêntico com e sem ela (corpus, divergências, toda string dos módulos de teste e formas do dia a dia).
+- **Regra do parâmetro `functions` restrita ao que o zsh usa para definir funções** (`_names_functions_parameter(tokens, words)`): palavra de atribuição `functions[...]=` na cabeça do comando (também depois de `noglob`/`command`), operandos de `typeset`/`declare`/`local`/`export`/`readonly`/`integer`/`float`, o nome solto `functions`/`functions[...]` como operando de `set`/`read`, o operando depois de `-v` em `print`/`printf`, e `${functions...}` em qualquer palavra fora de aspas simples (`Word.dynamic` distingue expansão de texto entre aspas simples; `${functions[...]}` entre aspas duplas segue bloqueado). Texto citado passado a outros programas (`grep -rn "functions\[..."`) fica limpo. `functions[g]=x` e `functions+=(g x)` seguem com `zsh_hooks`.
+- **Distribuição de rodadas** (26.177 comandos reais): 0 rodadas (o comando voltou antes de qualquer rodada: longo demais ou erro de léxico) em 3,42%, 1 rodada em 95,95% (cerca de 96% dos comandos), 2 rodadas em 0,63%, 3 ou 4 em nenhum. Não há texto real no teto.
+
+### Verificação 3 e 4 (resultados)
+
+- **Replay (3)**: 26.177 comandos de transcrições locais e métricas, HEAD 473021b contra a versão nova. Primeira medição: 0 diferenças de decisão inesperadas; 4 allow para deny pela regra de `functions` (um `grep -rn "functions\[..."`, falso positivo); 3 ganhos de precisão só na análise (`T=ls; zsh -c "$T"; bash s.sh` deixa de ser `piped_shell`); mediana do `analyze_command` +36,8% e p99 +27,1% (reprovou o limite de +10%: `cd`/`pushd`/`popd` marcavam `moved` e forçavam a segunda rodada em 66,6% dos comandos). Segunda medição, depois da regra de fatos consultados e da regra restrita do `functions`: mediana +3,4% (0,486 para 0,502 ms), p99 +0,1% (passou); 0 diferenças de decisão contra o HEAD (o `grep` voltou a ser allow); os 3 ganhos de precisão mantidos; resultado otimizado igual ao forçado nos 26.177 comandos.
+- **Latência do processo (4)**: mediana +1,1 a +1,25 ms na primeira medição, +1,1 ms na segunda (limite de +3 ms, passou).
+- Gate final: 1287 testes, cerca de 14 s em máquina quieta, 5 execuções sem teste instável (o módulo `test_stdin_facts.py` tem 128 testes).

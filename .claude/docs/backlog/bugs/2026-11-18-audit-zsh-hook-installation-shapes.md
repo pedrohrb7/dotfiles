@@ -31,3 +31,7 @@ Not diagnosed yet.
 ## Fix
 
 Not fixed yet.
+
+## Partly fixed (2026-11-19)
+
+Feature [audit-stdin-facts](../../features/audit-stdin-facts/spec.md) (not committed yet): `functions[NAME]=BODY` and `functions+=(NAME BODY)` of any name are classified as same-shell code and join the function table, and any word naming the zsh `functions` parameter outside that assignment path (`functions[`, `functions=`, `${functions`, bare name after set/typeset/declare/local/export/readonly/read/print/printf/integer/float) is dynamic_code. So `functions[f]=bash; echo x | f` and the other `functions` parameter forms are handled. Status stays Open: `functions[$n]=` resolution, `set -A`, `functions -c -- f`, quoted elements in `zshexit_functions` and `zsh_directory_name_functions` were not reviewed in that run.

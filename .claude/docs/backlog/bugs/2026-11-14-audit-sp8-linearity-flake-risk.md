@@ -30,3 +30,7 @@ Not diagnosed yet.
 ## Fix
 
 Not fixed yet.
+
+## Seen again (2026-11-19)
+
+Source: agent run: audit-stdin-facts, gate. Same class of wall-time flake: `tests.test_hook_process.HardeningProcess.test_p_hh2_stray_and_huge_run_states_do_not_break_the_run_tags` uses a 2.0 s wall-time bound and failed once at 2.06 s under load average 8; it passed on rerun and in 6 other runs. Fix idea: use a looser bound or CPU time.

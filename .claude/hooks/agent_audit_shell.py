@@ -291,11 +291,15 @@ class Site(_Node):
     in_compound; stdin: the reason a reader of its inherited stdin gets (`piped_shell`: the pipe of a stage that
     holds it, a group, subshell or other compound body, or a substitution, in a stage after the first;
     `dynamic_code`: a process substitution or an `exec` redirect), or None, unless a redirection replaced it on the
-    way; ctx: the `StdinContext` it sits in (`exec` redirects, fifos)."""
+    way; ctx: the `StdinContext` it sits in (`exec` redirects, fifos); given: `dynamic_code` when it sits in the body of
+    a compound whose own redirections give some descriptor a process substitution (`{ ...; } < <(x)`, `<&3` after an
+    `exec 3< <(x)`: the body may read it, whatever its own redirections), else None."""
 
-    __slots__ = ("cmd", "top_level", "stages", "stage", "substitution", "sub_word", "in_compound", "stdin", "ctx")
+    __slots__ = ("cmd", "top_level", "stages", "stage", "substitution", "sub_word", "in_compound", "stdin", "ctx",
+                 "given")
 
-    def __init__(self, cmd, top_level, stages, stage, substitution, sub_word, in_compound, stdin=None, ctx=None):
+    def __init__(self, cmd, top_level, stages, stage, substitution, sub_word, in_compound, stdin=None, ctx=None,
+                 given=None):
         self.cmd = cmd
         self.top_level = top_level
         self.stages = stages
@@ -305,6 +309,7 @@ class Site(_Node):
         self.in_compound = in_compound
         self.stdin = stdin or None
         self.ctx = ctx
+        self.given = given or None
 
     @property
     def piped(self) -> bool:
@@ -1547,13 +1552,16 @@ class Fifos:
     """The named pipes the text creates (`mkfifo`, `mknod NAME p`): their normalized names, and whether some could
     not be read (an expansion, a wrapper, a code string, a `mv` or `ln` of one), when every file may be one."""
 
-    __slots__ = ("names", "unknown")
+    __slots__ = ("names", "unknown", "reads")
 
-    def __init__(self):
+    def __init__(self, reads: "set | None" = None):
         self.names: set = set()
         self.unknown = False
+        self.reads = reads  # the facts a round consulted (`StdinContext.reads`); None: not recorded
 
     def __bool__(self) -> bool:
+        if self.reads is not None:
+            self.reads.add("fifos")
         return bool(self.names) or self.unknown
 
     def match(self, word) -> bool:
@@ -1572,18 +1580,117 @@ class Fifos:
 class StdinContext:
     """What the classifier knows about stdin outside one command: `fds`, the state of the descriptors an `exec`
     set (or the enclosing text gave); `fifos`; `moved`: the text changes directory or makes links, so a relative
-    path may be any file; `end`: the descriptors at the end of the text (what an EXIT trap reads)."""
+    path may be any file; `linked`: the text makes a link that reaches outside the plain names, so any path
+    (an absolute one too) may be a descriptor; `end`: the descriptors at the end of the text (what an EXIT trap reads). The classifier
+    builds one for each round of the reading of a text from the `Facts` the round assumes (`StdinContext.of(fds,
+    facts)`, filled once and never mutated afterwards) and reads them back as a value with `facts()`; the
+    context handed down to a nested text carries the same facts, `moved` included."""
 
-    __slots__ = ("fds", "fifos", "moved", "end")
+    __slots__ = ("fds", "fifos", "_moved", "end", "_linked", "reads", "sink")
 
     def __init__(self, fds: "dict | None" = None, fifos: "Fifos | None" = None, moved: bool = False,
-                 end: "dict | None" = None):
+                 end: "dict | None" = None, linked: bool = False, reads: "set | None" = None):
         self.fds = fds or {}
-        self.fifos = fifos if fifos is not None else Fifos()
-        self.moved = moved
+        self.fifos = fifos if fifos is not None else Fifos(reads)
+        self._moved = moved or linked
+        self._linked = linked
         self.end = end if end is not None else self.fds
+        self.reads = reads  # the facts of this context that were consulted: "fifos", "moved", "linked"; None: not recorded
+        self.sink = None  # for a context handed down (`inherit`): where the text that gets it deposits what it consulted
+
+    @property
+    def moved(self) -> bool:
+        if self.reads is not None:
+            self.reads.add("moved")
+        return self._moved
+
+    @property
+    def linked(self) -> bool:
+        if self.reads is not None:
+            self.reads.add("linked")
+        return self._linked
+
+    def facts(self) -> "Facts":
+        """What this context knows of fifos and `moved`, as a value (every one of them counts as consulted)."""
+        if self.reads is not None:
+            self.reads.update(("fifos", "moved", "linked"))
+        return Facts(frozenset(self.fifos.names), self.fifos.unknown, self._moved, self._linked)
+
+    def inherit(self, fds: "dict | None") -> "StdinContext":
+        """The context of a text this context's command runs as code: the same facts, which the text assumes (it
+        deposits the facts it consults into `sink`, the record of this context, so asking for them here is not a read)."""
+        fifos = Fifos()
+        fifos.names.update(self.fifos.names)
+        fifos.unknown = self.fifos.unknown
+        child = StdinContext(fds, fifos, self._moved, None, self._linked)
+        child.sink = self.reads
+        return child
+
+    @classmethod
+    def of(cls, fds: "dict | None", facts: "Facts", end: "dict | None" = None,
+           reads: "set | None" = None) -> "StdinContext":
+        """A context built from facts: the `Fifos` is filled here and never mutated afterwards. `reads`: the set that
+        records which facts the context is asked about (the round that built it decides from it whether a change of
+        a fact can change a decision)."""
+        fifos = Fifos(reads)
+        fifos.names.update(facts.fifos)
+        fifos.unknown = facts.fifo_unknown
+        return cls(fds, fifos, facts.moved, end, facts.linked, reads)
 
 
+class Facts:
+    """What a text does that later stdin reads depend on, as an immutable value: `fifos`, the normalized names of the
+    fifos it creates; `fifo_unknown`, some fifo had a name that could not be read (every file may be one); `moved`,
+    it changes directory or makes links (a relative path may be any file); `linked`, it makes a link that reaches
+    outside the plain names of the directory (`ln -s /dev/fd d`): a link outlives the process that made it, so
+    `linked` (and with it `moved`) goes up from a child, while a directory change stays in the child."""
+
+    __slots__ = ("fifos", "fifo_unknown", "moved", "linked")
+
+    def __init__(self, fifos: "frozenset" = frozenset(), fifo_unknown: bool = False, moved: bool = False,
+                 linked: bool = False):
+        object.__setattr__(self, "fifos", frozenset(fifos))
+        object.__setattr__(self, "fifo_unknown", bool(fifo_unknown))
+        object.__setattr__(self, "moved", bool(moved or linked))
+        object.__setattr__(self, "linked", bool(linked))
+
+    def __setattr__(self, name, value):
+        raise AttributeError("Facts is immutable")
+
+    def __delattr__(self, name):
+        raise AttributeError("Facts is immutable")
+
+    def join(self, other: "Facts") -> "Facts":
+        """The union of both."""
+        return Facts(self.fifos | other.fifos, self.fifo_unknown or other.fifo_unknown, self.moved or other.moved,
+                     self.linked or other.linked)
+
+    def for_parent(self, kind: str) -> "Facts":
+        """What reaches the enclosing text from a nested one of this kind: fifos and links always; `moved` (a
+        directory change) only from text that runs in the same shell (`"same"`) or a function body (`"body"`), not
+        from a child (`"child"`)."""
+        if self.moved and kind not in ("same", "body"):
+            return Facts(self.fifos, self.fifo_unknown, self.linked, self.linked)
+        return self
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, Facts):
+            return NotImplemented
+        return (self.fifos, self.fifo_unknown, self.moved, self.linked) == (
+            other.fifos, other.fifo_unknown, other.moved, other.linked)
+
+    def __hash__(self) -> int:
+        return hash((self.fifos, self.fifo_unknown, self.moved, self.linked))
+
+    def __bool__(self) -> bool:
+        return bool(self.fifos) or self.fifo_unknown or self.moved
+
+    def __repr__(self) -> str:
+        return f"Facts({set(self.fifos)!r}, {self.fifo_unknown}, {self.moved}, {self.linked})"
+
+
+NO_FACTS = Facts()
+UNKNOWN_FACTS = Facts(frozenset(), True, True)
 NO_CONTEXT = StdinContext()
 
 
@@ -1621,7 +1728,7 @@ def _file_state(target, fds: dict, known: dict, base, ctx: StdinContext):
     if alias is not None:
         return descriptor(alias, fds, known, None) or base
     if target.dynamic or target.has_glob or target.text.startswith("~") \
-            or (ctx.moved and not target.text.startswith("/")):
+            or (ctx.moved and (ctx.linked or not target.text.startswith("/"))):
         return base or active(fds, known)
     return base
 
@@ -1696,47 +1803,52 @@ def exec_fds(redirects, ctx: StdinContext, incoming=None) -> dict:
     return {fd: state for fd, state in out.items() if state}
 
 
-def _walk_redirects(redirects, owner: "Site | None", in_compound: bool, fed, ctx: StdinContext, resolve):
+def _walk_redirects(redirects, owner: "Site | None", in_compound: bool, fed, ctx: StdinContext, resolve, given=None):
     """`fed`: the state of the command's incoming stdin. A target sees only the redirections to its left; a
     here-string and a heredoc body are expanded before any of them."""
     for i, r in enumerate(redirects):
         state = fed if (r.heredoc is not None or r.op == "<<<") else stdin_state(redirects[:i], fed, ctx)
         if r.target is not None:
             for script, writer in r.target.script_items():
-                yield from _walk(script, False, in_compound, owner, r.target, PIPED if writer else state, resolve)
+                yield from _walk(script, False, in_compound, owner, r.target, PIPED if writer else state, resolve, given)
         if r.heredoc is not None:
             for part in r.heredoc.expansions:
                 for script, writer in part_script_items(part):
-                    yield from _walk(script, False, in_compound, owner, None, PIPED if writer else fed, resolve)
+                    yield from _walk(script, False, in_compound, owner, None, PIPED if writer else fed, resolve, given)
 
 
 def _walk(script: Script, top: bool, in_compound: bool, parent: "Site | None", sub_word: "Word | None",
-          piped=None, resolve=None):
+          piped=None, resolve=None, given=None):
     """`piped`: the state of the script's standard input (`PIPED`, `DYNAMIC` or None). The first stage of a pipeline
     keeps what the script has; a later stage is fed by the stage before it. `resolve(offset)`: the `StdinContext`
-    at that offset of the text (the descriptors an earlier `exec` set, the fifos)."""
+    at that offset of the text (the descriptors an earlier `exec` set, the fifos). `given`: `DYNAMIC` inside the body
+    of a compound whose own redirections give some descriptor a process substitution (see `Site.given`)."""
     for pipeline in script.pipelines:
         stages = len(pipeline.commands)
         for index, cmd in enumerate(pipeline.commands):
             fed = PIPED if index > 0 else piped
             ctx = resolve(cmd.span[0]) if resolve is not None else NO_CONTEXT
             if isinstance(cmd, Simple):
-                site = Site(cmd, top, stages, index, parent, sub_word, in_compound, piped, ctx)
+                site = Site(cmd, top, stages, index, parent, sub_word, in_compound, piped, ctx, given)
                 yield site
                 for word in (*cmd.assignments, *cmd.words):
                     for nested, writer in word.script_items():
-                        yield from _walk(nested, False, in_compound, site, word, PIPED if writer else fed, resolve)
-                yield from _walk_redirects(cmd.redirects, site, in_compound, fed, ctx, resolve)
+                        yield from _walk(nested, False, in_compound, site, word, PIPED if writer else fed, resolve,
+                                         given)
+                yield from _walk_redirects(cmd.redirects, site, in_compound, fed, ctx, resolve, given)
             else:
                 # a function body has no stdin until it is called; a coproc body always reads its own pipe
                 inner = PIPED if cmd.kind == "coproc" else (
                     None if cmd.kind in _NO_STDIN_KINDS else fd_state(cmd.redirects, fed, ctx))
+                # what the compound's own redirections give some descriptor reaches everything its bodies run
+                here = given or (DYNAMIC if cmd.redirects and DYNAMIC in fd_states(cmd.redirects, None, ctx).values()
+                                 else None)
                 for word in cmd.words:
                     for nested, writer in word.script_items():
-                        yield from _walk(nested, False, True, parent, word, PIPED if writer else inner, resolve)
+                        yield from _walk(nested, False, True, parent, word, PIPED if writer else inner, resolve, given)
                 for body in cmd.bodies:
-                    yield from _walk(body, False, True, parent, sub_word, inner, resolve)
-                yield from _walk_redirects(cmd.redirects, parent, True, fed, ctx, resolve)
+                    yield from _walk(body, False, True, parent, sub_word, inner, resolve, here)
+                yield from _walk_redirects(cmd.redirects, parent, True, fed, ctx, resolve, given)
 
 
 def iter_compounds(script: Script):

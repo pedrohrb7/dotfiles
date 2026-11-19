@@ -42,3 +42,7 @@ Source: fix bug-audit-pipe-procsub-stdin-family, reviewers. Same-text alias as a
 ## Seen again (2026-11-19)
 
 Source: agent run: fix bug-audit-regex-and-tables-46ae3a7, out_of_scope_collected (pre-existing). Unverified: zsh may expand an alias defined on an earlier line of the same -c string (`alias g=sh` newline `echo x | g`).
+
+## Seen again (2026-11-19, unverified)
+
+Source: agent run: audit-stdin-facts, out_of_scope_collected. zsh `aliases[g]='...'` followed by `g` on a later line of the same tool string may define same-shell code (same family as the alias case above; not verified).

@@ -1039,6 +1039,81 @@ class CodeEvaluatingExpansions(unittest.TestCase):
         self.assertTrue(first_words("${(e)X}")[0].dynamic)
 
 
+class FactsValue(unittest.TestCase):
+    """`Facts`, `NO_FACTS`, `UNKNOWN_FACTS` and the contexts built from and read back into facts."""
+
+    def test_join_is_the_union_with_or_on_the_flags(self):
+        a = shell.Facts(frozenset({"p"}), False, True)
+        b = shell.Facts(frozenset({"q"}), True, False)
+        self.assertEqual(a.join(b), shell.Facts(frozenset({"p", "q"}), True, True))
+        self.assertEqual(a.join(shell.NO_FACTS), a)
+
+    def test_for_parent_child_clears_moved_only(self):
+        facts = shell.Facts(frozenset({"p"}), True, True)
+        self.assertEqual(facts.for_parent("child"), shell.Facts(frozenset({"p"}), True, False))
+        self.assertEqual(facts.for_parent("same"), facts)
+        self.assertEqual(facts.for_parent("body"), facts)
+
+    def test_a_link_goes_up_from_a_child_with_the_directory_change_it_implies(self):
+        linked = shell.Facts(frozenset({"p"}), False, True, True)
+        self.assertEqual(linked.for_parent("child"), linked)
+        self.assertEqual(linked.for_parent("same"), linked)
+        self.assertEqual(linked.for_parent("body"), linked)
+        self.assertTrue(shell.Facts(linked=True).moved)  # (a link is a change of what a relative path names)
+        self.assertEqual(shell.Facts(frozenset({"p"}), True, True, False).for_parent("child"),
+                         shell.Facts(frozenset({"p"}), True, False, False))
+
+    def test_join_keeps_a_link_and_equality_tells_it_apart(self):
+        a = shell.Facts(frozenset(), False, True, True)
+        b = shell.Facts(frozenset({"q"}), False, True, False)
+        self.assertEqual(a.join(b), shell.Facts(frozenset({"q"}), False, True, True))
+        self.assertNotEqual(a, b)
+        self.assertNotEqual(shell.Facts(moved=True), shell.Facts(linked=True))
+        self.assertEqual(hash(a), hash(shell.Facts(frozenset(), False, False, True)))
+        self.assertTrue(shell.Facts(linked=True))
+
+    def test_equality_and_hash_are_by_fields(self):
+        a = shell.Facts(frozenset({"p"}), False, False)
+        b = shell.Facts(["p"])
+        self.assertEqual(a, b)
+        self.assertEqual(hash(a), hash(b))
+        self.assertNotEqual(a, shell.Facts(frozenset({"q"})))
+        self.assertNotEqual(a, shell.Facts(frozenset({"p"}), True))
+        self.assertNotEqual(a, shell.Facts(frozenset({"p"}), False, True))
+
+    def test_truthiness_and_constants(self):
+        self.assertFalse(shell.NO_FACTS)
+        self.assertTrue(shell.UNKNOWN_FACTS)
+        self.assertEqual(shell.UNKNOWN_FACTS, shell.Facts(frozenset(), True, True))
+        self.assertTrue(shell.Facts(frozenset({"p"})))
+        self.assertTrue(shell.Facts(moved=True))
+
+    def test_facts_are_immutable(self):
+        with self.assertRaises(AttributeError):
+            shell.NO_FACTS.moved = True
+        with self.assertRaises(AttributeError):
+            del shell.NO_FACTS.fifos
+
+    def test_of_builds_the_fifos_and_moved(self):
+        ctx = shell.StdinContext.of({3: shell.DYNAMIC}, shell.Facts(frozenset({"a/p"}), False, True))
+        self.assertTrue(ctx.fifos.match_text("./a/p"))
+        self.assertFalse(ctx.fifos.match_text("other"))
+        self.assertTrue(ctx.moved)
+        self.assertEqual(ctx.fds, {3: shell.DYNAMIC})
+        self.assertIs(ctx.end, ctx.fds)
+        unknown = shell.StdinContext.of(None, shell.UNKNOWN_FACTS, {})
+        self.assertTrue(unknown.fifos.match_text("anything"))
+        self.assertEqual(unknown.end, {})
+
+    def test_facts_round_trip_through_a_context(self):
+        for facts in (shell.NO_FACTS, shell.UNKNOWN_FACTS, shell.Facts(frozenset({"p", "q"}), False, True),
+                      shell.Facts(frozenset({"p"}), True, False)):
+            with self.subTest(facts=facts):
+                self.assertEqual(shell.StdinContext.of({}, facts).facts(), facts)
+        self.assertEqual(shell.StdinContext().facts(), shell.NO_FACTS)
+        self.assertEqual(shell.StdinContext({}, None, True).facts(), shell.Facts(moved=True))
+
+
 class StdinNames(unittest.TestCase):
     """The pure helpers of the stdin state (`stdin_alias`, `normalize_name`, `normalize_path`, `Fifos`, `fd_states`,
     `stdin_state`, `exec_fds`). Texts are only parsed."""
@@ -1183,6 +1258,50 @@ class StdinNames(unittest.TestCase):
         """Decision G: a copy of stdin (`exec 3<&0`) keeps the state of the descriptor it copies."""
         ctx = shell.StdinContext({0: shell.PIPED})
         self.assertEqual(shell.exec_fds(self.redirects("exec 3<&0"), ctx), {0: shell.PIPED, 3: shell.PIPED})
+
+
+class SiteGiven(unittest.TestCase):
+    """`Site.given` (spec audit-stdin-facts, Design 8): `dynamic_code` for what runs in the body of a compound whose own
+    redirections give some descriptor a process substitution, whatever the command's own redirections."""
+
+    def given(self, text, fds=None):
+        """`head -> given` of the simple commands of the text (`resolve` gives every offset the descriptors `fds`)."""
+        ctx = shell.StdinContext(dict(fds or {}))
+        found = {}
+        for site in shell.iter_sites(parse(text), None, lambda offset: ctx):
+            found[site.cmd.words[0].text] = site.given
+        return found
+
+    def test_the_body_of_each_kind_of_compound_is_given(self):
+        for text in ("{ inner; } < <(x)", "( inner ) < <(x)", "while true; do inner; done < <(x)",
+                     "for i in 1; do inner; done < <(x)", "if true; then inner; fi < <(x)",
+                     "case x in x) inner;; esac < <(x)", "f() { inner; } < <(x)", "{ { inner; }; } < <(x)",
+                     "{ echo $(inner); } < <(x)", "{ inner; } 3< <(x)", "{ inner; } <> <(x)"):
+            with self.subTest(text=text):
+                self.assertEqual(self.given(text)["inner"], shell.DYNAMIC)
+
+    def test_what_is_not_inside_such_a_body_is_not_given(self):
+        found = self.given("before; { inner; } < <(x); after")
+        self.assertEqual((found["before"], found["after"]), (None, None))
+        self.assertIsNone(self.given("{ inner; } < <(x)")["x"])  # (the procsub itself)
+
+    def test_a_pipe_a_fifo_and_a_body_with_no_redirection_give_nothing(self):
+        for text in ("{ inner; } | cat", "cat | { inner; }", "{ inner; } < file", "{ inner; }", "{ inner; } > out",
+                     "{ inner; } <<< x", "{ inner; } > >(w)"):
+            with self.subTest(text=text):
+                self.assertIsNone(self.given(text)["inner"])
+
+    def test_a_descriptor_that_an_exec_gave_a_process_substitution_is_given(self):
+        fds = {3: shell.DYNAMIC}
+        for text in ("{ inner; } <&3", "{ inner; } < /dev/fd/3", "{ inner; } 0<&3"):
+            with self.subTest(text=text):
+                self.assertEqual(self.given(text, fds)["inner"], shell.DYNAMIC)
+        self.assertIsNone(self.given("{ inner; } <&4", fds)["inner"])
+        self.assertIsNone(self.given("{ inner; } <&3", {3: shell.PIPED})["inner"])
+
+    def test_an_inner_compound_inherits_what_the_outer_one_gave(self):
+        found = self.given("{ ( inner ) < file; } < <(x)")
+        self.assertEqual(found["inner"], shell.DYNAMIC)
 
 
 def load_tests(loader, tests, pattern):

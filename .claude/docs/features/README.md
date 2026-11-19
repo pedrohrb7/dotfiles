@@ -28,4 +28,4 @@ Neste repo (dotfiles), o plan de uma etapa da config vive no `.claude/agent-work
 | [lua-agent](lua-agent/) | Implemented ([agent-workflow.md, 15.2](../../agent-workflow.md#152-etapa-i---agent-lua-adendo-2026-11-12)) | Implemented ([spec.md](lua-agent/spec.md)) | 2026-11-13 |
 | [audit-hook-hardening](audit-hook-hardening/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-13-audit-hook-hardening.md)) | Implemented ([spec.md](audit-hook-hardening/spec.md)) | 2026-11-13 |
 | [audit-shell-lexer](audit-shell-lexer/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-13-audit-shell-lexer.md)) | Implemented ([spec.md](audit-shell-lexer/spec.md)) | 2026-11-13 |
-| [audit-stdin-facts](audit-stdin-facts/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-18-audit-stdin-facts-from-main-analysis.md)) | Approved ([spec.md](audit-stdin-facts/spec.md)) | 2026-11-18 |
+| [audit-stdin-facts](audit-stdin-facts/) | - (refactor, sem plan; [entrada](../backlog/refactor/2026-11-18-audit-stdin-facts-from-main-analysis.md)) | Implemented ([spec.md](audit-stdin-facts/spec.md)) | 2026-11-19 |

@@ -245,3 +245,13 @@ No command: literal `:::` args are still classified one level down; `::::`, `-a`
 **Files:** `.claude/hooks/agent_audit_classify.py` (`_STRIPPABLE_EXPANSION`, `_head_unsafe`, `_parallel_code`, `_parallel_template`, `_parallel_takes_file`, `_PARALLEL_FORBIDDEN`, `_PARALLEL_BRACE_CODE`, `_PARALLEL_HOST`, `_sets_parallel_vars`, `_FISH_*`, `_CSH_*`, `_AT_LISTING`); tests in `test_command_positions.py`. `.claude/README.md` (piped_shell line) and the suite count in the root `CLAUDE.md` updated.
 
 **Gate:** the suite now has 1145 tests (13.0 s). Spec: see "Adendo 2026-11-19".
+
+## Addendum 2026-11-19 (2) - stdin facts from the classification's fixed point
+
+Feature `audit-stdin-facts` ([spec](../audit-stdin-facts/spec.md#adendo-2026-11-19---implementação), [log](../audit-stdin-facts/log.md)) replaces the separate facts pass of Addendum 2026-11-18 (2) (`_stdin_facts`, `_nested_facts`, `_site_code_facts`, `_stdin_resolver`): fifos, `moved` and the `exec` descriptor map now come from the classification itself, rerun until its observations stop growing (`MAX_FACT_ROUNDS` = 4, `analysis_budget` at the cap). Public contract unchanged (`analyze_command`, three-field `Analysis`). What changed for users of the hook:
+
+- Forms that resolve through values, aliases, `GIT_CONFIG_*`, positional arguments or `exec` heads are now seen by the facts too (`f() { $1 -c 'mk""fifo p'; }; f sh; bash < p`, `e=exec; $e -- 3< <(x); bash <&3`); `mv` of a fifo inside nested code counts.
+- `cd`/`ln` and a fifo `mv` count behind wrappers (`sudo ln -s /dev/fd d; echo x | bash d/0`); the `moved` state goes down into nested code (`cd /dev/fd; echo x | eval 'source 0'` blocks); links made by a child shell go up (`linked`: any absolute or `~` path may then be a descriptor); `echo x | eval 'cd /dev/fd'` alone is clean.
+- A compound with a `<(...)` or an `exec`-opened procsub descriptor (`exec 3< <(x); { eval y; } <&3`) blocks any command that may read code in its body, by the walker's state (`Site.given`).
+- Same-shell blocks now cover forwarded function bodies, heredocs to functions, compound heredocs and zsh `functions[NAME]=` of any name; bare `exec` copies, zsh `functions` parameter mentions and function or loop bodies that see later `exec`s fail closed.
+- "`source $f` marks `moved`" no longer holds (see the spec addendum). New accepted false positives: `exec 4>&3; ls`, `exec 5<&4; ls`, `functions+=(g)`, `{ exec 4<&3; } 3< z; ls`, `f() { cat; }; f <<E` with a function definition in the body.

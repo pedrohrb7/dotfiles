@@ -1,6 +1,6 @@
 # agent-audit: the stdin facts pass lacks function positional values and exported GIT_CONFIG_*
 
-- **Status:** Open
+- **Status:** Fixed
 - **Reported:** 2026-11-18
 - **Severity:** medium
 - **Environment:** local (Claude Code hooks)
@@ -26,8 +26,8 @@ Flags are empty.
 
 ## Root cause
 
-The separate `_stdin_facts` / `_nested_facts` pass re-implements resolution and diverges from the main analysis; see the linked refactor.
+A separate facts pass (`_stdin_facts` / `_nested_facts`) re-implemented resolution and diverged from the main analysis (positional values of function calls, exported GIT_CONFIG_*); see the linked refactor.
 
 ## Fix
 
-Not fixed yet.
+Fixed 2026-11-19 (not committed yet) by feature [audit-stdin-facts](../../features/audit-stdin-facts/spec.md): the facts are derived from the main analysis (fixed point), so there is one resolution. Regression tests in `.claude/hooks/tests/test_stdin_facts.py`: classes StdinFactsFromAnalysis, NestedEqualsInline and ResolverReads.
