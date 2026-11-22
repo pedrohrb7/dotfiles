@@ -191,7 +191,7 @@ Symlinked as `~/.claude/hooks -> ~/dotfiles/.claude/hooks` (link listed in [Setu
 
 The Claude Code status bar (`statusLine` in `settings.json`, run as `sh "$HOME/dotfiles/.claude/statusline.sh"`, so it needs no symlink). It prints the model and the plan limits, for example `Opus 5.5 · 5h 12% · 7d 40%`; a window is omitted when Claude Code does not report it (non-claude.ai accounts, or a window that already reset).
 
-Claude Code passes `rate_limits.five_hour` and `rate_limits.seven_day` (`used_percentage` 0-100, `resets_at` epoch seconds) in the JSON on stdin. The script also writes them, with an `updated_at` timestamp, to `${XDG_CACHE_HOME:-~/.cache}/claude/rate-limits.json` (atomic `mv`, and only when at least one window is present). That file is what the CLAUDE section of the conky left column reads; see [`conky/README.md`](../conky/README.md#seção-claude). The limits only refresh when Claude Code gets a response, so usage on claude.ai web shows up only after the next CLI response. Requires `jq`.
+Claude Code passes `rate_limits.five_hour` and `rate_limits.seven_day` (`used_percentage` 0-100, `resets_at` epoch seconds) in the JSON on stdin. Requires `jq`.
 
 ## templates/
 
