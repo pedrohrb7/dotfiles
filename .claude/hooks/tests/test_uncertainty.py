@@ -322,6 +322,14 @@ class DenyTokenCanary(unittest.TestCase):
                 self.assertEqual(result.uncertainty, reasons)
                 self.assertEqual(result.flags, [])
 
+    def test_un9_an_unflagged_commit_creating_verb_is_recorded_like_commit(self):
+        for command in ("echo git commit -m x", "echo git merge feature", "ssh h git merge feature",
+                        "echo git fast-import", "echo git filter-branch x"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertEqual(result.uncertainty, ["deny_token_unmatched"])
+                self.assertEqual(result.flags, [])
+
     def test_un9_commands_without_the_pattern_have_no_reason(self):
         for command in ("docker ps", "git log --grep commit", "docker restart x", "git push", "echo hi",
                         "rtk docker compose up -d", "sudo git push", "timeout 5 docker restart x"):
@@ -584,11 +592,252 @@ class LevelBReasonsD1(unittest.TestCase):
                     self.assertIn(reason, result.uncertainty, command)
 
     def test_the_forms_that_stay_below_level_b(self):
-        for command in ("f() { \"$@\"; }", "f() { \"$@\"; }; f ls -la", "${X:-/usr/bin}/ls -la", "{'git',x} y",
+        for command in ("f() { \"$@\"; }", "f() { \"$@\"; }; f ls -la", "${X:-/usr/bin}/ls -la",
                         "python3 -c 'PS4=1; -xc'", "psql <<'EOF'\nselect 1;\nEOF", "docker -Dl info ps",
                         "x=$(foo); read y <<< \"$x\"; echo $y"):
             with self.subTest(command=command):
                 self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+
+class GitUnknownSubcommand(unittest.TestCase):
+    """Bug audit-git-config-keys-run-commands: a git subcommand that is not a builtin may be an alias from a config
+    file. The hook reads the repo aliases at hook time (`_read_repo_git_aliases(cwd)`, None = unreadable); what it
+    cannot resolve is level B (`git_unknown_subcommand`), unless a `git-<name>` program exists on the PATH."""
+
+    REASON = "git_unknown_subcommand"
+
+    def classify(self, command, aliases, external=False):
+        reader = mock.patch.object(classifier, "_read_repo_git_aliases", create=True, side_effect=lambda *a, **k: aliases)
+        exists = mock.patch.object(classifier, "_git_external_exists", create=True, return_value=external)
+        with reader as read, exists:
+            return analyze(command), read
+
+    def assert_blocked(self, command, aliases, external=False):
+        result, _ = self.classify(command, aliases, external)
+        self.assertIn("unclassified_command", result.flags, command)
+        self.assertIn(self.REASON, result.uncertainty, command)
+        self.assertEqual(result.categories.count("unclassified"), 1, command)
+
+    def test_an_alias_the_repo_defines_is_classified_by_its_expansion(self):
+        for command, aliases, flag in (("git c -m x", {"c": "commit"}, "git_commit"),
+                                       ("git p", {"p": "push"}, "git_push"),
+                                       ("git d", {"d": "!docker compose up"}, "docker_lifecycle"),
+                                       ("git d", {"d": "!git push"}, "git_push"),
+                                       ("git -c user.name=x c -m x", {"c": "commit"}, "git_commit"),
+                                       ("sudo git c -m x", {"c": "commit"}, "git_commit"),
+                                       ("git ci", {"ci": "c", "c": "commit"}, "git_commit")):
+            with self.subTest(command=command):
+                result, _ = self.classify(command, aliases)
+                self.assertIn(flag, result.flags)
+                self.assertNotIn(self.REASON, result.uncertainty)
+
+    def test_an_alias_that_expands_to_something_harmless_is_allowed(self):
+        for command, aliases in (("git s", {"s": "status"}), ("git l", {"l": "log --oneline"})):
+            with self.subTest(command=command):
+                result, _ = self.classify(command, aliases)
+                self.assertEqual((result.flags, result.uncertainty), ([], []), command)
+
+    def test_an_unreadable_repo_config_blocks_an_unknown_subcommand(self):
+        for command in ("git c -m x", "git frobnicate", "git -c user.name=x frob", "sudo git c"):
+            with self.subTest(command=command):
+                self.assert_blocked(command, None)
+
+    def test_a_name_that_is_not_an_alias_blocks(self):
+        for command in ("git frobnicate", "git c -m x"):
+            with self.subTest(command=command):
+                self.assert_blocked(command, {"other": "commit"})
+                self.assert_blocked(command, {})
+
+    def test_a_text_that_changes_directory_first_blocks_even_when_the_name_resolves(self):
+        for command in ("cd x && git c -m x", "git -C d c -m x", "git --git-dir=d c -m x", "git --git-dir d c",
+                        "GIT_DIR=d git c -m x", "pushd x; git c", "export GIT_DIR=d; git c", "git --work-tree=d c",
+                        "cd x; git c"):
+            with self.subTest(command=command):
+                self.assert_blocked(command, {"c": "commit"})
+
+    def test_an_external_git_program_on_the_path_is_allowed(self):
+        for command in ("git lfs ls-files", "git lfs pull"):
+            with self.subTest(command=command):
+                result, _ = self.classify(command, None, external=True)
+                self.assertNotIn("unclassified_command", result.flags, command)
+                self.assertNotIn(self.REASON, result.uncertainty, command)
+
+    def test_a_builtin_never_reads_the_repo_aliases(self):
+        for command in ("git log", "git status", "git ls-files", "git rev-parse HEAD", "git worktree list", "git diff --stat",
+                        "git -C d log", "git show HEAD", "git branch", "git fetch origin", "git config --get alias.c"):
+            with self.subTest(command=command):
+                result, read = self.classify(command, None)
+                read.assert_not_called()
+                self.assertNotIn(self.REASON, result.uncertainty, command)
+                self.assertNotIn("unclassified_command", result.flags, command)
+
+
+class GitUnknownSubcommandRound2(unittest.TestCase):
+    """Round 2: a verb from a variable, a moved guard (the repo is not the one the resolver reads) and fetch
+    refspecs reached through aliases."""
+
+    REASON = "git_unknown_subcommand"
+    ALIASES = {"c": "commit", "p": "push"}
+
+    def run_with(self, command, aliases):
+        reader = mock.patch.object(classifier, "_read_repo_git_aliases", create=True, side_effect=lambda *a, **k: aliases)
+        exists = mock.patch.object(classifier, "_git_external_exists", create=True, return_value=False)
+        with reader as read, exists:
+            return analyze(command), read
+
+    def assert_blocked(self, command, aliases):
+        result, _ = self.run_with(command, aliases)
+        self.assertIn("unclassified_command", result.flags, command)
+        self.assertIn(self.REASON, result.uncertainty, command)
+
+    def test_a_verb_held_in_a_variable_is_resolved(self):
+        for command, flag in (("V=c; git $V -m x", "git_commit"), ("V=p; git $V", "git_push"),
+                              ("for v in c; do git $v -m x; done", "git_commit"),
+                              ("c=c; git -c user.name=x \"$c\" -m x", "git_commit")):
+            with self.subTest(command=command):
+                result, _ = self.run_with(command, self.ALIASES)
+                self.assertIn(flag, result.flags)
+
+    def test_a_variable_verb_that_is_no_alias_blocks(self):
+        self.assert_blocked("V=frob; git $V", self.ALIASES)
+
+    def test_the_repo_is_not_consulted_when_the_directory_or_the_config_may_have_moved(self):
+        aliases = {"s": "status"}
+        for command in ("env -C /tmp/d git s", "env --chdir=/tmp/d git s", "sudo -D /tmp/d git s", "HOME=/tmp/h git s",
+                        "git --bare s", "printf '[alias]\\n s = commit -am x\\n' >> .git/config; git s",
+                        "cp /tmp/evil .git/config && git s", "echo x > ~/.gitconfig; git s"):
+            with self.subTest(command=command):
+                self.assert_blocked(command, aliases)
+
+    def test_a_plain_alias_still_resolves_with_the_same_resolver(self):
+        result, _ = self.run_with("git s", {"s": "status"})
+        self.assertEqual((result.flags, result.uncertainty), ([], []))
+
+    def test_a_remote_fetch_refspec_reaches_a_fetch_alias(self):
+        result, _ = self.run_with("git -c remote.origin.fetch=+refs/heads/*:refs/heads/* f origin", {"f": "fetch"})
+        self.assertIn("git_commit", result.flags)
+
+
+class _GitResolverHelpers:
+    """Shared helpers of the resolver tests of rounds 3 and 4."""
+
+    REASON = "git_unknown_subcommand"
+
+    def run_with(self, command, aliases, external=False):
+        reader = mock.patch.object(classifier, "_read_repo_git_aliases", create=True, side_effect=lambda *a, **k: aliases)
+        exists = mock.patch.object(classifier, "_git_external_exists", create=True,
+                                   side_effect=lambda name: external and name == "lfs")
+        with reader, exists:
+            return analyze(command)
+
+    def assert_blocked(self, command, aliases, external=False):
+        result = self.run_with(command, aliases, external)
+        self.assertIn("unclassified_command", result.flags, command)
+        self.assertIn(self.REASON, result.uncertainty, command)
+
+    def assert_allowed(self, command, aliases):
+        result = self.run_with(command, aliases)
+        self.assertEqual((result.flags, result.uncertainty), ([], []), command)
+
+
+class GitUnknownSubcommandRound3(_GitResolverHelpers, unittest.TestCase):
+    """Round 3: a brace-expanded head, a PATH that may hide another `git-<name>`, and the moved-guard forms that
+    must stay allowed."""
+
+    def test_a_brace_head_is_resolved_like_the_words_it_expands_to(self):
+        aliases = {"c": "commit", "p": "push"}
+        self.assertIn("git_commit", self.run_with("{git,c} -m x", aliases).flags)
+        self.assertIn("git_push", self.run_with("{git,p}", aliases).flags)
+        self.assert_blocked("{git,zz}", aliases)
+
+    def test_a_brace_program_with_an_unknown_subcommand_blocks(self):
+        for aliases in (None, {}):
+            with self.subTest(aliases=aliases):
+                self.assert_blocked("{'git',x} y", aliases)
+
+    def test_a_path_that_may_hide_an_external_blocks_it(self):
+        for command in ("PATH=/tmp/e:$PATH git lfs pull", "PATH=/tmp/e git lfs", "export PATH=/tmp/e:$PATH; git lfs",
+                        "env PATH=/tmp/e git lfs pull"):
+            with self.subTest(command=command):
+                self.assert_blocked(command, None, external=True)
+        result = self.run_with("git lfs pull", None, external=True)
+        self.assertNotIn("unclassified_command", result.flags)
+        self.assertNotIn(self.REASON, result.uncertainty)
+
+    def test_forms_that_do_not_move_the_repo_stay_allowed(self):
+        aliases = {"st": "status", "lg": "log --oneline"}
+        for command in ("git st 2>/dev/null", "git st >/dev/null 2>&1", "git st 2>&1",
+                        "echo cp && git st", "git lg -C", "git lg -- path"):
+            with self.subTest(command=command):
+                self.assert_allowed(command, aliases)
+
+    def test_forms_that_may_move_the_repo_stay_blocked(self):
+        aliases = {"st": "status", "lg": "log --oneline"}
+        for command in ("git st > out.txt", "cp a b && git st", "cat x | tee y && git st",
+                        "sed -i s/a/b/ .git/config && git st", "git -C d st", "env -C d git st"):
+            with self.subTest(command=command):
+                self.assert_blocked(command, aliases)
+
+
+class GitUnknownSubcommandRound4(_GitResolverHelpers, unittest.TestCase):
+    """Round 4: the repo aliases are trusted only when every other command site of the text is a known non-writing
+    program; anything else (interpreters, unknown programs, archives, scripts, a `git config` write) means the
+    config may have moved."""
+
+    ALIASES = {"s": "status"}
+
+    def test_a_text_with_a_program_that_may_write_blocks_the_resolver(self):
+        for command in ("python3 -c 'open(\".git/\"+\"config\",\"a\").write(\"x\")'; git s", "perl -e 'print 1'; git s",
+                        "python3 /tmp/w.py; git s", "tar xf /tmp/e.tar; git s", "unzip -o /tmp/e.zip; git s",
+                        "npx cpy /tmp/e .git; git s", "node x.js && git s", "./script.sh; git s", "make; git s",
+                        "git config --global include.path /tmp/x; git s", "git config alias.s commit && git s",
+                        "npm install && git s"):
+            with self.subTest(command=command):
+                self.assert_blocked(command, self.ALIASES)
+
+    def test_a_non_builtin_git_verb_before_counts_as_moving(self):
+        with self.subTest(command="git lfs install; git s"):
+            self.assert_blocked("git lfs install; git s", self.ALIASES, external=True)
+        with self.subTest(command="git zz; git s"):
+            self.assert_blocked("git zz; git s", {"s": "status", "zz": "status"})
+
+    def test_a_text_with_only_known_readers_keeps_the_resolver(self):
+        for command in ("git s", "git status && git s", "ls && git s", "echo hi; git s", "cat README.md | head && git s",
+                        "grep -r x . ; git s", "git log --oneline | head -5; git s", "git s 2>/dev/null", "pwd; git s",
+                        "git diff && git s", "wc -l x; git s", "git config --get alias.s && git s"):
+            with self.subTest(command=command):
+                self.assert_allowed(command, self.ALIASES)
+
+
+class GitConfigProgramKeysLevelB(unittest.TestCase):
+    """Bug audit-git-config-keys-run-commands: the keys that name a program or a file are level B with the reason of
+    a dynamic reading; an empty value or a plain value of a harmless key is not."""
+
+    def test_a_program_or_file_key_is_level_b_with_one_unclassified_category(self):
+        for command in ("git -c core.hooksPath=/tmp/h status", "git -c include.path=/tmp/x log",
+                        "git -c core.askPass=/tmp/a fetch", "git -c gpg.program=/tmp/g log",
+                        "GIT_CONFIG_GLOBAL=/tmp/x git status", "GIT_CONFIG_SYSTEM=/tmp/x git log",
+                        "GIT_ASKPASS=/tmp/a git fetch", "GIT_PROXY_COMMAND=/tmp/p git fetch",
+                        "export GIT_CONFIG_GLOBAL=/tmp/x; git log"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertEqual(result.categories.count("unclassified"), 1, command)
+                self.assertIn("unclassified_command", result.flags, command)
+                self.assertIn("dynamic_code", result.uncertainty, command)
+
+    def test_an_empty_value_or_a_harmless_key_is_not_level_b(self):
+        for command in ("git -c core.hooksPath= status", "GIT_ASKPASS= git fetch", "GIT_CONFIG_GLOBAL= git log",
+                        "git -c user.name=x status", "git -c core.pager=cat log", "GIT_PAGER=cat git log"):
+            with self.subTest(command=command):
+                self.assertNotIn("unclassified_command", analyze(command).flags, command)
+
+    def test_a_variable_in_the_value_of_a_risky_key_stays_dynamic(self):
+        for command in ("git -c core.hooksPath=$H status", "git -c core.pager=$P log", "GIT_PAGER=$P git log",
+                        "GIT_CONFIG_GLOBAL=$F git status", "git -c include.path=$F log", "GIT_ASKPASS=$A git fetch"):
+            with self.subTest(command=command):
+                result = analyze(command)
+                self.assertIn("unclassified_command", result.flags, command)
+                self.assertIn("dynamic_code", result.uncertainty, command)
 
 
 class OldReadersAreGone(unittest.TestCase):

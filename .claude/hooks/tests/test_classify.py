@@ -131,6 +131,293 @@ class GitCommitSubcommand(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(classify(command), (["git-commit"], ["git_commit"]))
 
+    def test_gc1_every_commit_creating_or_moving_subcommand_is_git_commit(self):
+        for command in ("git commit-tree abc -m x", "git update-ref refs/heads/main abc", "git merge feature",
+                        "git cherry-pick abc", "git revert abc", "git am p.patch", "git rebase main", "git pull",
+                        "git -C . commit-tree abc -m x", "git -c user.name=x merge feature",
+                        "sudo git -C r rebase main", "git -c alias.m=merge m x"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertIn("git_commit", flags)
+
+    def test_gc1_ref_moving_forms_are_git_commit(self):
+        for command in ("git fast-import", "git filter-branch --all", "git subtree add --prefix=p repo main",
+                        "git subtree merge --prefix=p abc", "git subtree pull --prefix=p repo main",
+                        "git notes add -m x", "git notes edit", "git notes append -m x", "git notes copy a b",
+                        "git notes merge other", "git replace abc def", "git replace -d abc",
+                        "git symbolic-ref HEAD refs/heads/x", "git symbolic-ref -d HEAD",
+                        "git symbolic-ref --delete HEAD", "git hash-object -w -t commit --stdin",
+                        "git stash create", "git stash store abc",
+                        "git reset --hard", "git reset --soft HEAD~1", "git reset --keep abc", "git reset --merge",
+                        "git reset --mixed", "git reset HEAD~1", "git reset abc123",
+                        "git branch -f main abc", "git branch --force main abc", "git branch -M new", "git branch -C new",
+                        "git checkout -B x abc", "git switch -C x abc", "git switch --force-create x abc",
+                        "git -C r reset --hard abc", "git -c alias.fi=fast-import fi"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertIn("git_commit", flags)
+
+    def test_gc1_read_only_and_non_ref_forms_are_not_git_commit(self):
+        for command in ("git replace", "git replace -l", "git replace --list", "git symbolic-ref HEAD",
+                        "git symbolic-ref --short HEAD", "git hash-object file", "git stash", "git stash push",
+                        "git stash pop", "git stash list", "git stash show", "git stash apply", "git reset",
+                        "git reset -- file.txt", "git reset -p", "git branch", "git branch -a", "git branch --list",
+                        "git branch new-feature", "git branch -d x", "git checkout main", "git checkout -b x",
+                        "git switch main", "git switch -c x"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertNotIn("git_commit", flags)
+
+    def test_gc1_unique_long_option_prefixes_are_git_commit(self):
+        for command in ("git branch --forc main abc", "git branch --fo main abc", "git switch --force-c main abc",
+                        "git reset --har abc", "git reset --ke abc", "git notes --re x add -m y"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_branch_options_that_are_not_force_are_not_git_commit(self):
+        for command in ("git branch --format=%(refname)", "git branch --list"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_subtree_mutating_forms_with_leading_options_are_git_commit(self):
+        for command in ("git subtree -P lib add https://x main", "git subtree --prefix lib pull r main",
+                        "git subtree --prefix=lib merge abc", "git subtree split --rejoin -P x",
+                        "git subtree split -P x -b newbr"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_every_subtree_form_with_arguments_is_git_commit(self):
+        for command in ("git subtree -P p -b main split", "git subtree --branch main -P p split",
+                        "git subtree --onto abc -P p split", "git subtree --annotate x -P p split",
+                        "git subtree -P p push r main"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_subtree_help_forms_are_not_git_commit(self):
+        for command in ("git subtree", "git subtree -h", "git subtree --help"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_fetch_stdin_or_refmap_with_a_destination_is_git_commit(self):
+        for command in ("git fetch --stdin .", "git fetch --st .", "git fetch --refmap=+x:refs/heads/main . x",
+                        "git fetch --refmap +x:main . x"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_fetch_refmap_without_a_destination_is_not_git_commit(self):
+        for command in ("git fetch --refmap= origin", "git fetch --refmap=x: origin", "git fetch --dry-run origin"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_bare_subtree_is_not_git_commit(self):
+        for command in ("git subtree", "git subtree -h"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_worktree_force_branch_is_git_commit(self):
+        self.assertIn("git_commit", classify("git worktree add -B br ../p abc")[1])
+
+    def test_gc1_other_worktree_forms_are_not_git_commit(self):
+        for command in ("git worktree add ../p", "git worktree list", "git worktree add -b new ../p"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_fetch_with_a_local_ref_destination_is_git_commit(self):
+        for command in ("git fetch . abc:refs/heads/main", "git fetch origin +main:main",
+                        "git fetch origin refs/heads/x:refs/heads/y"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_fetch_without_a_destination_is_not_git_commit(self):
+        for command in ("git fetch", "git fetch origin", "git fetch origin main", "git fetch origin main:"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_rebase_exec_in_bundles_and_abbreviations_is_read_as_code(self):
+        for command in ("git rebase -ix 'docker compose up' main", "git rebase --exe 'docker compose up' main",
+                        "git rebase --ex='docker compose up' main"):
+            with self.subTest(command=command):
+                flags = classify(command)[1]
+                self.assertIn("git_commit", flags)
+                self.assertIn("docker_lifecycle", flags)
+
+    def test_gc1_reset_of_paths_only_is_not_git_commit(self):
+        for command in ("git reset HEAD -- f.txt", "git reset abc -- f.txt", "git reset HEAD f.txt", "git reset HEAD",
+                        "git reset --pathspec-from-file x", "git reset -q HEAD -- f"):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+    def test_gc1_reset_that_may_move_a_ref_is_git_commit(self):
+        for command in ("git reset HEAD~1", "git reset abc", "git reset --hard HEAD", "git reset f.txt"):
+            with self.subTest(command=command):
+                self.assertIn("git_commit", classify(command)[1])
+
+    def test_gc1_rebase_exec_value_is_read_as_code(self):
+        for command in ("git rebase -x 'docker compose up' main", "git rebase --exec='docker compose up' main",
+                        "git rebase --exec 'docker compose up' main"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertIn("git_commit", flags)
+                self.assertIn("docker_lifecycle", flags)
+
+    # -- git subcommands that run shell code from an option or a word (bug audit-git-subcommands-run-shell-code) --
+
+    def assertFlagsIn(self, command, *wanted):
+        flags = classify(command)[1]
+        for flag in wanted:
+            self.assertIn(flag, flags, command)
+
+    def test_gc2_filter_branch_filter_values_are_read_as_code(self):
+        for option in ("--tree-filter X", "--index-filter=X", "--msg-filter X", "--env-filter X", "--commit-filter X",
+                       "--parent-filter X", "--tag-name-filter X", "--setup X", "--tree X"):
+            command = "git filter-branch " + option.replace("X", "'docker compose up'") + " HEAD"
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle", "git_commit")
+
+    def test_gc2_filter_branch_push_in_a_filter_is_not_masked_by_git_commit(self):
+        self.assertFlagsIn("git filter-branch --tree-filter 'git push' HEAD", "git_push", "git_commit")
+
+    def test_gc2_filter_branch_subdirectory_filter_is_a_path_not_code(self):
+        flags = classify("git filter-branch --subdirectory-filter lib HEAD")[1]
+        self.assertNotIn("docker_lifecycle", flags)
+        self.assertNotIn("git_push", flags)
+
+    def test_gc2_submodule_foreach_command_is_read_as_code(self):
+        for command in ("git submodule foreach 'docker compose up'", "git submodule foreach --recursive 'docker compose up'",
+                        "git submodule --quiet foreach 'docker compose up'",
+                        "git submodule foreach -q --recursive docker compose up"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc2_submodule_other_uses_are_clean(self):
+        for command in ("git submodule foreach 'git status'", "git submodule update --init"):
+            with self.subTest(command=command):
+                self.assertEqual(classify(command)[1], [])
+
+    def test_gc2_difftool_extcmd_is_read_as_code(self):
+        for command in ("git difftool -x 'docker compose up'", "git difftool -x'docker compose up'",
+                        "git difftool --extcmd='docker compose up'", "git difftool --extcmd 'docker compose up'",
+                        "git difftool --extc='docker compose up'"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc2_difftool_harmless_extcmd_and_nonexistent_options_are_not_code(self):
+        self.assertNotIn("docker_lifecycle", classify("git difftool -x 'diff -u'")[1])
+        for command in ("git difftool --tool-cmd='docker compose up'", "git mergetool --tool-cmd='docker compose up'"):
+            with self.subTest(command=command):
+                self.assertNotIn("docker_lifecycle", classify(command)[1])
+
+    def test_gc2_transport_program_options_are_read_as_code(self):
+        up = "'docker compose up'"
+        for command in (f"git clone -u {up} a b", f"git clone --upload-pack={up} a b", f"git fetch --upload-pack {up} origin",
+                        f"git pull --upload-pack={up} origin", f"git ls-remote --upload-pack={up} origin",
+                        f"git ls-remote --exec={up} origin", f"git archive --exec={up} --remote=r HEAD"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+        for command in (f"git push --receive-pack={up} origin", f"git push --exec={up} origin",
+                        f"git send-pack --receive-pack={up} r"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle", "git_push")
+
+    def test_gc2_send_email_command_options_are_read_as_code(self):
+        for option in ("--to-cmd", "--cc-cmd", "--header-cmd", "--sendmail-cmd"):
+            command = f"git send-email {option}='docker compose up' x.patch"
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc2_send_email_smtp_host_is_clean(self):
+        self.assertEqual(classify("git send-email --smtp-server=smtp.example.com x.patch")[1], [])
+
+    def test_gc2_grep_pager_option_is_read_as_code(self):
+        for command in ("git grep -O'docker compose up' x", "git grep --open-files-in-pager='docker compose up' x"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+        for command in ("git grep -O x", "git grep -n x"):
+            with self.subTest(command=command):
+                self.assertEqual(classify(command)[1], [])
+
+    def test_gc2_ext_url_command_is_read_as_code(self):
+        for command in ("git clone 'ext::docker compose up' d", "git fetch 'ext::docker compose up'",
+                        "git push 'ext::docker compose up' main", "git ls-remote 'ext::docker compose up'",
+                        "git clone 'ext::sh -c docker% compose% up' d"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc2_a_plain_url_is_clean(self):
+        self.assertEqual(classify("git clone https://x/y d")[1], [])
+
+    def test_gc3_submodule_foreach_shell_wrapper_and_helper_are_read_as_code(self):
+        for command in ("git submodule foreach sh -c 'docker compose up'", "git submodule foreach bash -c 'docker compose up'",
+                        "git submodule--helper foreach 'docker compose up'"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc3_send_email_getopt_spellings_are_read_as_code(self):
+        up = "'docker compose up'"
+        for command in (f"git send-email -to-cmd={up} x.patch", f"git send-email +to-cmd={up} x.patch",
+                        f"git send-email --TO-CMD={up} x.patch", f"git send-email -sendmail-cmd {up} x",
+                        f"git send-email --to-c={up} x.patch"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc3_clone_local_config_of_a_code_key_is_read_as_code(self):
+        for command in ("git clone -c core.sshCommand='docker compose up' ssh://h/r d",
+                        "git clone --config=core.sshCommand='docker compose up' ssh://h/r d"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+        self.assertEqual(classify("git clone -c user.name=x a b")[1], [])
+
+    def test_gc3_ext_url_in_more_places_is_read_as_code(self):
+        for command in ("git submodule add 'ext::docker compose up' d", "git archive --remote='ext::docker compose up' HEAD",
+                        "git push --repo='ext::docker compose up' main", "git fetch-pack 'ext::docker compose up'",
+                        "git send-pack 'ext::docker compose up'", "git clone 'ext::%Gx docker compose up' d"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc3_unrelated_short_options_and_words_are_not_push_or_code(self):
+        for command in ("git push -u origin main", "git fetch -u origin", "git pull -u origin", "git grep -nO x",
+                        "git grep -On x", "git bisect run"):
+            with self.subTest(command=command):
+                flags = classify(command)[1]
+                self.assertNotIn("docker_lifecycle", flags)
+        self.assertNotIn("git_push", classify("git grep send-pack")[1])
+        for command in ("git fetch -u origin", "git pull -u origin", "git grep -nO x", "git grep -On x"):
+            with self.subTest(push=command):
+                self.assertNotIn("git_push", classify(command)[1])
+
+    def test_gc4_a_double_dash_that_is_an_option_value_does_not_end_the_options(self):
+        up = "'docker compose up'"
+        for command in (f"git difftool -t -- -x {up}", f"git rebase --onto -- -x {up} main", f"git clone -o -- -u {up} u d",
+                        f"git fetch --depth -- --upload-pack {up} origin", f"git push -o -- --receive-pack {up} origin",
+                        f"git filter-branch -d -- --tree-filter {up} HEAD", f"git send-email --from -- --to-cmd {up} a.patch"):
+            with self.subTest(command=command):
+                self.assertFlagsIn(command, "docker_lifecycle")
+
+    def test_gc4_a_real_double_dash_stays_clean(self):
+        for command in ("git difftool -- file", "git clone -- url d", "git push origin -- main"):
+            with self.subTest(command=command):
+                self.assertNotIn("docker_lifecycle", classify(command)[1])
+
+    def test_gc4_clone_config_through_an_alias_is_read_as_code(self):
+        self.assertFlagsIn("git -c alias.c=clone c -c core.sshCommand='docker compose up' url", "docker_lifecycle")
+        with mock.patch.object(classifier, "_read_repo_git_aliases", create=True,
+                               side_effect=lambda *a, **k: {"cl": "clone"}):
+            self.assertFlagsIn("git cl -c core.sshCommand='docker compose up' url", "docker_lifecycle")
+
+    def test_gc1_rebase_exec_push_is_not_masked_by_git_commit(self):
+        categories, flags = classify("git rebase -x 'git push origin main' main")
+        self.assertIn("git_commit", flags)
+        self.assertIn("git_push", flags)
+
+    def test_gc1_other_subcommands_and_words_as_arguments_are_not_git_commit(self):
+        for command in ("git commit-graph write", "git stash", "git tag v1", "git status", "git log", "git show",
+                        "git diff", "git log --grep merge", "git config --get merge.ff", "git show update-ref",
+                        "git config --get commit.template"):
+            with self.subTest(command=command):
+                categories, flags = classify(command)
+                self.assertNotIn("git_commit", flags)
+                self.assertNotIn("git-commit", categories)
+
 
 NV = "nvim --headless"
 MT = "--noplugin -u scripts/minimal_init.lua"
@@ -312,6 +599,120 @@ TIMEOUT_ROUND2 = [
     ("LR10", "timeout -k 1 5 docker ps", ["docker-read"], []),
     ("LR10", "timeout --signal=KILL 1e3 git status", ["git-other"], []),
 ]
+
+
+class GitConfigWrites(unittest.TestCase):
+    """Bug audit-git-config-keys-run-commands: a `git config` write of a key that runs code, pulls a file or
+    redirects a remote or a ref is `git_config_exec`; harmless writes and every read stay without it."""
+
+    FLAG = "git_config_exec"
+    RISKY_KEYS = (
+        "alias.c", "alias.p", "core.pager", "pager.log", "core.editor", "sequence.editor", "core.sshCommand",
+        "core.fsmonitor", "credential.helper", "diff.external", "diff.x.textconv", "merge.x.driver",
+        "filter.x.clean", "interactive.diffFilter", "core.gitProxy", "remote.origin.uploadpack", "trailer.x.cmd",
+        "core.hooksPath", "gpg.program", "core.askPass", "init.templateDir", "include.path", "includeIf.gitdir:/a/.path",
+        "remote.origin.fetch", "remote.origin.url", "remote.origin.pushurl", "remote.origin.push",
+        "url.x.insteadOf", "url.x.pushInsteadOf", "protocol.ext.allow", "submodule.m.update",
+    )
+
+    def flags(self, command):
+        return classifier.analyze_command(command).flags
+
+    def test_a_write_of_a_risky_key_is_git_config_exec(self):
+        for key in self.RISKY_KEYS:
+            for command in (f"git config {key} v", f"git config --global {key} v", f"git config --local {key} v",
+                            f"git config --system {key} v", f"git config --worktree {key} v",
+                            f"git config -f /tmp/f {key} v", f"git config --file /tmp/f {key} v",
+                            f"git config --add {key} v", f"git config --replace-all {key} v",
+                            f"git config --unset {key}", f"git config --unset-all {key}",
+                            f"git config set {key} v", f"git config unset {key}",
+                            f"git -C d config {key} v", f"sudo git config {key} v"):
+                with self.subTest(command=command):
+                    self.assertIn(self.FLAG, self.flags(command))
+
+    def test_editing_the_config_file_is_git_config_exec(self):
+        for command in ("git config -e", "git config --edit", "git config --global -e", "git config --global --edit",
+                        "git config --system --edit", "git config -f /tmp/f --edit", "git config --worktree -e"):
+            with self.subTest(command=command):
+                self.assertIn(self.FLAG, self.flags(command))
+
+    def test_the_alias_that_hides_a_commit_is_asked_when_it_is_written(self):
+        self.assertIn(self.FLAG, self.flags("git config alias.c commit"))
+
+    def test_a_harmless_write_is_not_git_config_exec(self):
+        for command in ("git config user.name x", "git config --global user.email a@b.c", "git config core.autocrlf false",
+                        "git config --local color.ui auto", "git config --unset user.name", "git config set user.name x",
+                        "git config --add safe.directory /x", "git config pull.rebase true", "git config core.editorconfig x"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+    def test_a_read_is_not_git_config_exec(self):
+        for command in ("git config --get alias.c", "git config alias.c", "git config user.name", "git config -l",
+                        "git config --list", "git config --global --list", "git config --get-all remote.origin.url",
+                        "git config --get-regexp alias", "git config --global core.pager", "git config get alias.c",
+                        "git config list", "git config --show-origin --get include.path", "git config remote.origin.url",
+                        "git config --global --get core.hooksPath", "git config --list --show-origin"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+    def test_git_that_is_not_config_is_not_git_config_exec(self):
+        for command in ("git log --grep alias.c", "git status", "echo git config alias.c commit", "git commit -m 'config alias.c x'"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+    def test_a_remote_fetch_refspec_that_writes_local_branches_is_a_commit(self):
+        for command in ("git -c remote.origin.fetch=+refs/heads/*:refs/heads/* fetch origin",
+                        "git -c remote.origin.fetch=+refs/heads/*:refs/heads/* fetch"):
+            with self.subTest(command=command):
+                self.assertEqual(classify(command), (["git-commit"], ["git_commit"]))
+        for command in ("git -c remote.origin.fetch=+refs/heads/*:refs/remotes/origin/* fetch origin",):
+            with self.subTest(command=command):
+                self.assertNotIn("git_commit", classify(command)[1])
+
+
+class GitConfigWritesRound2(unittest.TestCase):
+    """Round 2 of audit-git-config-keys-run-commands: more keys, the `set --value` form and remote URLs."""
+
+    FLAG = "git_config_exec"
+
+    def flags(self, command):
+        return classifier.analyze_command(command).flags
+
+    def test_a_write_of_the_added_keys_is_git_config_exec(self):
+        for key in ("protocol.allow", "protocol.ext.allow", "hook.x.command", "hook.x.event", "trailer.t.command",
+                    "gpg.ssh.defaultKeyCommand", "core.alternateRefsCommand", "sendemail.sendmailCmd",
+                    "sendemail.toCmd", "sendemail.ccCmd", "sendemail.headerCmd", "imap.tunnel", "guitool.t.cmd",
+                    "sendemail.smtpServer", "remote.origin.vcs"):
+            for command in (f"git config {key} x", f"git config --global {key} x"):
+                with self.subTest(command=command):
+                    self.assertIn(self.FLAG, self.flags(command))
+        self.assertIn(self.FLAG, self.flags("git config protocol.allow always"))
+
+    def test_a_protocol_allow_write_is_git_config_exec_unless_it_is_never_or_empty(self):
+        for command in ("git config protocol.allow user", "git config protocol.ext.allow user",
+                        "git config protocol.allow always"):
+            with self.subTest(command=command):
+                self.assertIn(self.FLAG, self.flags(command))
+        for command in ("git config protocol.allow never", "git config protocol.file.allow never"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+    def test_the_set_form_with_an_option_before_the_key_is_git_config_exec(self):
+        self.assertIn(self.FLAG, self.flags("git config set --value foo alias.c commit"))
+
+    def test_a_read_with_a_url_option_stays_clean(self):
+        for command in ("git config --url https://x --get-urlmatch http.proxy", "git config --get-urlmatch http.proxy https://x"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
+
+    def test_a_remote_url_that_runs_a_program_is_git_config_exec(self):
+        for command in ("git remote add o 'ext::sh -c x'", "git remote set-url o 'fd::3'",
+                        "git submodule set-url s 'ext::x'"):
+            with self.subTest(command=command):
+                self.assertIn(self.FLAG, self.flags(command))
+        for command in ("git remote add o https://github.com/a/b", "git remote set-url o git@github.com:a/b.git"):
+            with self.subTest(command=command):
+                self.assertNotIn(self.FLAG, self.flags(command))
 
 
 class LuaCommands(unittest.TestCase):

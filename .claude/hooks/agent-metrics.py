@@ -36,6 +36,7 @@ FLAG_LABELS = {
     "docker_build": "docker builds (only when the task changes a Dockerfile)",
     "git_commit": "commits (only with explicit authorization)",
     "git_push": "pushes (only with explicit authorization)",
+    "git_config_exec": "git config writes of keys that run a program, redirect a remote or pull in a file, or define an alias (asked)",
     "visual_tool": "browser/screenshot tool calls outside ui-verifier (target 0)",
     "external_request": "requests to non-local hosts (target 0)",
     "command_too_long": "Bash commands over 16384 chars, denied before classification - write large content with the Write tool (target 0)",

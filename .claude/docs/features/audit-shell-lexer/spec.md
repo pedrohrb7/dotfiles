@@ -773,7 +773,7 @@ Tabelas `(id, texto, esperado)`, uma subTest por linha; o esperado é a lista de
 - **Stack:** backend-python
 - **Files:** `.claude/hooks/agent-audit.py`, `.claude/hooks/tests/test_command_positions.py`, `.claude/hooks/tests/test_uncertainty.py`, `.claude/hooks/tests/test_classify.py`
 - **Depends on:** Task 2
-- **Done when:** `_prefix_steps` lê a tabela da seção 4.2 (N3-N5), `KNOWN_HEADS` calculado e N2 aplicado; CP8-CP11 e o `test_a_path_prefixed_program_is_recognized` alterado passam; UN1-UN5 sem mudança; suite verde *Adendo 2026-11-14:* vale também: `git-commit`/`git_commit` só com `commit` como subcomando, depois das opções globais do git (A2); GC1 passa, inclusive `git config --get commit.gpgsign` sozinho e dentro de `$(...)` sem `git_commit`; as demais linhas das tabelas de `test_classify.py` sem mudança; ver [Adendo 2026-11-14](#adendo-2026-11-14---decisões-do-usuário-na-task-2)
+- **Done when:** `_prefix_steps` lê a tabela da seção 4.2 (N3-N5), `KNOWN_HEADS` calculado e N2 aplicado; CP8-CP11 e o `test_a_path_prefixed_program_is_recognized` alterado passam; UN1-UN5 sem mudança; suite verde *Adendo 2026-11-14:* vale também: `git-commit`/`git_commit` só com `commit` como subcomando, depois das opções globais do git (A2); GC1 passa, inclusive `git config --get commit.gpgsign` sozinho e dentro de `$(...)` sem `git_commit`; as demais linhas das tabelas de `test_classify.py` sem mudança; ver [Adendo 2026-11-14](#adendo-2026-11-14---decisões-do-usuário-na-task-2) *Adendo 2026-11-16:* o escopo de `git_commit` deixou de ser só `commit`; ver [Adendo 2026-11-16](#adendo-2026-11-16---git_commit-cobre-todo-comando-git-que-cria-ou-move-commits)
 - **Status:** done
 
 ### Task 4 - Argumentos que executam código e recursão
@@ -892,7 +892,7 @@ Subshells `( )`, substituições, pipelines e os outros compostos (`if`, `for`, 
 
 **Motivo.** A regex `^git (\S+ )*commit\b` de `_classify_segment` casa `commit` em qualquer palavra depois de `git`, inclusive `git config --get commit.gpgsign`. Antes o hook não via esse comando dentro de `$(...)`; com o parser (S5) vê, e o replay mostrou perguntas `git_commit` falsas (classe E1).
 
-**Regra nova** (Task 3): `git-commit`/`git_commit` só quando o subcomando é `commit`. Depois de `git` (cabeça normalizada da leitura), as opções globais do [git(1)](https://git-scm.com/docs/git) são puladas e a primeira palavra restante é o subcomando; `commit` em argumento ou valor (`git config --get commit.gpgsign`, `git log --grep commit`, `git show commit`) não conta. A regex sai de `_classify_segment` e dá lugar a uma função sobre as palavras da leitura.
+**Regra nova** (Task 3): `git-commit`/`git_commit` só quando o subcomando é `commit`. Depois de `git` (cabeça normalizada da leitura), as opções globais do [git(1)](https://git-scm.com/docs/git) são puladas e a primeira palavra restante é o subcomando; `commit` em argumento ou valor (`git config --get commit.gpgsign`, `git log --grep commit`, `git show commit`) não conta. A regex sai de `_classify_segment` e dá lugar a uma função sobre as palavras da leitura. *Adendo 2026-11-16: o escopo de `git_commit` foi ampliado para todo comando git que cria ou move commits; ver [Adendo 2026-11-16](#adendo-2026-11-16---git_commit-cobre-todo-comando-git-que-cria-ou-move-commits). `commit` deixa de ser o único subcomando.*
 
 | Opção global | Forma pulada |
 |---|---|
@@ -1345,3 +1345,144 @@ Lacunas que o log registra como não modeladas ou fora do escopo desta rodada. V
 - `pixi exec` (verificação estreita) e `doas` como wrapper (fora da tabela de wrappers, decisão 5; parte E);
 - aliases com o mesmo texto do comando, não verificados sob o `eval` do zsh do Claude Code (verificação estreita);
 - `env $N=x GIT_CONFIG_PARAMETERS=... git p`: a leitura do wrapper para na palavra dinâmica, só nível A (parte E).
+
+## Adendo 2026-11-16 - `git_commit` cobre todo comando git que cria ou move commits
+
+**Motivo.** A2 limitou `git_commit` ao subcomando `commit`. Bug `2026-11-14-audit-git-commit-subcommand-regression` (backlog): a regex antiga casava `commit` em qualquer palavra e por isso pegava, por acidente, `merge`, `cherry-pick`, `rebase` e outros que criam commits; a regra de A2 os deixou passar sem pergunta. Decisão do usuário (2026-11-16): a flag `git_commit` (ação `ask`) vale para todo comando git que cria ou move commits, não só `commit`.
+
+**Regra nova** (`agent_audit_classify.py`: `_GIT_COMMIT_SUBCOMMANDS`, `_GIT_COMMIT_FORMS`, `_creates_git_commits`; substitui "só `commit`" de A2, e a tabela de opções globais de A2 continua valendo):
+
+- Subcomandos inteiros (`_GIT_COMMIT_SUBCOMMANDS`): `commit`, `commit-tree`, `merge`, `cherry-pick`, `revert`, `am`, `rebase`, `update-ref`, `pull`, `fast-import`, `filter-branch`.
+- Por forma (`_GIT_COMMIT_FORMS`, o subcomando só conta com a forma indicada):
+
+| Subcomando | Conta quando |
+|---|---|
+| `subtree` | qualquer forma, menos sem argumentos, `-h` e `--help` |
+| `notes` | `add`, `edit`, `append`, `copy`, `merge` |
+| `replace` | não é listagem |
+| `symbolic-ref` | escrita |
+| `hash-object` | `-w` |
+| `stash` | `create`, `store` |
+| `reset` | opção de modo (`--hard`, `--soft`, `--mixed`, ...), ou revisão que não é `HEAD` fora da forma `<rev> -- caminhos`; `git reset f.txt` é ambíguo (revisão ou caminho) e falha fechado |
+| `branch` | `-f`, `--force`, `-M`, `-C` |
+| `checkout` | `-B` |
+| `switch` | `-C`, `--force-create` |
+| `worktree` | `add -B` |
+| `fetch` | refspec com destino local, ou `--stdin` / `--refmap` |
+
+- Opções longas casam pelos prefixos únicos do git (`_is_long`), falhando fechado: `--forc` conta como `--force`.
+- `git rebase -x`/`--exec`: o valor é lido como código de shell (`_git_exec_code`), como os outros argumentos que executam código.
+- `git_push` deixa de ser mascarado por `git_commit`, exceto em `commit` simples, cuja mensagem de `-m` a regex de push leria errado (`git commit -m "a; git push"` continua só `git_commit`, CP4).
+- O canário registra os verbos de commit do conjunto de subcomandos mais `fast-import` e `filter-branch` (`_CANARY_GIT_FLAGS`).
+- As isenções de heredoc como dado (`git commit -F -`, `$(cat <<EOF)` em `-m`) continuam só para `git commit`: em `revert` e `cherry-pick`, `-m` é o número da linha principal, não mensagem.
+
+**Efeito nos itens anteriores.** O texto de A2 e da Task 3 sobre "só `commit`" vale para a classificação do `commit` e para as isenções de heredoc; o resto fica superado por esta regra. A Pergunta 7 (função única de subcomando) segue como aplicada: `_is_git_commit` serve às isenções, `_creates_git_commits` à classificação.
+
+## Adendo 2026-11-16 (2) - `piped_shell` dentro de grupo, subshell, composto e substituição sob um estágio com pipe
+
+**Motivo.** Bug `2026-11-14-audit-pipe-into-group-not-flagged` (backlog). X4 só olhava o estágio de pipeline que não é o primeiro; `echo x | { bash; }`, `| ( bash )`, `| while read l; do bash; done`, `| { source /dev/stdin; }` e `| echo $(bash)` passavam, porque o shell de dentro herda o stdin do pipe sem ser ele mesmo um estágio.
+
+**Regra nova** (estende X4; `agent_audit_shell.py`: `Site.piped`, `_fd_states`, `stdin_piped`, `fd_piped`, `_walk`, `_walk_redirects`; `agent_audit_classify.py`: `_stdin_code`). Decisões do usuário (2026-11-16):
+
+- Um leitor de shell sem `-c` e sem arquivo de script cujo stdin ainda é o pipe é nível B, `piped_shell`. Vale para o estágio que não é o primeiro e para todo comando dentro de grupo, subshell ou corpo composto (`while`, `for`, `if`, ...) alimentado por um estágio, e para a substituição de comando sob um estágio com pipe (`| echo $(bash)`), também em alvos de redirecionamento, here-strings e corpos de heredoc (o bash os expande antes de aplicar os redirecionamentos).
+- `Site.piped`: o stdin do comando é herdado do pipe de um estágio que o segura, salvo redirecionamento que o tenha trocado no caminho. O primeiro estágio mantém o que o script tem; um estágio seguinte é alimentado pelo anterior.
+- Os redirecionamentos de stdin são lidos da esquerda para a direita, por descritor (`_fd_states`). Sob um pipe, só heredoc (`<<`, `<<-`) e here-string (`<<<`) o substituem, e o último redirecionamento do fd 0 vale. Um redirecionamento de arquivo (`<`, `<>`, para qualquer alvo) nunca o substitui: o alvo pode ser o próprio pipe (`/dev/./stdin`, `/proc/*/fd/0`, `/dev/fd/N`, links simbólicos), então falha fechado. Descritores desconhecidos herdam o estado do pipe; `N<&M` copia o estado de M; `<&-` mantém o pipe.
+- Um corpo composto é alimentado se qualquer um dos seus fds segura o pipe (`fd_piped`). Corpos de função e de `coproc` não herdam. O alvo de um redirecionamento vê só os redirecionamentos à sua esquerda; here-string e corpo de heredoc são expandidos antes de todos.
+- `_stdin_code` junta os dois resultados: a string de código de uma here-string ou o `dynamic_code` de um `<(...)` continuam reportados, e `piped_shell` é acrescentado quando o stdin ainda é o pipe (por exemplo `bash < <(x)` sob pipe, ou `<(...)` depois de um `< arquivo`).
+- Falsos positivos aceitos: `cmd | bash < script.sh` e `cmd | while read l; do sh; done < list`.
+
+**Não muda:** os níveis A e B, o conjunto de motivos (U1-U4), a classificação sem pipe e `agent-audit.json`.
+
+**Testes:** `test_command_positions.py` e `test_shell_lexer.py`. A suite tem 846 tests.
+
+
+## Adendo 2026-11-16 (3) - chaves de configuração do git que executam comandos e subcomandos desconhecidos
+
+**Motivo.** Bug `2026-11-14-audit-git-config-keys-run-commands` (backlog). Chaves como `core.pager`, `core.sshCommand`, `core.fsmonitor`, `credential.helper` e `diff.external`, dadas por `-c`, `--config-env`, `GIT_CONFIG_*`, variáveis de ambiente ou gravadas por `git config`, executam um programa, e um subcomando desconhecido pode ser um alias do repositório ou um `git-<nome>` no PATH; nada disso era lido. Decisões do usuário (2026-11-16).
+
+**Regra nova** (`agent_audit_classify.py`: `_GIT_CODE_KEYS`, `_GIT_PROGRAM_KEYS`, `_CONFIG_SECTIONS`, tabelas de variáveis de ambiente, `_git_config_writes_risky`, `_GIT_BUILTINS`, `RESOLVERS`, `_git_unknown_site`, `_script_moves` com `_READ_ONLY_PROGRAMS` e `_GIT_READ_VERBS`; `agent-audit.py`: `read_git_aliases`, `git_external_exists`, `_classify_in`, `GIT_ALIASES_MAX_BYTES`; `agent-audit.json`: `git_config_exec: ask`):
+
+- **Categoria `git_config_exec` (`ask`).** Escrita de `git config`, e `git remote add|set-url` e `git submodule set-url` com URL `ext::` ou `fd::`, de chave arriscada: `alias.*`, chaves cujo valor executa um programa, chaves de programa ou arquivo, `include*`, refspecs de `remote`/`url`, `protocol.*allow`, `hook.*` e `submodule.*.update`. Escritas inofensivas e leituras seguem limpas.
+- **Chaves por `-c`, `--config-env` e `GIT_CONFIG_*`.** Valor que é código de shell é lido como código (`-c core.pager=cat` passa; `-c core.pager='docker compose up'` é bloqueado). Chaves de programa ou arquivo (`core.hooksPath`, `include.path`, `url.*.insteadOf`, `gpg.program`, `protocol.*allow` exceto `never` ou vazio, ...) são nível B, salvo valor vazio. `remote.*.fetch` para refs locais em `fetch`, `remote update` e aliases de `fetch` é `git_commit`.
+- **Variáveis de ambiente.** Lidas como código: `GIT_PAGER`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `GIT_SSH_COMMAND`, `GIT_EXTERNAL_DIFF`, `EDITOR`, `VISUAL`, `PAGER`, `LESSOPEN`, `LESSCLOSE`. Nível B salvo valor vazio: `GIT_ASKPASS`, `GIT_PROXY_COMMAND`, `GIT_SSH`, `GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`, `GIT_ALLOW_PROTOCOL`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `HOME`, `XDG_CONFIG_HOME`, `--exec-path=` e `--template`.
+- **Subcomando desconhecido**, nesta ordem: lista de builtins (`_GIT_BUILTINS`, nunca faz fork); alias do texto; leitura, na hora do hook, dos aliases do repositório (`git config --get-regexp ^alias\.` no cwd do payload, timeout de 2 s, teto de 1 MiB, ambiente da sessão sem variáveis de programa e de trace, `None` quando a sessão define `GIT_DIR`, `GIT_WORK_TREE` ou `GIT_COMMON_DIR`); programa `git-<nome>` no PATH (não quando o texto atribui `PATH`); senão nível B `unclassified_command`, motivo `git_unknown_subcommand`.
+- **Confiança na leitura do repositório.** Só vale quando todo outro comando do texto é leitor conhecido (lista `_READ_ONLY_PROGRAMS`, `_GIT_READ_VERBS`) e no máximo um ponto de git tem verbo fora dos builtins. `-C`, `--git-dir`, `--work-tree`, `--bare`, `env -C`, `sudo -D`, redirecionamentos de arquivo (exceto `/dev/null` e duplicação de fd), escrita de `git config` e menção a `.git/config` ou `.gitconfig` tornam a leitura não confiável.
+- **Efeitos aceitos:** `HOME=/x git status` é bloqueado (como `GIT_CONFIG_GLOBAL`); `git lfs` é bloqueado em máquina sem git-lfs; `GIT_EXEC_DIRS` é fixo (caminhos do Void Linux); a edição direta de `.git/config` por escrita de arquivo fica fora do classificador.
+
+**Testes:** `test_classify.py`, `test_command_positions.py`, `test_config_contract.py`, `test_hook_main.py` e `test_uncertainty.py`. A suite tem 911 tests.
+
+## Adendo 2026-11-16 (4) - opções de subcomandos git que executam código shell
+
+**Motivo.** Bug `2026-11-16-audit-git-subcommands-run-shell-code` (backlog). Várias opções de subcomandos git executam um comando como `git rebase -x` faz, e nenhuma era lida. Decisões do usuário (2026-11-16).
+
+**Regra nova** (`agent_audit_classify.py`: `_GIT_CODE_OPTIONS`, `_git_exec_code`, `_is_getopt`, `_ends_options`, `_ext_url_code`, `_ext_codes`, `_git_program_option`, `_git_strategies`, `_git_clone_config`, o caso `git` de `_prefix_steps`):
+
+- **Lidas como código:** `filter-branch` `--*-filter` e `--setup`; `bisect run <cmd...>` (início do comando); `submodule [--helper] foreach <cmd>` (a primeira palavra é o código, o resto são seus argumentos); `difftool -x`/`--extcmd`; `clone -u`/`--upload-pack`, `fetch`/`pull`/`fetch-pack` `--upload-pack`, `ls-remote` `--upload-pack`/`--exec`, `push`/`send-pack` `--receive-pack`/`--exec`, `archive --exec`; `send-email` `--to-cmd`, `--cc-cmd`, `--header-cmd`, `--sendmail-cmd` (grafias do Perl Getopt::Long); `grep -O`/`--open-files-in-pager` (valor anexado).
+- **URLs `ext::`** em clone, fetch, pull, push, ls-remote, `submodule add`, `archive --remote`, `push --repo`, fetch-pack e send-pack: o código é o texto da URL, com `% ` e `%%` sem escape e `%G`/`%V` descartados. `clone -c`/`--config` passa os pares pelas regras de configuração.
+- **Nível B (`dynamic_code`):** `instaweb -b/-d/-m` e config `instaweb.*`; `send-email --smtp-server` com `/`, `~` ou expansão; estratégias de merge personalizadas (`merge`/`pull`/`rebase` `-s`, `cherry-pick`/`revert` `--strategy`, `pull.twohead`, `pull.octopus`); `daemon --access-hook`; `merge-index`.
+- **Aliases:** as opções de programa valem também através de aliases. Um `--` logo depois de uma opção escrita sem `=` é lido como o valor dela (falha fechada). `send-pack` conta como `git_push`. `mergetool`/`difftool --tool-cmd` não existem e não são modelados.
+
+**Testes:** `test_classify.py` e `test_command_positions.py`. A suite tem 951 tests.
+
+## Adendo 2026-11-18 - stdin de pipe e de substituição de processo: escritor, coproc, chamada de função e composto
+
+**Motivo.** Bugs `2026-11-16-audit-procsub-writer-shell-not-flagged`, `2026-11-16-audit-function-coproc-pipe-receiver-not-followed` e `2026-11-16-audit-group-procsub-stdin-not-flagged` (backlog), corrigidos numa só rodada. **Altera o Adendo 2026-11-16 (2)** em dois pontos: o corpo de `coproc` passa a ler sempre um pipe (antes "não herda"), e a função deixa de ser ignorada: a chamada é resolvida no ponto de chamada. Decisões do usuário (2026-11-18).
+
+**Regra nova** (estende X4 e o Adendo 2026-11-16 (2); `agent_audit_shell.py`: `part_script_items`, `Word.script_items`, `_NO_STDIN_KINDS`, `_walk`; `agent_audit_classify.py`: `_SAME_SHELL_LOADERS`, `_function_readers`, `_receiver_heads`, `_Run.function_verdicts`, `_Run.function_call`, `_Run.compound_procsub_stdin`, parâmetros `fn`/`same_shell`):
+
+- **Escritor `>(...)`.** O script de uma substituição `>(...)` tem sempre o stdin piped (o pipe que o escritor enche): `echo x > >(bash)` é `piped_shell`.
+- **`coproc`.** O corpo que lê código é sempre piped, com escritor visível ou não. Só o corpo de função continua sem herdar o stdin.
+- **Chamada de função.** Sob um pipe ou com `<(...)` no stdin, a chamada de uma função definida no texto vale como o shell que o corpo guarda (`f() { bash; }; echo x | f` é `piped_shell`), pelas mesmas regras de `_stdin_code`. O predicado do corpo é `_compound_reads_code` sem mudança. O veredito junta todas as definições do nome, é calculado uma vez por execução e cobra `VARIANT_COST` por corpo lido. A chamada vale em cada cabeça resolvida (`$g` com `g=f`, `{f,}`, `${g:-f}`) e em cabeça não resolvida (expansão ou glob sem `/` literal), que pode nomear qualquer função (falha fechada); cabeça com `/` literal não é chamada de função.
+- **Tabela de funções externa.** Desce para `eval`, `trap`, `source`/`.`, `bash -c` e corpos de heredoc. Uma função definida dentro de string de `eval`, `trap` ou `source` (`_SAME_SHELL_LOADERS`: também `.`, `mapfile`, `readarray`, `emulate`) é `dynamic_code`, porque sobrevive à string e suas chamadas não são vistas; `bash -c` é um filho, então `bash -c 'f() { :; }; f'` fica limpo. Corpo de heredoc lido por carregador do mesmo shell, ou por receptor de cabeça desconhecida, recebe o mesmo bloqueio.
+- **`command_not_found_handle`.** Uma definição que lê código é `dynamic_code`: o bash a chama para qualquer comando desconhecido.
+- **Composto com `<(...)`.** Um composto com `<(...)` como alvo de qualquer redirecionamento de entrada (`<` ou `<>`, qualquer fd) que lê código é `dynamic_code`, como `bash < <(x)`: `{ bash; } 3< <(x)` bloqueia.
+
+**Falsos positivos aceitos:** `{ bash <<< x; } < <(y)`; `f() { eval "$1"; }; echo x | f a`; nome redefinido (conta qualquer definição que leia código); `command`/`sudo`/`env`/`timeout f` e `echo x | command f` sob pipe contam como chamada; `f() { bash; } < <(x)` sem chamada bloqueia; `f() { cat; }; g() { f; }; echo x | g` bloqueia; `echo x | $UNKNOWN` bloqueia quando o texto define função que lê código; `eval 'x=$(f() { :; }; f)'` bloqueia.
+
+**Limitações aceitas:** uma função definida em chamada anterior (outro comando da sessão) não é resolvida; uma função definida por `bash -c` ou em corpo de heredoc é analisada no filho e não aparece para o pai. O stdin de handlers de `trap` (DEBUG/ERR/EXIT) e de callbacks de `mapfile -C` foi para o backlog.
+
+**Não muda:** os níveis A e B, o conjunto de motivos, a classificação sem pipe e `agent-audit.json`.
+
+**Testes:** `test_shell_lexer.py` (`PipedStdin`, o caso de `coproc` invertido) e `test_command_positions.py` (`PipeReceivers`). A suite tem 989 tests.
+
+## Adendo 2026-11-18 (2) - stdin de outras fontes: código aninhado, traps, exec, fifos, aliases e leitores
+
+**Motivo.** Bugs `2026-11-18-audit-pipe-into-code-string-not-followed`, `2026-11-18-audit-trap-action-stdin-context`, `2026-11-18-audit-mapfile-callback-stdin`, `2026-11-18-audit-named-pipe-fd-stdin-not-tracked`, `2026-11-18-audit-exec-stdin-not-followed`, `2026-11-16-audit-operand-stdin-alias-exact-match`, `2026-11-16-audit-pipe-readers-not-piped-shell`, `2026-11-18-audit-glob-receiver-head-not-same-shell` e `2026-11-18-audit-zsh-command-not-found-handler-not-modeled` (backlog), corrigidos numa rodada de sete passos. **Estende o Adendo 2026-11-18**: o estado do stdin deixa de ser booleano e passa a ser um motivo (`None`, `piped_shell`, `dynamic_code`), levado a todo texto de código aninhado. Decisões do usuário (2026-11-18).
+
+**Regra nova** (estende X4 e o Adendo 2026-11-18; `agent_audit_shell.py`: `Site`, `_fd_states`, `stdin_alias`, `normalize_name`, `normalize_path`, `Fifos`, `StdinContext`, `exec_fds`; `agent_audit_classify.py`: `_site_stdin`, `_stdin_facts`, `_nested_facts`, `_STDIN_CODE_READERS`, `_OTHER_SHELLS`, `_IMPLICIT_FUNCTIONS`, `_PARALLEL_*`):
+
+- **Estado como motivo.** `piped_shell` quando o stdin é um pipe, `dynamic_code` quando vem de `<(...)` ou de fonte desconhecida. O código aninhado (`eval`, `bash -c`, `trap`, `mapfile -C`/`readarray -C`, corpos de alias do git, corpos repassados) herda o estado do ponto onde roda; corpo de heredoc não herda; strings de código sob `xargs` herdam.
+- **`trap`.** `EXIT`/`0` roda com o estado de quem o definiu, unido ao estado no fim do texto (`StdinContext.end`); qualquer outro sinal cuja ação lê código é `dynamic_code`; `EXIT` dentro de corpo de função é `dynamic_code`.
+- **`exec` só com redirecionamentos.** Os descritores valem para todo ponto posterior do texto, mesmo depois de subshell ou `if` (sobre-aproximação). Reconhece `--`, `-a NOME`, `-c`, `-l`, `command`/`builtin`, atribuição de prefixo e cabeça `$e`; `{fd}` é descritor desconhecido (`?`, falha fechada). `exec` em texto aninhado do mesmo shell é `dynamic_code`. A decisão é por tokens, não por substring, e `exec` com expansão que pode sumir conta como `exec` puro.
+- **Fifos.** `mkfifo` e `mknod NOME p` no texto criam um fifo: shell ou `source` que o lê por redirecionamento, operando ou `exec N< p` é `piped_shell`. Nome ilegível (expansão, envoltório, string de código, `mv`/`ln`/`cp`/`install` de um fifo, config do git ilegível) faz todo arquivo lido por shell no texto bloquear; texto sem `mkfifo` mantém arquivo comum limpo.
+- **Alias de stdin.** `stdin_alias` normaliza o caminho (`.`, `..`, `//`), lê `/dev/stdin`, `/dev/fd/N` e `/proc/<pid>/[task/<tid>/]fd/N` como o descritor, tira `/proc/<pid>/root|cwd`, trata caminho relativo que sobe como a partir da raiz e `~user` como qualquer diretório. Sob estado ativo, operando de shell ou `source` com expansão, glob ou `~user` é `piped_shell`. Texto com `cd`, `pushd`, `popd` ou `ln` (também em código aninhado do mesmo shell; ilegível ou dinâmico falha fechado, então `source $f` conta) faz todo operando e alvo de redirecionamento relativo valer qualquer descritor ativo (`StdinContext.moved`). Caminho absoluto que não é alias fica limpo.
+- **Cabeça glob.** Programa com glob (`/bin/[c]at`) sob qualquer estado ativo bloqueia (substitui a isenção de `PipeReceivers`); cabeça `$VAR` fica limpa (`| $PAGER`). Cabeça glob de receptor de heredoc ou here-string falha fechada.
+- **Leitores.** Além de bash, sh, zsh, dash, ksh, mksh e ash: `rbash`, `rzsh`, `yash`, `posh`, `hush`, `sash`, `ksh93`, `oksh`, `loksh`, `osh`, `toysh`, `bash5`/`zsh5.9` versionados, applets de `busybox`/`toybox`, e `at`/`batch`/`parallel` sem comando. `parallel` falha fechado em opção desconhecida, separador ou string de substituição própria; `--pipe CMD`, `sh -c`, `{}` e `eval` valem como código; argumentos literais após `:::` são classificados um nível abaixo. `fish`, `csh` e `tcsh` (`_OTHER_SHELLS`) leem stdin como código e seus `-c`/`-C` são `dynamic_code`, sem parse como bash. Interpretadores estrangeiros (`python3 -`, `perl`, `node -`) ficam de fora por projeto (X7).
+- **Funções implícitas.** `command_not_found_handler`, `chpwd`, `precmd`, `preexec`, `periodic`, `zshexit`, `TRAP*`, os arrays `*_functions`, `add-zsh-hook`, `functions[...]=` e `functions -c` que leem código são `dynamic_code`, como `command_not_found_handle`.
+- **Passada de fatos.** `fifos`, `moved` e os descritores de `exec` vêm de uma passada própria sobre as strings de código de todo ponto que roda código (`_nested_facts`, guiada por `CodeArg`, corpos de heredoc de shell e alias do git; arquivos nunca são lidos), aberta por token (`_CODE_PROGRAMS`) ou por expansão, com falha fechada em texto ilegível, dinâmico ou acima do orçamento.
+
+**Falsos positivos aceitos:** `ls | while read f; do bash "$f"; done`; um shell que lê arquivo comum num texto que menciona `mkfifo` de forma não resolvida; `echo x | bash ~user/x`; `$cmd < <(x)` (lido como possível `exec`); a sobre-aproximação de `trap`, `exec` e `xargs`; `fish -c`, `csh -c` e `tcsh -c` bloqueados.
+
+**Limitações aceitas:** fifo criado fora do texto (`exec 3<> p; bash <&3` sem `mkfifo`); interpretadores estrangeiros (X7); `source $f` marca `moved` para o texto inteiro; a passada de fatos duplica a resolução da passada principal (refactor registrado: derivar `fifos`, `moved` e descritores de `exec` da própria análise, em segunda passada até o ponto fixo). Duas variantes da rodada 7 foram registradas como bugs.
+
+**Não muda:** os níveis A e B, o conjunto de motivos, a classificação sem stdin ativo e `agent-audit.json`.
+
+**Testes:** `test_command_positions.py` (`StdinOtherSources`, `StdinOtherSourcesRound2` a `Round7`, `PipeReceivers` ajustada) e `test_shell_lexer.py` (`StdinNames`). A suite tem 1101 tests.
+
+## Adendo 2026-11-19 - regressão do regex, lista de permissão do parallel, opções de fish/csh/tcsh e at -V
+
+**Motivo.** Bugs `2026-11-18-audit-duplicate-expansion-regex-head-dynamic`, `2026-11-18-audit-parallel-command-line-not-read-as-code` (parte "Seen again"), `2026-11-18-audit-fish-csh-option-scan-stops-at-value` e `2026-11-18-audit-at-version-option-listing` (backlog), corrigidos numa rodada de cinco passos. **Estende o Adendo 2026-11-18 (2)**. Decisões do usuário (2026-11-19).
+
+**Regra nova** (`agent_audit_classify.py`):
+
+- **Regex de expansão.** Um segundo `_EXPANSION` redefinia o primeiro e `_head_is_dynamic` usava o padrão errado. O que remove expansões que podem sumir passa a ser `_STRIPPABLE_EXPANSION`. Substituição (`$(...)`, crase) depois de prefixo literal de caminho (`/usr/$(x)`) é nível B (`dynamic_code`): `_head_unsafe` junta as partes em ordem e a substituição é nível B quando uma `/` literal a precede e nenhuma a segue (era nível A em 571d2b8; aceito por falhar fechado).
+- **`parallel` como lista de permissão.** Limpo só quando: toda opção é conhecida (só opções que certamente exigem valor; opção de valor opcional ou incerta, como `-l`, falha fechada; `-m`, `--plus`, `--shuf` são flags); o modelo (palavras do comando juntas) é lido como código shell com apenas as strings de substituição exatas como marcadores (`{}`, `{.}`, `{/}`...; as de `--plus` só com `--plus`); todo ponto de comando do modelo tem programa literal que não é shell, leitor de código, `eval`/`source`, envoltório ou prefixo (`nohup`, `nice`, `timeout`, `env`, `sudo`, `xargs`, `command`, `exec`, `stdbuf`, `time`...), e marcador ou expansão nunca fica em posição de programa; o comando composto é classificado normalmente (as flags propagam: `parallel git ::: push` vale `git <desconhecido>`).
+- **Casos que bloqueiam.** `{=` antes do primeiro `:::`; marcador em qualquer contexto de aspas (`'...'`, `$'...'`, `"..."` em qualquer profundidade, operandos de `${...}`, `$"..."`, heredoc sem aspas) a não ser que toda fonte seja palavra literal após `:::` só com `[-_.+A-Za-z0-9/]`; `-S`/`--sshlogin` só com listas simples de hosts (host e usuário começam por alfanumérico ou `_`), `--sshloginfile`/`--slf` é `dynamic_code`; `PARALLEL` ou `PARALLEL_SHELL` atribuída, exportada, passada por `env` ou definida por `read`/`printf -v` em qualquer ponto do texto (`_sets_parallel_vars`, sobre-aproximação). Sem comando: `:::` literais seguem classificados um nível abaixo; `::::`, `-a` e stdin são `dynamic_code`. Substitui as decisões anteriores: `parallel bash ::: a.sh` e `parallel nice gzip ::: a` passam a bloquear.
+- **fish, csh e tcsh.** A leitura de opções não para mais no primeiro valor. Tabelas por shell (`_FISH_*`, `_CSH_*`): opções de valor consomem o valor, opções longas aceitam prefixo (prefixo ambíguo ou de opção de comando vale como código), `-Dnome=valor` em csh/tcsh. Opção fora da tabela é `dynamic_code`. `-s` e um `-` solto em csh/tcsh leem o script do stdin.
+- **`at -V`.** `V` sai de `_AT_LISTING`: `at -V` imprime a versão e ainda lê o job do stdin.
+
+**Falsos positivos aceitos:** `parallel bash ::: a.sh` e `parallel nice gzip ::: a`; `{...}` numa string `-c` do parallel (inclusive `${HOME}`) e `awk '{print $1}'` num modelo do parallel; `-T` e `-S` do tcsh; atribuição de `PARALLEL` em qualquer ponto do texto.
+
+**Não muda:** os níveis A e B, o conjunto de motivos, a classificação sem esses programas e `agent-audit.json`.
+
+**Testes:** `test_command_positions.py`. A suite tem 1145 tests.

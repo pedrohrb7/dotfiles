@@ -24,3 +24,9 @@ False positives from parsing shell text; false sense of coverage.
 ## Out of scope
 
 Blocking mode (warn->block promotion).
+
+## Seen again (2026-11-16)
+
+Source: agent run: fix of audit-git-config-keys-run-commands, out_of_scope_issues.
+
+Direct edits of `.git/config` or `~/.gitconfig`, by the Write/Edit tool or by a command the classifier cannot see into, can set value-running keys (`core.pager`, `core.fsmonitor`, `core.hooksPath`, `hook.*`) that later run on builtin git calls. Neither the Write/Edit path checks nor the git config model (which covers `git config` and `-c`, not file writes) reach this; no existing write-scope entry covered it, so it is recorded here. Related: [hook self-protection](../bugs/2026-11-11-audit-hook-self-protection.md). Pre-existing.

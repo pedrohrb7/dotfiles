@@ -334,7 +334,7 @@ def _prefix_steps(tokens: list[str], p: int) -> list[int]:
     Prefixes: env assignments after a wrapper; the wrappers of `_WRAPPERS` with their flag grammar (an option the
     table does not know yields two readings, fail closed); the flagless prefixes of `_PLAIN_PREFIXES`; zsh
     `repeat N`; `timeout [options] DURATION` (every GNU form); `mise [global flags] exec|x [...] --` (cut up to
-    the `--`). Program names go through `_program_name`. Every step moves forward, so a search over positions
+    the `--`); `git [global options] bisect run` (the command it runs). Program names go through `_program_name`. Every step moves forward, so a search over positions
     ends."""
     if p >= len(tokens):
         return []
@@ -362,6 +362,10 @@ def _prefix_steps(tokens: list[str], p: int) -> list[int]:
         return []
     if tok == "timeout":
         return [p + length for length in _timeout_prefix_lengths(tokens, p)]
+    if tok == "git":  # `git bisect run COMMAND ARGS`: git runs the words as a command (and `git` is a command too)
+        args = tokens[p + 1:]
+        runs = [p + 1 + i + 2 for i in _git_walk(args)[0] if args[i] == "bisect" and args[i + 1:i + 2] == ["run"]]
+        return [p] + runs if runs else []
     return []
 
 
@@ -727,19 +731,53 @@ def _git_walk(args: list[str]) -> "tuple[list[int], list[tuple[int, bool, bool]]
     return verbs, configs
 
 
-def _git_has_subcommand(args: list[str], name: str) -> bool:
-    """True when `name` can be the git subcommand of `args` (the words after `git`): one reading of the global
-    options (`_git_walk`) with `name` as the subcommand is enough. `commit` as the value of `--grep` or as a
-    config key is not the subcommand."""
-    return any(args[i] == name for i in _git_walk(args)[0])
+def _git_has_subcommand(args: list[str], name: "str | frozenset[str]") -> bool:
+    """True when `name` (one subcommand, or a set of them) can be the git subcommand of `args` (the words after
+    `git`): one reading of the global options (`_git_walk`) with it as the subcommand is enough. `commit` as the
+    value of `--grep` or as a config key is not the subcommand."""
+    names = frozenset({name}) if isinstance(name, str) else name
+    return any(args[i] in names for i in _git_walk(args)[0])
 
 
 _GIT_ALIAS_DEPTH = 5
 
 
+# Environment variables that give git a program to run: `code` ones hold shell code (read as code), `program` ones
+# name a program or a file that cannot be known (level B unless empty).
+_GIT_ENV_VARS = {
+    "GIT_PAGER": "code", "GIT_EDITOR": "code", "GIT_SEQUENCE_EDITOR": "code", "GIT_SSH_COMMAND": "code",
+    "GIT_EXTERNAL_DIFF": "code", "EDITOR": "code", "VISUAL": "code", "PAGER": "code", "LESSOPEN": "code",
+    "LESSCLOSE": "code", "GIT_ASKPASS": "program", "GIT_PROXY_COMMAND": "program", "GIT_CONFIG_GLOBAL": "program",
+    "GIT_CONFIG_SYSTEM": "program", "GIT_SSH": "program", "GIT_EXEC_PATH": "program", "GIT_TEMPLATE_DIR": "program",
+    "GIT_ALLOW_PROTOCOL": "program", "HOME": "program", "XDG_CONFIG_HOME": "program",
+}
+# Where the text can mention one of them (the cheap test before the values of the text are read for them).
+_GIT_ENV_HINTS = ("GIT_", "HOME", "XDG_", "EDITOR", "VISUAL", "PAGER", "LESS", "PATH")
+# Another repo's configuration, or another one for the same repo.
+_GIT_REDIRECT_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "HOME", "XDG_CONFIG_HOME")
+# The repo the aliases are read in is the one git runs in, with the configuration read, only when nothing else in the
+# text can change directory or write a file: every other command of the text must be one of these (`_script_moves`).
+_REDIRECT_WRITES = frozenset({">", ">>", ">|", "&>", "&>>", "<>"})
+_NO_FILE_TARGETS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
+_READ_ONLY_PROGRAMS = frozenset(
+    "ls cat head tail grep egrep fgrep rg wc echo printf pwd true false test [ sort uniq cut tr jq stat file which "
+    "date env id whoami uname basename dirname realpath readlink diff cmp column fold nl tac rev seq expr sleep tree "
+    "du df hostname printenv : export unset set declare local readonly shift read".split())
+_FIND_WRITES = frozenset({"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"})
+# The git subcommands that write neither a file outside `.git/objects` and `.git/refs` nor the configuration.
+_GIT_READ_VERBS = frozenset(
+    "status log diff show ls-files rev-parse branch describe blame grep shortlog ls-tree cat-file show-ref "
+    "for-each-ref rev-list merge-base name-rev diff-tree diff-index ls-remote version help whatchanged reflog "
+    "count-objects check-ignore".split())
+
+
 def _has_git_config_names(cmd, env) -> bool:
-    """The command (prefix assignments) or the text (values) sets a `GIT_CONFIG_*` variable."""
-    return any(w.text.startswith("GIT_CONFIG_") for w in cmd.assignments) or any(n.startswith("GIT_CONFIG_") for n in env)
+    """The command (prefix assignments) or the text (values) sets a `GIT_CONFIG_*` variable, or one of
+    `_GIT_ENV_VARS`."""
+    def named(name: str) -> bool:
+        return name.startswith("GIT_CONFIG_") or name in _GIT_ENV_VARS
+
+    return any(named(w.text.partition("=")[0]) for w in cmd.assignments) or any(named(n) for n in env)
 
 
 def _sq_dequote(text: str, i: int) -> "tuple[str, int] | None":
@@ -876,11 +914,130 @@ def _git_env_config(cmd, env) -> "tuple[list[tuple[str, str]], bool]":
     return pairs, unresolved
 
 
-def _git_aliases(cmd, args: list[str], env) -> "tuple[dict[str, list[str]], bool]":
-    """The aliases a `git` reading defines for itself (`-c alias.p=push`, `--config-env=alias.p=VAR`, the
-    `GIT_CONFIG_*` variables): lower-cased name -> values, and whether some configuration cannot be known (a
-    key or value made by an expansion)."""
-    verbs, configs = _git_walk(args)
+_GIT_CODE_KEYS = re.compile(
+    r"^(?:core\.(?:pager|editor|sshcommand|fsmonitor|gitproxy|alternaterefscommand)|sequence\.editor|diff\.external"
+    r"|interactive\.difffilter|uploadpack\.packobjectshook|web\.browser|pager\..+|imap\.tunnel"
+    r"|diff\..+\.(?:command|textconv)|merge\..+\.driver|(?:mergetool|difftool|guitool)\..+\.cmd"
+    r"|filter\..+\.(?:clean|smudge|process)|remote\..+\.(?:uploadpack|receivepack)|trailer\..+\.(?:cmd|command)"
+    r"|(?:browser|man)\..+\.cmd|hook\..+\.command|gpg\.ssh\.defaultkeycommand"
+    r"|sendemail\.(?:sendmailcmd|tocmd|cccmd|headercmd))$")
+_GIT_BANG_KEYS = re.compile(r"^(?:credential(?:\..+)?\.helper|submodule\..+\.update)$")
+_GIT_PROGRAM_KEYS = re.compile(
+    r"^(?:core\.(?:hookspath|askpass|worktree)|include\.path|includeif\..+\.path|url\..+\.(?:pushinsteadof|insteadof)"
+    r"|remote\..+\.(?:url|pushurl|vcs)|gpg\.program|gpg\..+\.program|init\.templatedir|protocol\.(?:.+\.)?allow"
+    r"|sendemail\.smtpserver"
+    r"|(?:mergetool|difftool|browser)\..+\.path|instaweb\.(?:httpd|browser|modulepath))$")
+_GIT_STRATEGY_KEYS = re.compile(r"^pull\.(?:twohead|octopus)$")
+_GIT_FETCH_KEY = re.compile(r"^remote\..+\.fetch$")
+_GIT_PROTOCOL_ALLOW = re.compile(r"^protocol\.(?:.+\.)?allow$")
+_GIT_WRITE_ONLY_KEYS = re.compile(r"^(?:alias\..+|remote\..+\.push|hook\..+\.event)$")  # risky to write, but not read as code
+
+
+def _config_kind(key: str) -> "str | None":
+    """What the value of the configuration `key` does when git runs: `code` (shell code), `bang` (shell code when it
+    starts with `!`), `program` (a program or a file that cannot be known), `strategy` (merge strategies: level B unless built in), `fetch` (a refspec), or None."""
+    if key.startswith("env:"):
+        return _GIT_ENV_VARS.get(key[4:])
+    low = key.lower()
+    if _GIT_CODE_KEYS.match(low):
+        return "code"
+    if _GIT_BANG_KEYS.match(low):
+        return "bang"
+    if _GIT_PROGRAM_KEYS.match(low):
+        return "program"
+    if _GIT_STRATEGY_KEYS.match(low):
+        return "strategy"
+    if _GIT_FETCH_KEY.match(low):
+        return "fetch"
+    return None
+
+
+def _risky_config_key(key: str) -> bool:
+    """Writing this key to the configuration makes git run a program, read a file, redirect a remote or a ref, or
+    expands an alias later (`git config alias.c commit`)."""
+    low = key.lower()
+    return _config_kind(low) is not None or bool(_GIT_WRITE_ONLY_KEYS.match(low))
+
+
+def _config_effects(pairs: "list[tuple[str, str]]", user_off: bool = False) -> "tuple[list[str], bool, list[str]]":
+    """What the configuration pairs (not the aliases) make git do: the shell code their values hold, whether some
+    value names a program or a file that cannot be known (level B; an empty value resets the key and is not), and
+    the refspecs of `remote.*.fetch` that write local refs outside `refs/remotes/`. A protocol `allow` of `user`
+    allows what the user types: harmless only when the same command sets `GIT_PROTOCOL_FROM_USER=0` (`user_off`)."""
+    code: list[str] = []
+    unknown = False
+    specs: list[str] = []
+    for key, value in pairs:
+        kind = _config_kind(key)
+        low = key.lower()
+        if kind == "code":
+            if key in ("env:LESSOPEN", "env:LESSCLOSE"):  # `|cmd %s`, `||cmd %s`, `-cmd`: a leading pipe mark
+                value = value.lstrip("|-")
+            if value.strip():
+                code.append(value)
+        elif kind == "bang":
+            if value.startswith("!"):
+                code.append(value[1:])
+            elif low.startswith("credential") and value.strip():
+                if value.lstrip().startswith(("/", "~")):
+                    unknown = True  # a helper program given by its path
+                else:  # git runs `git credential-<value>` with the shell
+                    code.append("git credential-" + value.strip())
+        elif kind == "program":
+            allowed = (("", "never", "user") if user_off else ("", "never")) if _GIT_PROTOCOL_ALLOW.match(low) else ("",)
+            if value.strip().lower() not in allowed:
+                unknown = True
+        elif kind == "strategy":  # a strategy of the merge programs git ships is no program of the user's
+            if any(name not in _GIT_BUILTIN_STRATEGIES for name in value.split()):
+                unknown = True
+        elif kind == "fetch":
+            dst = value.lstrip("+").partition(":")[2]
+            if dst and not dst.startswith("refs/remotes/"):
+                specs.append(value)
+    return code, unknown, specs
+
+
+def _env_is(cmd, env, name: str, value: str) -> bool:
+    """The command (a prefix assignment, `env NAME=v`) or the text sets the variable `name`, and only to `value`."""
+    known = None
+    for word in cmd.assignments:
+        first = word.parts[0]
+        target = _assignment_target(first.text) if first.kind == "lit" else None
+        if target is not None and target[0] == name and target[1] == "=":
+            known = None if word.dynamic else frozenset({word.text[target[2]:]})
+            return known == frozenset({value})
+    known = env.get(name)
+    return known == frozenset({value})
+
+
+def _git_env_var_pairs(cmd, env) -> "tuple[list[tuple[str, str]], bool]":
+    """The `_GIT_ENV_VARS` the command or the text sets, as `("env:NAME", value)` pairs, and whether one of them
+    holds a value that cannot be known."""
+    values: dict = {}
+    for word in cmd.assignments:
+        first = word.parts[0]
+        target = _assignment_target(first.text) if first.kind == "lit" else None
+        if target is not None and target[0] in _GIT_ENV_VARS and target[1] == "=":
+            values[target[0]] = None if word.dynamic else frozenset({word.text[target[2]:]})
+    for name, known in env.items():
+        if name in _GIT_ENV_VARS and name not in values:
+            values[name] = known
+    pairs: list[tuple[str, str]] = []
+    unresolved = False
+    for name, known in values.items():
+        real = [v for v in known if v is not None] if known is not None else []
+        if not real:
+            unresolved = True
+            continue
+        pairs.extend((f"env:{name}", v) for v in real)
+    return pairs, unresolved
+
+
+def _git_config_pairs(cmd, args: list[str], env) -> "tuple[list[tuple[str, str]], bool]":
+    """The configuration a `git` reading gives itself (`-c key=value`, `--config-env=key=VAR`, the `GIT_CONFIG_*`
+    variables, the `_GIT_ENV_VARS`), as (key, value) pairs, and whether some of it cannot be known (a key or value
+    made by an expansion, a variable with no known value for a key that matters)."""
+    _, configs = _git_walk(args)
     pairs: list[tuple[str, str]] = []
     unresolved = False
     for index, attached, from_env in configs:
@@ -898,7 +1055,7 @@ def _git_aliases(cmd, args: list[str], env) -> "tuple[dict[str, list[str]], bool
                     known = frozenset({word.text[target[2]:]})
             known = known if known is not None else env.get(value)
             if not known or None in known:
-                if key.lower().startswith("alias."):
+                if _risky_config_key(key):
                     unresolved = True
                 continue
             pairs.extend((key, v) for v in known)
@@ -908,11 +1065,10 @@ def _git_aliases(cmd, args: list[str], env) -> "tuple[dict[str, list[str]], bool
         extra, more = _git_env_config(cmd, env)
         pairs.extend(extra)
         unresolved = unresolved or more
-    aliases: dict[str, list[str]] = {}
-    for key, value in pairs:
-        if key.lower().startswith("alias."):
-            aliases.setdefault(key[6:].lower(), []).append(value)
-    return aliases, unresolved
+        extra, more = _git_env_var_pairs(cmd, env)
+        pairs.extend(extra)
+        unresolved = unresolved or more
+    return pairs, unresolved
 
 
 class _AssignView:
@@ -925,7 +1081,7 @@ class _AssignView:
         self.assignments = assignments
 
 
-def _wrapper_assignments(cmd, tokens: list[str], words: list, s: int) -> "tuple[object, bool]":
+def _wrapper_assignments(cmd, tokens: list[str], words: list, s: int) -> "tuple[_AssignView | shell.Simple, bool]":
     """Part E, V4: `cmd` with the `NAME=value` words among `tokens[:s]` (the wrapper operands before the program at
     `s`) added to its prefix assignments, and whether some such word cannot be read (its name is made by an
     expansion): then the configuration is not known."""
@@ -943,16 +1099,285 @@ def _wrapper_assignments(cmd, tokens: list[str], words: list, s: int) -> "tuple[
     return _AssignView(tuple(cmd.assignments) + tuple(extra)), unreadable
 
 
-def _git_alias_variants(variants: list, cmd, env) -> "tuple[list, list[str], bool]":
+# The subcommands git ships (`git --list-cmds=builtins,main,nohelpers,list-complete`, and the GUI and import
+# front ends): any other word after the global options may be an alias of a configuration file or a `git-<name>`
+# program.
+_GIT_BUILTINS = frozenset(
+    "add am annotate apply archimport archive backfill bisect blame branch bugreport bundle cat-file check-attr "
+    "check-ignore check-mailmap check-ref-format checkout checkout--worker checkout-index cherry cherry-pick citool "
+    "clean clone column commit commit-graph commit-tree config contacts count-objects credential credential-cache "
+    "credential-cache--daemon credential-store cvsexport cvsimport cvsserver daemon describe diagnose diff diff-files "
+    "diff-index diff-pairs diff-tree difftool difftool--helper fast-export fast-import fetch fetch-pack filter-branch "
+    "fmt-merge-msg for-each-ref for-each-repo format-patch format-rev fsck fsck-objects fsmonitor--daemon gc "
+    "get-tar-commit-id gitk grep gui gui--askyesno hash-object help history hook http-backend http-fetch http-push "
+    "imap-send index-pack init init-db instaweb interpret-trailers jump last-modified log ls-files ls-remote ls-tree "
+    "mailinfo mailsplit maintenance merge merge-base merge-file merge-index merge-octopus merge-one-file merge-ours "
+    "merge-recursive merge-recursive-ours merge-recursive-theirs merge-resolve merge-subtree merge-tree mergetool "
+    "mktag mktree multi-pack-index mv name-rev notes p4 pack-objects pack-redundant pack-refs patch-id pickaxe prune "
+    "prune-packed pull push quiltimport range-diff read-tree rebase receive-pack reflog refs remote remote-ext "
+    "remote-fd remote-ftp remote-ftps remote-http remote-https repack replace replay repo request-pull rerere reset "
+    "restore rev-list rev-parse revert rm send-email send-pack sh-i18n--envsubst shell shortlog show show-branch "
+    "show-index show-ref sparse-checkout stage stash status stripspace submodule submodule--helper subtree svn "
+    "switch symbolic-ref tag unpack-file unpack-objects update-index update-ref update-server-info upload-archive "
+    "upload-archive--writer upload-pack url-parse var verify-commit verify-pack verify-tag version web--browse "
+    "whatchanged worktree write-tree bisect--helper".split())
+
+
+# What the classifier cannot do itself (it starts no process and reads no file): the hook registers here, before it
+# analyzes, `git_aliases` (cwd -> {alias: value} | None, the aliases the configuration files of the repo at the cwd
+# define, None when they cannot be read), `git_external` (name -> bool, a `git-<name>` program is on the PATH) and
+# `cwd` (the cwd of the tool call). Without them nothing can be read: an unknown git subcommand is level B.
+RESOLVERS: dict = {}
+
+
+def _read_repo_git_aliases(cwd: "str | None") -> "dict[str, str] | None":
+    """The aliases git finds for a command run in `cwd` (lower-cased name -> value), or None when they cannot be
+    read: no reader registered (`RESOLVERS["git_aliases"]`, the hook's `read_git_aliases`), or it failed."""
+    reader = RESOLVERS.get("git_aliases")
+    return reader(cwd) if reader is not None else None
+
+
+def _git_external_exists(name: str) -> bool:
+    """A program `git-<name>` is on the PATH (git runs it as the subcommand `<name>`: `git lfs`)."""
+    exists = RESOLVERS.get("git_external")
+    return bool(exists(name)) if exists is not None else False
+
+
+_PLAIN_VERB = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]*")
+
+
+def _git_unknown_verb(word: str) -> bool:
+    """`word` is a plain subcommand name that git does not ship (so: an alias, or an external program). A word with
+    an expansion, a pattern or an escape is judged by the code that resolves it, not here."""
+    return _PLAIN_VERB.fullmatch(word) is not None and word not in _GIT_BUILTINS
+
+
+def _with_refmaps(tokens: list[str], words: list, s: int, specs: list[str]) -> "tuple[list[str], list] | None":
+    """The reading with the `remote.*.fetch` refspecs `specs` (they write local refs) given as `--refmap=<spec>` after
+    every `fetch` and `remote` subcommand it can have (`fetch`, `fetch --all`, `remote update`), where the
+    classifier already reads a refspec that writes a ref. None when it has none."""
+    ats = {s + 1 + v for v in _git_walk(tokens[s + 1:])[0] if tokens[s + 1 + v] in ("fetch", "remote")}
+    if not ats:
+        return None
+    extra = [f"--refmap={spec}" for spec in specs]
+    for at in sorted(ats, reverse=True):
+        if tokens[at + 1:at + 1 + len(extra)] == extra:
+            continue
+        tokens = tokens[:at + 1] + extra + tokens[at + 1:]
+        words = words[:at + 1] + [None] * len(extra) + words[at + 1:]
+    return tokens, words
+
+
+def _git_config_reads(rest: list[str]) -> bool:
+    """`git config` with the words `rest` only reads the configuration."""
+    if _short_in(rest, "l") or _long_in(rest, *_CONFIG_READ_LONG):
+        return True
+    if _short_in(rest, "e") or _long_in(rest, "edit", "unset", "unset-all", "add", "replace-all", "rename-section",
+                                        "remove-section"):
+        return False
+    pos = _positionals(rest, frozenset({"-f", "-t"}), ("file", "blob", "type", "default", "comment", "value", "url"))
+    if pos and pos[0] in ("set", "unset", "edit", "rename-section", "remove-section"):
+        return False
+    if pos and pos[0] in ("get", "list"):
+        return True
+    return len(pos) <= 1
+
+
+def _git_unknown_site(tokens: list[str], at: int) -> bool:
+    """The command at `tokens[at]` is `git` with a subcommand git does not ship (an alias, or a `git-<name>` program
+    that may write: `git lfs install`)."""
+    if _program_name(tokens[at]) != "git":
+        return False
+    args = tokens[at + 1:]
+    return any(_git_unknown_verb(args[v]) for v in _git_walk(args)[0])
+
+
+def _site_may_write(tokens: list[str], at: int) -> bool:
+    """The command at `tokens[at]` may change directory, write a file or write the configuration of git: anything
+    that is not a known reader (`_READ_ONLY_PROGRAMS`, a `find` that only searches, `git` with a reading subcommand,
+    an alias or `git-<name>` program, `git config` reading)."""
+    name = _program_name(tokens[at])
+    rest = tokens[at + 1:]
+    if name == "find":
+        return any(t in _FIND_WRITES for t in rest)
+    if name == "env":
+        return any(t.startswith(("-C", "--chdir")) for t in rest)
+    if name == "git":
+        args = tokens[at + 1:]
+        for v in _git_walk(args)[0]:
+            word = args[v]
+            if word == "config":
+                if not _git_config_reads(args[v + 1:]):
+                    return True
+            elif word in _GIT_BUILTINS and word not in _GIT_READ_VERBS:
+                return True
+        return False
+    return name not in _READ_ONLY_PROGRAMS
+
+
+def _script_moves(script, command: str) -> bool:
+    """The text may change directory or write a file before git runs: a command that is not a known reader
+    (`_site_may_write`: interpreters, scripts, archive tools, `cd`, `cp`, `tee`, `sed -i`, a `git config` write...), a
+    redirect to a file other than `/dev/null` and the descriptor copies, `--chdir`, `find -execdir`, or a name of a
+    configuration file of git. The repo the aliases are read in may not be the one git runs in, or may have changed.
+    The commands are those of the parsed text (a program name that is only an argument, `echo cp`, is not one)."""
+    if ".gitconfig" in command or ".git/config" in command:
+        return True
+    unknown_sites = 0  # git sites with a subcommand git does not ship: the second one follows a program that may write
+    for site in shell.iter_sites(script):
+        cmd = site.cmd
+        for r in cmd.redirects:
+            target = r.target.text if r.target is not None else None
+            if target is None or target in _NO_FILE_TARGETS:
+                continue
+            if r.op in _REDIRECT_WRITES or (r.op == ">&" and not (target.isdigit() or target == "-")):
+                return True
+        tokens = [w.text for w in cmd.words]
+        if any(t.startswith("--chdir") or t in ("-execdir", "-okdir") for t in tokens):
+            return True
+        for at in _token_readings(tokens).starts:
+            if at >= len(tokens):
+                continue
+            word = cmd.words[at] if at < len(cmd.words) else None
+            if word is not None and word.has_brace:  # `{git,c} -m x` runs `git c -m x`
+                expanded = _brace_words(word)
+                if not expanded:
+                    return True
+                if _site_may_write(tokens[:at] + expanded + tokens[at + 1:], at):
+                    return True
+            elif _site_may_write(tokens, at):
+                return True
+            if _git_unknown_site(tokens, at):
+                unknown_sites += 1
+                if unknown_sites > 1:
+                    return True
+    return False
+
+
+def _git_program_option(args: list[str]) -> bool:
+    """A command-line option moves git to other programs or templates: `--exec-path=<dir>` (the bare form prints the
+    path), `clone`/`init` with `--template=<dir>` (or `--template <dir>`)."""
+    verbs = _git_walk(args)[0]
+    lead = args[:min(verbs)] if verbs else args
+    if any(t.startswith("--exec-path=") and t[len("--exec-path="):] for t in lead):
+        return True
+    for v in verbs:
+        sub = args[v]
+        rest = args[v + 1:]
+        if sub == "instaweb" and _instaweb_program(rest):
+            return True  # the browser, the server and the module path are programs
+        if sub == "send-email":
+            for k, tok in enumerate(rest):
+                if _ends_options(rest, k):
+                    break
+                if _is_getopt(tok, "smtp-server"):
+                    value = tok.partition("=")[2] if "=" in tok else rest[k + 1] if k + 1 < len(rest) else ""
+                    if value.startswith(("/", "~")) or "$" in value or "`" in value:
+                        return True  # a path is a program that sends the mail
+        if sub == "daemon" and _long_in(rest, "access-hook"):
+            return True
+        if sub == "merge-index":
+            return True  # its first word is the program that merges each file
+        letters = _GIT_STRATEGY_SHORT.get(sub)
+        if (letters is not None or sub in ("cherry-pick", "revert")) and any(
+                s not in _GIT_BUILTIN_STRATEGIES for s in _git_strategies(rest, letters)):
+            return True  # `git-merge-<name>` of the PATH or the exec path (cherry-pick, revert: `-s` is signoff)
+        if sub not in ("clone", "init"):
+            continue
+        for k, tok in enumerate(rest):
+            if _ends_options(rest, k):
+                break
+            if _is_long(tok, "template"):
+                value = tok.partition("=")[2] if "=" in tok else rest[k + 1] if k + 1 < len(rest) else ""
+                if value:
+                    return True
+    return False
+
+
+_GIT_BUILTIN_STRATEGIES = frozenset({"ort", "recursive", "resolve", "octopus", "ours", "subtree"})
+# The short options that take a value (the rest of the word, else the next one), per subcommand with `-s`: a letter
+# not listed is read as a flag, so the scan goes on (fail closed).
+_GIT_STRATEGY_SHORT = {"merge": "mFXS", "pull": "XSjo", "rebase": "xXSC"}
+
+
+def _git_strategies(rest: list[str], letters: "str | None") -> list[str]:
+    """The merge strategies named by `-s`, `-sNAME`, `--strategy NAME` and `--strategy=NAME` (any prefix of the long
+    option) in the words after a merge, pull or rebase; `letters`: the short options of the subcommand that take
+    a value, None for a subcommand whose `-s` is another option (cherry-pick, revert: the long form only)."""
+    out: list[str] = []
+    for k, tok in enumerate(rest):
+        if _ends_options(rest, k):
+            break
+        following = rest[k + 1] if k + 1 < len(rest) else ""
+        if _is_long(tok, "strategy"):
+            out.append(tok.partition("=")[2] if "=" in tok else following)
+        elif letters is not None and tok.startswith("-") and not tok.startswith("--"):
+            for at, c in enumerate(tok[1:], 1):
+                if c == "s":
+                    out.append(tok[at + 1:] or following)
+                    break
+                if c in letters:
+                    break
+    return out
+
+
+def _instaweb_program(rest: list[str]) -> bool:
+    """`instaweb` (a shell script that scans every word, `--` included) is given a browser, a server or a module path."""
+    for tok in rest:
+        if tok.startswith("--"):
+            if any(_is_long(tok, name) for name in ("browser", "httpd", "module-path")):
+                return True
+        elif tok.startswith("-") and any(c in "bdm" for c in tok[1:]):
+            return True
+    return False
+
+
+def _git_clone_config(args: list[str]) -> "tuple[list[tuple[str, str]], bool]":
+    """The `-c key=value` / `--config key=value` pairs of a `git clone` in `args` (the words after `git`), and whether
+    one is made by an expansion."""
+    pairs: list[tuple[str, str]] = []
+    unresolved = False
+    for v in _git_walk(args)[0]:
+        if args[v] != "clone":
+            continue
+        rest = args[v + 1:]
+        for k, tok in enumerate(rest):
+            if _ends_options(rest, k):
+                break
+            following = rest[k + 1] if k + 1 < len(rest) else None
+            if _is_long(tok, "config"):
+                text = tok.partition("=")[2] if "=" in tok else following
+            elif tok.startswith("-") and not tok.startswith("--") and "c" in tok[1:]:
+                text = tok[tok.index("c") + 1:] or following
+            else:
+                continue
+            if text is None:
+                continue
+            if "$" in text or "`" in text:
+                unresolved = True
+                continue
+            key, _, value = text.partition("=")
+            pairs.append((key, value))
+    return pairs, unresolved
+
+
+def _git_alias_variants(variants: list, cmd, env, repo=None, text_moved=None,
+                        in_fwd: bool = False, external=None) -> "tuple[list, list[str], set[str]]":
     """B2 item 6: `git -c alias.p=push p` runs `git push`. For every variant that reads a `git` with aliases of its
-    own: more variants with the alias name replaced by its value (an alias of an alias too, up to
-    _GIT_ALIAS_DEPTH), the shell code of the `!` aliases (the value, then the rest of the words), and whether an
-    alias could not be resolved or the chain goes on (level B)."""
+    own, or with a subcommand git does not ship (an alias of the configuration files of the repo, read through
+    `repo()`: `git c -m x`): more variants with the alias name replaced by its value (an alias of an alias too, up
+    to _GIT_ALIAS_DEPTH), the shell code of the `!` aliases (the value, then the rest of the words) and of the
+    configuration keys that run code (`-c core.pager=CODE`, `GIT_PAGER=CODE`), and the reasons of level B: an alias
+    that could not be resolved or a chain that goes on (`dynamic_code`), a key that names a program or a file, a
+    subcommand that is no alias and no `git-<name>` program, or whose alias cannot be read where git runs
+    (`git_unknown_subcommand`). `text_moved()`: the text may change directory before git runs; `in_fwd`: the words are
+    those of a forwarding function, where `ARG` stands for a parameter (the calls are classified with theirs);
+    `external(name)`: whether a `git-<name>` program exists (default `_git_external_exists`; the text passes a memo)."""
     out = list(variants)
     code: list[str] = []
     seen: set = set()
-    unresolved = False
-    for tokens, words, readings in variants:
+    reasons: set[str] = set()
+    for index, (tokens, words, readings) in enumerate(variants):
         if not readings.complete:
             continue
         for s in readings.starts:
@@ -960,42 +1385,113 @@ def _git_alias_variants(variants: list, cmd, env) -> "tuple[list, list[str], boo
                 continue
             args = tokens[s + 1:]
             cmd_s, unreadable = _wrapper_assignments(cmd, tokens, words, s)  # `env VAR=v git`, `sudo VAR=v git` (V4)
-            if not (any(t == "-c" or t.startswith("--config-env") for t in args) or _has_git_config_names(cmd_s, env)):
-                unresolved = unresolved or (unreadable and any(t.startswith("GIT_CONFIG") for t in tokens[:s]))
-                continue
-            aliases, more = _git_aliases(cmd_s, args, env)
-            unresolved = unresolved or more or unreadable
-            if not aliases:
-                continue
+            pairs: list[tuple[str, str]] = []
+            if any(t == "-c" or t.startswith("--config-env") for t in args) or _has_git_config_names(cmd_s, env):
+                pairs, more = _git_config_pairs(cmd_s, args, env)
+                if more or unreadable:
+                    reasons.add("dynamic_code")
+            elif unreadable and any(t.startswith("GIT_CONFIG") for t in tokens[:s]):
+                reasons.add("dynamic_code")
+            if "clone" in args:
+                clone_pairs, more = _git_clone_config(args)
+                pairs.extend(clone_pairs)
+                if more:
+                    reasons.add("dynamic_code")
+            aliases: dict[str, list[str]] = {}
+            others: list[tuple[str, str]] = []
+            for key, value in pairs:
+                if key.lower().startswith("alias."):
+                    aliases.setdefault(key[6:].lower(), []).append(value)
+                else:
+                    others.append((key, value))
+            run, unknown, specs = _config_effects(others, _env_is(cmd_s, env, "GIT_PROTOCOL_FROM_USER", "0"))
+            code.extend(run)
+            if unknown:
+                reasons.add("dynamic_code")
+            if specs:  # `remote.*.fetch` into local refs: the fetch writes them as `--refmap` would
+                injected = _with_refmaps(tokens, words, s, specs)
+                if injected is not None:
+                    entry = (injected[0], injected[1], _token_readings(injected[0]))
+                    if len(readings.starts) == 1:
+                        out[index] = entry  # the configuration applies to this command: it is this form
+                    else:
+                        out.append(entry)
+            if _git_program_option(args):
+                reasons.add("dynamic_code")
+            verbs_at = _git_walk(args)[0]
+            lead = args[:min(verbs_at)] if verbs_at else args  # the global options of git: before the subcommand
+            redirected = any(t in ("-C", "--bare") or t.startswith(("--git-dir", "--work-tree")) for t in lead) or any(
+                t in ("-C", "-D", "-execdir", "-okdir") or t.startswith("--chdir") for t in tokens[:s]) or any(
+                w.text.partition("=")[0] in _GIT_REDIRECT_VARS for w in cmd_s.assignments) or any(
+                n in _GIT_REDIRECT_VARS for n in env)
+            path_set = any(w.text.partition("=")[0] == "PATH" for w in cmd_s.assignments) or "PATH" in env
+            lookups: dict[str, list[str]] = {}
+
+            def resolve(word: str) -> "list[str]":
+                """The alias values of a subcommand git does not ship: the repo's, else none (a `git-<name>` program),
+                else level B."""
+                if word not in lookups:
+                    moved = redirected or (text_moved is not None and text_moved())
+                    known = repo() if repo is not None and not moved else None
+                    if known is not None and word.lower() in known:
+                        lookups[word] = [known[word.lower()]]
+                    else:
+                        lookups[word] = []
+                        # (a PATH of the text may put another `git-<name>` first: the one that exists here is not it)
+                        if path_set or not (external or _git_external_exists)(word):
+                            reasons.add("git_unknown_subcommand")
+                return lookups[word]
+
             frontier = [(tokens, words)]
             for _ in range(_GIT_ALIAS_DEPTH):
                 following = []
                 for toks, wds in frontier:
-                    for v in _git_walk(toks[s + 1:])[0]:
+                    walked = _git_walk(toks[s + 1:])[0]
+                    for v in walked:
                         at = s + 1 + v
-                        for value in aliases.get(toks[at].lower(), ()):
+                        values = aliases.get(toks[at].lower(), ())
+                        # (an option this does not know is read both ways; git itself refuses it, so only the
+                        # reading where it takes no value names a subcommand that can run)
+                        if not values and v == min(walked) and _git_unknown_verb(toks[at]) \
+                                and not (in_fwd and toks[at] == "ARG") \
+                                and not any(
+                                    toks[s + 1 + w] in _GIT_BUILTINS or toks[s + 1 + w].lower() in aliases
+                                    for w in walked):
+                            values = resolve(toks[at])
+                        for value in values:
                             if value.startswith("!"):
                                 code.append((value[1:] + " " + " ".join(_sh_quote(t) for t in toks[at + 1:])).strip())
                                 continue
                             pieces = _split_cmdline(value)
                             if pieces is None:  # a quote that does not close: git refuses it or reads it its own way
-                                unresolved = True
+                                reasons.add("dynamic_code")
                                 continue
                             new_tokens = toks[:at] + pieces + toks[at + 1:]
                             if not pieces or tuple(new_tokens) in seen:
                                 continue
                             seen.add(tuple(new_tokens))
                             if len(seen) > MAX_VALUE_CANDIDATES:
-                                return out, code, True
+                                return out, code, reasons | {"dynamic_code"}
                             new_words = wds[:at] + [None] * len(pieces) + wds[at + 1:]
+                            if specs:
+                                injected = _with_refmaps(new_tokens, new_words, s, specs)
+                                if injected is not None:
+                                    new_tokens, new_words = injected
                             out.append((new_tokens, new_words, _token_readings(new_tokens)))
                             following.append((new_tokens, new_words))
+                            if _git_program_option(new_tokens[s + 1:]):
+                                reasons.add("dynamic_code")
+                            clone_pairs, more = _git_clone_config(new_tokens[s + 1:])
+                            run, unknown, _ = _config_effects(clone_pairs)  # `git c -c KEY=VALUE` (c = clone)
+                            code.extend(run)
+                            if more or unknown:
+                                reasons.add("dynamic_code")
                 frontier = following
                 if not frontier:
                     break
             else:
-                unresolved = True  # an alias chain longer than the limit
-    return out, code, unresolved
+                reasons.add("dynamic_code")  # an alias chain longer than the limit
+    return out, code, reasons
 
 
 def _is_git_commit(tokens: list[str]) -> bool:
@@ -1004,8 +1500,297 @@ def _is_git_commit(tokens: list[str]) -> bool:
     return args is not None and _git_has_subcommand(args, "commit")
 
 
+# Git subcommands that create or move commits: all of them are `git_commit` (the user's authorization).
+_GIT_COMMIT_SUBCOMMANDS = frozenset(
+    {"commit", "commit-tree", "merge", "cherry-pick", "revert", "am", "rebase", "update-ref", "pull"})
+
+
+def _is_long(tok: str, name: str, exact: frozenset = frozenset()) -> bool:
+    """`tok` is the long option `--name` the way git's parse-options reads it: the name, or any prefix of it of two
+    letters or more (`--forc`), with or without `=value`. Fail closed: the prefix counts even when git would find
+    it ambiguous, except a word that is exactly another option of the subcommand (`exact`: `--format` for `branch`)."""
+    if not tok.startswith("--") or tok == "--":
+        return False
+    part = tok[2:].partition("=")[0]
+    return len(part) >= 2 and name.startswith(part) and part not in exact
+
+
+def _ends_options(rest: list[str], k: int) -> bool:
+    """`rest[k]` is a `--` that ends the options. A `--` right after an option word written without `=` is that
+    option's value (git parse-options and Getopt::Long take it so, and go on reading options): fail closed, the scan
+    goes on. A `--` that is the first word or follows a positional ends them."""
+    if rest[k] != "--":
+        return False
+    prev = rest[k - 1] if k else ""
+    return not (prev.startswith("-") and prev != "--" and "=" not in prev)
+
+
+def _positionals(rest: list[str], short_values: frozenset = frozenset(), long_values: tuple = ()) -> list[str]:
+    """The words of `rest` that are neither options nor the value of one (`short_values`: `-P`; `long_values`: the
+    names of the long options that take the next word as value, in any prefix form); `--` ends the options."""
+    out: list[str] = []
+    skip = False
+    for k, tok in enumerate(rest):
+        if skip:
+            skip = False
+        elif tok == "--":
+            out.extend(rest[k + 1:])
+            break
+        elif tok in short_values or (
+                "=" not in tok and any(_is_long(tok, name) for name in long_values)):
+            skip = True
+        elif not tok.startswith("-"):
+            out.append(tok)
+    return out
+
+
+def _short_in(rest: list[str], letters: str) -> bool:
+    """Some short option cluster of `rest` (`-f`, `-fd`: one dash, no `--`) holds one of `letters`. A bundle counts
+    as each of its letters (fail closed); the options before `--` only."""
+    for tok in rest:
+        if tok == "--":
+            break
+        if tok.startswith("-") and not tok.startswith("--") and any(c in letters for c in tok[1:]):
+            return True
+    return False
+
+
+def _long_in(rest: list[str], *names: str, exact: frozenset = frozenset()) -> bool:
+    """Some long option of `rest` (before `--`) is one of `names` (`_is_long`)."""
+    for tok in rest:
+        if tok == "--":
+            break
+        if any(_is_long(tok, name, exact) for name in names):
+            return True
+    return False
+
+
+_RESET_MODES = ("hard", "soft", "keep", "merge", "mixed")
+
+
+def _reset_moves(rest: list[str]) -> bool:
+    """`reset` moves the branch: a mode flag, or a revision. Not the path forms: `<rev> -- paths`, and a first
+    positional that is exactly `HEAD` (`git reset HEAD f.txt` unstages). `git reset f.txt` is ambiguous and counts."""
+    if _long_in(rest, *_RESET_MODES):
+        return True
+    if "--" in rest and rest[rest.index("--") + 1:]:
+        return False
+    before = rest[:rest.index("--")] if "--" in rest else rest
+    words = _positionals(before, long_values=("pathspec-from-file",))
+    return bool(words) and words[0] != "HEAD"
+
+
+def _replace_writes(rest: list[str]) -> bool:
+    """`replace` writes a ref except in its list forms (bare, `-l`, `--list`)."""
+    return bool(rest) and not (_short_in(rest, "l") or _long_in(rest, "list"))
+
+
+def _symbolic_ref_writes(rest: list[str]) -> bool:
+    """`symbolic-ref` writes with two positionals (name and target) or `-d`/`--delete`; one name is a read."""
+    return _short_in(rest, "d") or _long_in(rest, "delete") or len(_positionals(rest, frozenset({"-m"}))) >= 2
+
+
+def _first_positional_in(verbs: frozenset, short_values: frozenset = frozenset(), long_values: tuple = ()):
+    def check(rest: list[str]) -> bool:
+        words = _positionals(rest, short_values, long_values)
+        return bool(words) and words[0] in verbs
+    return check
+
+
+def _worktree_forces_branch(rest: list[str]) -> bool:
+    """`worktree add -B <branch>` resets the branch (`-B`, also bundled or with the name attached: `-Bbr`)."""
+    words = _positionals(rest)
+    return bool(words) and words[0] == "add" and _short_in(rest, "B")
+
+
+def _refmap_dst(spec: str) -> bool:
+    """A refspec `src:dst` (a leading `+` forces it) with a destination: it writes the local ref `dst`."""
+    return bool(spec.lstrip("+").partition(":")[2])
+
+
+def _fetch_writes_a_ref(rest: list[str]) -> bool:
+    """`fetch` writes a local ref: a refspec `<src>:<dst>` after the repo, `--stdin` (the refspecs come from the
+    input), or a `--refmap` with a destination (`=value` or the next word); `src:` with no destination does not."""
+    if _long_in(rest, "stdin"):
+        return True
+    for k, tok in enumerate(rest):
+        if tok == "--":
+            break
+        if _is_long(tok, "refmap"):
+            value = tok.partition("=")[2] if "=" in tok else rest[k + 1] if k + 1 < len(rest) else ""
+            if _refmap_dst(value):
+                return True
+    return any(_refmap_dst(word) for word in _positionals(rest, long_values=("refmap",))[1:])
+
+
+def _remote_update_writes_a_ref(rest: list[str]) -> bool:
+    """`remote update` fetches: with the `--refmap` the classifier gives it for a `remote.*.fetch` that writes local
+    refs (`_with_refmaps`) it writes them."""
+    words = _positionals(rest, long_values=("refmap",))
+    return bool(words) and words[0] == "update" and _long_in(rest, "refmap")
+
+
+def _subtree_acts(rest: list[str]) -> bool:
+    """Every `subtree` form with arguments may commit or move refs (`add`, `merge`, `pull`, `split`, `push`, with
+    their options in any order): only the bare command and the help forms do not."""
+    return any(word not in ("-h", "--help") for word in rest)
+
+
+# Subcommands that create or move commits or refs only in some forms: subcommand -> predicate over the words after
+# it. Short options are read as bundles (`-fM` has `f` and `M`), long options as any prefix (`_is_long`).
+_GIT_COMMIT_FORMS = {
+    "fast-import": lambda rest: True,
+    "filter-branch": lambda rest: True,
+    "subtree": _subtree_acts,
+    "notes": _first_positional_in(frozenset({"add", "edit", "append", "copy", "merge"}), long_values=("ref",)),
+    "replace": _replace_writes,
+    "symbolic-ref": _symbolic_ref_writes,
+    "hash-object": lambda rest: _short_in(rest, "w"),
+    "stash": _first_positional_in(frozenset({"create", "store"})),
+    "reset": _reset_moves,
+    "branch": lambda rest: _short_in(rest, "fMC") or _long_in(rest, "force", exact=frozenset({"format", "list"})),
+    "checkout": lambda rest: _short_in(rest, "B"),
+    "switch": lambda rest: _short_in(rest, "C") or _long_in(rest, "force-create", exact=frozenset({"force"})),
+    "worktree": _worktree_forces_branch,
+    "fetch": _fetch_writes_a_ref,
+    "remote": _remote_update_writes_a_ref,
+}
+
+
+def _creates_git_commits(tokens: list[str]) -> bool:
+    """`tokens` (a reading, from its head) is a `git` command that creates or moves commits or refs: a subcommand of
+    `_GIT_COMMIT_SUBCOMMANDS`, or a form of `_GIT_COMMIT_FORMS`, after git's global options (every reading of
+    them). Only for the classification: the heredoc exemptions below stay on `_is_git_commit` (`git commit` flags)."""
+    args = _git_args(tokens)
+    if args is None:
+        return False
+    for i in _git_walk(args)[0]:
+        if args[i] in _GIT_COMMIT_SUBCOMMANDS:
+            return True
+        check = _GIT_COMMIT_FORMS.get(args[i])
+        if check is not None and check(args[i + 1:]):
+            return True
+    return False
+
+
+_CONFIG_READ_LONG = ("get", "get-all", "get-regexp", "get-urlmatch", "list", "get-color", "get-colorbool")
+_CONFIG_SECTIONS = frozenset(
+    "alias include includeif core remote url credential diff merge filter pager sequence interactive gpg protocol "
+    "init submodule trailer uploadpack mergetool difftool browser man web hook sendemail imap guitool pull "
+    "instaweb".split())
+
+
+def _is_ext_url(word: str) -> bool:
+    """`word` is a remote URL of the `ext::` transport (git-remote-ext runs the program it names) or of `fd::`
+    (reads a descriptor)."""
+    return word.lower().startswith(("ext::", "fd::"))
+
+
+_EXT_SERVICE = {"s": "upload-pack", "S": "git-upload-pack", "G": "x", "V": "x"}
+
+
+def _ext_url_code(word: str) -> "str | None":
+    """The command line an `ext::<program> <arguments>...` URL runs, as shell code (each word quoted), or None for
+    another URL. git-remote-ext splits the text on spaces and unescapes: `% ` is a space, `%%` a `%`, `%s` is
+    `upload-pack` (`%S`: `git-upload-pack`), and a word that starts with `%G` or `%V` is an argument git adds (dropped)."""
+    if not word.lower().startswith("ext::"):
+        return None
+    words: list[str] = []
+    cur: list[str] = []
+    drop = False
+    text = word[5:]
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if not cur and not drop and text[i:i + 2] in ("%G", "%V"):
+            drop = True
+        if c == "%" and i + 1 < len(text):
+            nxt = text[i + 1]
+            cur.append(_EXT_SERVICE.get(nxt, nxt if nxt in "% " else "%" + nxt))
+            i += 2
+            continue
+        if c == " ":
+            if cur and not drop:
+                words.append("".join(cur))
+            cur = []
+            drop = False
+        else:
+            cur.append(c)
+        i += 1
+    if cur and not drop:
+        words.append("".join(cur))
+    return " ".join("'" + w.replace("'", "'\\''") + "'" for w in words) if words else None
+
+
+def _ext_codes(words: list[str]) -> list[str]:
+    """The commands the `ext::` URLs among `words` run: a word, or the value of a `--option=` word."""
+    out: list[str] = []
+    for w in words:
+        if "ext::" not in w.lower():
+            continue
+        for cand in (w, w.partition("=")[2] if w.startswith("--") else ""):
+            code = _ext_url_code(cand)
+            if code:
+                out.append(code)
+    return out
+
+
+def _git_config_writes_risky(tokens: list[str]) -> bool:
+    """`tokens` (a reading, from its head) is a `git config` that writes a risky key (`_risky_config_key`: an alias, a
+    key that runs a program, reads a file or redirects a remote or a ref), renames or removes a section of such keys,
+    or opens the file in an editor. Reads (`--get`, `--list`, `get`, one positional) and writes of other keys are
+    not. Every reading of the global options counts."""
+    args = _git_args(tokens)
+    if args is None:
+        return False
+    for i in _git_walk(args)[0]:
+        rest = args[i + 1:]
+        if args[i] in ("remote", "submodule"):  # a URL that runs a program (`ext::`) or reads a descriptor (`fd::`)
+            words = _positionals(rest)
+            verbs = ("set-url", "add") if args[i] == "remote" else ("set-url",)
+            if words and words[0] in verbs and any(_is_ext_url(w) for w in words[1:]):
+                return True
+            continue
+        if args[i] != "config":
+            continue
+        if _short_in(rest, "e") or _long_in(rest, "edit"):
+            return True
+        if _short_in(rest, "l") or _long_in(rest, *_CONFIG_READ_LONG):
+            continue
+        pos = _positionals(rest, frozenset({"-f", "-t"}), ("file", "blob", "type", "default", "comment", "value", "url"))
+        if not pos:
+            continue
+        if pos[0] == "edit":
+            return True
+        if pos[0] in ("get", "list"):
+            continue
+        sections = None
+        key = None
+        value = None  # None: no value is written (an unset)
+        if pos[0] in ("rename-section", "remove-section"):
+            sections = pos[1:]
+        elif _long_in(rest, "rename-section", "remove-section"):
+            sections = pos
+        elif pos[0] == "set":
+            key, value = (pos[1] if len(pos) > 1 else None), (pos[2] if len(pos) > 2 else "")
+        elif pos[0] == "unset":
+            key = pos[1] if len(pos) > 1 else None
+        elif _long_in(rest, "unset", "unset-all"):
+            key = pos[0]
+        elif _long_in(rest, "add", "replace-all") or len(pos) >= 2:
+            key, value = pos[0], (pos[1] if len(pos) > 1 else "")
+        if sections and any(name.partition(".")[0].lower() in _CONFIG_SECTIONS for name in sections):
+            return True
+        if key is not None and _risky_config_key(key):
+            if value is not None and _GIT_PROTOCOL_ALLOW.match(key.lower()) and value.strip().lower() in ("", "never"):
+                continue  # a protocol allow that only restricts
+            return True
+    return False
+
+
 _STDIN_FILE_FLAGS = {"git": [["-F", "-"], ["--file", "-"], ["--file=-"]], "gh": [["--body-file", "-"], ["-F", "-"], ["--body-file=-"]]}
-_GIT_CONFIG = re.compile(r"(?:^|\s)-c\s*\S*(?:alias|core)\.")  # -c alias.x=!cmd / core.pager=cmd run code
+_GIT_CONFIG = re.compile(  # -c alias.x=!cmd / core.pager=cmd / sequence.editor=cmd ... run code
+    r"(?:^|\s)(?:-c\s*|--config-env[=\s]\s*)\S*(?:" + "|".join(sorted(_CONFIG_SECTIONS | {"sequence"})) + r")\.")
 # `$(cat <<EOF ...)` is data only as the value of these options, right before the `$(` (and its `"`).
 # (the reading must also be a `git commit`, `_is_git_commit`: `commit` as the subcommand, not as an argument)
 _GIT_MESSAGE_VALUE = re.compile(r"^git\s.*(?:\s-[A-Za-z]*m|\s--message)(?:=|\s+)?\"?$")
@@ -1021,7 +1806,15 @@ _FOREIGN_INTERPRETERS = frozenset({"node", "ruby", "perl", "lua", "luajit", "php
 # SQL / DSL clients: a heredoc or here-string body is a query, not shell (HD4, review fix B2), unless it asks the
 # client to run a command (`_query_escape`).
 _QUERY_CLIENTS = frozenset({"sqlite3", "psql", "mysql", "mariadb", "cypher-shell"})
-_SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "mksh", "ash"})
+_SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "mksh", "ash", "rbash", "rzsh", "yash", "posh", "hush", "sash",
+                     "ksh93", "oksh", "loksh", "osh", "toysh"})
+_VERSIONED_SHELL = re.compile(r"(bash|zsh)[0-9][0-9.]*")  # `bash5`, `zsh5.9`
+# Shells with another grammar (fish, csh, tcsh): they read stdin as code, but their `-c` strings are never parsed as bash.
+_OTHER_SHELLS = frozenset({"fish", "csh", "tcsh"})
+# Programs that read a script of shell lines from stdin (`at`, `batch`, `parallel` with no command) and the launchers
+# whose first operand names an applet (`busybox sh`, `busybox env sh`).
+_STDIN_LINE_READERS = frozenset({"at", "batch", "parallel"})
+_APPLET_LAUNCHERS = frozenset({"busybox", "toybox"})
 # The heads `_classify_segment` and its regexes (TEST_RUNNERS, LOAD_RUNNERS, LINT, TYPECHECK) look for. `mvnw` and
 # `gradlew` are left out on purpose: `./mvnw` is matched with its `./`.
 _CLASSIFIED_HEADS = frozenset(
@@ -1031,7 +1824,7 @@ _CLASSIFIED_HEADS = frozenset(
     "stylua treefmt tsc mypy pyright k6 artillery locust jmeter vegeta ab wrk".split())
 # N2: every program name the hook's tables use, computed from them (wrappers, sinks, shells and interpreters,
 # classified heads, direct binaries, path tools), so a path-prefixed program is recognized by its last component.
-KNOWN_HEADS = frozenset(_WRAPPERS) | frozenset(_LAUNCHERS) | _PLAIN_PREFIXES | {"repeat", "timeout", "eval", "trap", "su"} | _SHELLS \
+KNOWN_HEADS = frozenset(_WRAPPERS) | frozenset(_LAUNCHERS) | _PLAIN_PREFIXES | {"repeat", "timeout", "eval", "trap", "su"} | _SHELLS | _OTHER_SHELLS | _STDIN_LINE_READERS | _APPLET_LAUNCHERS \
     | _SINK_HEADS | _FOREIGN_INTERPRETERS | _QUERY_CLIENTS | _CLASSIFIED_HEADS | DIRECT_BINARIES | _PATH_TOOLS
 
 
@@ -1326,6 +2119,8 @@ TEXT_COST = 128
 VARIANT_COST = 64
 _NAME_READERS = frozenset({"read", "getopts", "mapfile", "readarray", "printf", "print", "vared", "let", "unset"})
 _CODE_LOADERS = frozenset({"eval", "source", "."})
+# the programs that run a string, or the heredoc they read, in the current shell: a function it defines outlives it
+_SAME_SHELL_LOADERS = _CODE_LOADERS | frozenset({"trap", "mapfile", "readarray", "emulate"})
 _OPTION_SETTERS = frozenset({"setopt", "unsetopt", "emulate", "set"})
 _DECLARE_BUILTINS = shell.DECLARE_BUILTINS
 _VALUE_HEADS = _DECLARE_BUILTINS | _NAME_READERS | _CODE_LOADERS | _OPTION_SETTERS
@@ -1975,11 +2770,34 @@ def _param_unsafe(text: str, env: "_Values") -> bool:
 
 def _head_unsafe(word, env: "_Values") -> bool:
     """A dynamic program name that cannot be left as level A: a part that cannot be decoded with certainty
-    (`$'\\q'`), or an expansion that is not the environment alone (`_param_unsafe`)."""
+    (`$'\\q'`), an expansion that is not the environment alone (`_param_unsafe`), or a command substitution that makes
+    the last component of a path: a literal `/` comes before it (in any literal part: unquoted, `'...'`, `$'...'`, or
+    inside double quotes, read in order) and none after it (`"/usr/bin/"$(x)`, `"$(a)/bin/$(a)"`). A substitution
+    in a directory (`./bin/$(uname -m)/tool`), or one with no `/` before it (`$(which python)`), stays level A."""
     for part in _walk_parts(word.parts):
         if part.dyn or (part.kind == "param" and _param_unsafe(part.text, env)):
             return True
-    return False
+    events: "list[str | None]" = []  # the literal text, or None for a command substitution, in word order
+
+    def add(part) -> None:
+        if part.kind in ("cmdsub", "backtick"):
+            events.append(None)
+        elif part.inner:
+            text, pos = part.text, 0
+            for inner in part.inner:
+                at = text.find(inner.text, pos)
+                at = pos if at < 0 else at
+                events.append(text[pos:at])
+                add(inner)
+                pos = at + len(inner.text)
+            events.append(text[pos:])
+        elif part.kind not in _DYNAMIC_PART_KINDS:
+            events.append(part.text)
+
+    for part in word.parts:
+        add(part)
+    return any(e is None and any(t and "/" in t for t in events[:i]) and not any(t and "/" in t for t in events[i + 1:])
+               for i, e in enumerate(events))
 
 
 # The verb of git, docker and gh: the first word that is not an option nor the value of one. The names the hook
@@ -2266,8 +3084,8 @@ _STDIN_DATA = frozenset(
     "paste column fmt fold nl rev tac sha1sum sha256sum md5sum cksum read mapfile readarray expand unexpand".split())
 _STDIN_PROGRAM_READERS = frozenset({"sed", "awk", "gawk"})  # with `-f` / `--file` their stdin may be the program
 # What may run the text of a here-string handed to a compound (`{ bash; } <<< x`, `f() { sh; }; f <<< x`).
-_STDIN_CODE_READERS = _SHELLS | frozenset({"source", ".", "eval", "xargs", "su", "sudo", "env", "at", "batch", "parallel",
-                                           "exec", "ssh", "script", "coproc"})
+_STDIN_CODE_READERS = _SHELLS | _OTHER_SHELLS | _STDIN_LINE_READERS | _APPLET_LAUNCHERS | frozenset(
+    {"source", ".", "eval", "xargs", "su", "sudo", "env", "exec", "ssh", "script", "coproc"})
 
 
 def _data_reader(readings: Readings) -> bool:
@@ -2285,21 +3103,49 @@ def _data_reader(readings: Readings) -> bool:
     return True
 
 
+def _copies_input(redirects) -> bool:
+    """Some redirection copies a descriptor that may hold input (`4<&3`, `0<&3`, `4>&3`, `4< /dev/fd/3`, `<&$n`): not
+    a copy of the output of the shell (`2>&1`, `1>&2`) and not a close (`<&-`)."""
+    for r in redirects:
+        if r.target is None:
+            continue
+        text = r.target.text
+        if r.op in ("<&", ">&"):
+            number = text[:-1] if text.endswith("-") else text
+            if number.isdigit():
+                if r.op == "<&" or int(number) not in (1, 2):
+                    return True
+            elif number and any(c in number for c in "$*?["):
+                return True
+        elif r.op in ("<", "<>") and shell.stdin_alias(text) is not None:
+            return True
+    return False
+
+
+def _site_reads_code(words, readings: Readings, functions: frozenset, site=None) -> bool:
+    """The command may read code from the stdin it is given: a shell, a loader (`source`, `eval`), a program that
+    runs its input (`xargs`, `at`), a function of the text, a program name made by an expansion, readings that
+    are not complete, or (`site`) a bare `exec` that copies a descriptor (`exec 4<&0`: what reads descriptor 4
+    later reads that stdin)."""
+    if not readings.complete:
+        return True
+    if site is not None and _copies_input(site.cmd.redirects) and _bare_exec(site, [w.text for w in words], words):
+        return True
+    for start, text in zip(readings.starts, readings.texts):
+        head = _head_of(text).rsplit("/", 1)[-1]
+        if head in _STDIN_CODE_READERS or _VERSIONED_SHELL.fullmatch(head) or head in functions or (
+                start < len(words) and _head_is_dynamic(words[start])):
+            return True
+    return False
+
+
 def _compound_reads_code(compound, functions: frozenset) -> bool:
-    """Some command inside the compound may read code from the stdin the compound is given: a shell, a loader
-    (`source`, `eval`), a program that runs its input (`xargs`, `at`), a function of the text, a program name made
-    by an expansion, or a command whose readings are not complete."""
+    """Some command inside the compound may read code from the stdin the compound is given (`_site_reads_code`)."""
     for body in compound.bodies:
         for site in shell.iter_sites(body):
             words = site.cmd.words
-            readings = _word_readings(words)
-            if not readings.complete:
+            if _site_reads_code(words, _word_readings(words), functions, site):
                 return True
-            for start, text in zip(readings.starts, readings.texts):
-                head = _head_of(text).rsplit("/", 1)[-1]
-                if head in _STDIN_CODE_READERS or head in functions or (
-                        start < len(words) and _head_is_dynamic(words[start])):
-                    return True
     return False
 
 
@@ -2579,7 +3425,8 @@ class Analysis(namedtuple("Analysis", "categories flags uncertainty")):
 # Docker and git forms the canary (U7) looks for outside the command head.
 _CANARY_SPLIT = re.compile(r"[\s'\"`(){};&|=$]+")
 _DOCKER_VERBS = frozenset({"up", "down", "start", "stop", "restart", "rm", "kill", "pull", "create", "run", "exec"})
-_CANARY_GIT_FLAGS = (("push", "git_push"), ("commit", "git_commit"))
+_CANARY_GIT_FLAGS = (("push", "git_push"),) + tuple(
+    (verb, "git_commit") for verb in sorted(_GIT_COMMIT_SUBCOMMANDS | {"fast-import", "filter-branch"}))
 _CANARY_FEEDERS = frozenset({"xargs", "parallel", "-exec", "-execdir", "-ok", "-okdir"})
 
 
@@ -2612,31 +3459,71 @@ def _level_b(reason: str) -> Analysis:
     return Analysis(["unclassified"], ["unclassified_command"], [reason])
 
 
-def _code_text(text: str, categories: list[str], flags: list[str], reasons: set[str], _depth: int,
-               budget, code: bool = False, env=None) -> None:
+# What kind of text a nested text is, for the facts it hands up (`shell.Facts.for_parent`): a string a child shell runs,
+# a string the same shell runs (`eval`, `source`, `trap`), or the body of a function the text defines (runs in the shell).
+_CHILD = "child"
+_SAME = "same"
+_BODY = "body"
+
+# An `exec` with only redirections, seen by a round: where it is, its redirections and the stdin it gets there.
+ExecSeen = namedtuple("ExecSeen", "start end redirects incoming")
+
+# The rounds a text is read in at most: each one assumes the facts the one before observed; a text whose facts have not
+# settled after them is level B (`analysis_budget`).
+MAX_FACT_ROUNDS = 4
+# Test-only switch: read a text again whenever any fact changed, the way the rounds ran before they looked at which facts
+# a round consulted (the tests compare both).
+_FORCE_FACT_ROUNDS = False
+
+
+def _changed_facts(old: "shell.Facts", new: "shell.Facts") -> set:
+    """The names of the facts (`StdinContext.reads`) that differ between two `Facts`."""
+    changed = set()
+    if old.fifos != new.fifos or old.fifo_unknown != new.fifo_unknown:
+        changed.add("fifos")
+    if old.moved != new.moved:
+        changed.add("moved")
+    if old.linked != new.linked:
+        changed.add("linked")
+    return changed
+
+
+def _exec_key(execs) -> tuple:
+    """What of the `exec`s of a round decides the contexts of the next: where they are and the stdin they get."""
+    return tuple((seen.start, seen.incoming) for seen in sorted(execs, key=lambda seen: seen.start))
+
+
+def _code_text(text: str, categories: list[str], flags: list[str], reasons: set[str], depth: int,
+               budget, code: bool = False, env=None, fn=None, kind: str = _CHILD, stdin=None,
+               shared: "dict | None" = None) -> "shell.Facts":
     """Classify a text the command runs as shell (a heredoc body, a code argument) as a command of its own, one
     level deeper; what it finds joins the outer result. More than MAX_CODE_DEPTH levels deep (X2): level B.
     `code`: the text is a code argument, so a command name made by an expansion is level B (X3). `env`: the
-    values of the variables of the outer text, which go down (V3)."""
+    values of the variables of the outer text, which go down (V3). `fn`: the functions of the outer text (name ->
+    whether the body may read code from stdin), which the same shell, or a child of it, can call. `kind`: `_SAME` when
+    the text runs in the current shell (`eval`, `trap`, `source`), so a function it defines outlives it; `_BODY` or
+    `_CHILD` otherwise. `stdin`: the `StdinContext` of the command that runs it: the standard input it is given (a
+    pipe, a process substitution, an `exec` redirect), and the fifos of the outer text. Returns the facts of the text
+    that reach the enclosing one (`Facts.for_parent(kind)`). `shared`: what the whole analysis reads once (the `git-<name>` lookups)."""
     if not text.strip():
-        return
-    if _depth >= MAX_CODE_DEPTH:
+        return shell.NO_FACTS
+    if depth >= MAX_CODE_DEPTH:
         categories.append("unclassified")
         flags.append("unclassified_command")
         reasons.add("nested_shell_depth")
-        return
-    sub = analyze_command(text, _depth + 1, env, budget, code)
+        return shell.NO_FACTS
+    sub, facts = _analyze(text, depth + 1, env, budget, code, False, fn, kind, stdin, shared)  # (no known cwd)
     categories.extend(sub.categories)
     flags.extend(sub.flags)
     reasons.update(sub.uncertainty)
+    return facts.for_parent(kind)
 
 
 # X1-X6: arguments that run code. `CodeArg.text` is the shell text to classify one level deeper; `None` is a
 # form whose code cannot be known, level B with `reason`.
-CodeArg = namedtuple("CodeArg", "text reason")
+CodeArg = namedtuple("CodeArg", "text reason signals", defaults=(None,))  # signals: the traps of a trap action
 MAX_CODE_ARGS = 16  # code arguments of one simple command; more is level B (`analysis_budget`)
 _SHELL_VALUE_LONG = frozenset({"--rcfile", "--init-file"})
-_STDIN_FILES = frozenset({"/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"})
 _DYNAMIC_PART_KINDS = shell.DYNAMIC_KINDS
 _EXPANSION = re.compile(r"[$`]")
 
@@ -2725,29 +3612,96 @@ def _shell_operands(tokens: list[str], i: int) -> tuple[str, int]:
     return seen, i
 
 
+def _site_fds(site) -> dict:
+    """The state of each descriptor the redirections of the command name, and of fd 0: the incoming stdin (the pipe of a
+    stage after the first, the state the walk gave it, or what an `exec` set) after the redirections, left to right."""
+    ctx = site.ctx or shell.NO_CONTEXT
+    base = shell.PIPED if site.stage > 0 else (site.stdin or ctx.fds.get(0))
+    return shell.fd_states(site.cmd.redirects, base, ctx)
+
+
+def _site_stdin(site) -> "str | None":
+    """What a reader of the stdin of this command gets (`piped_shell`, `dynamic_code`) or None."""
+    return _site_fds(site)[0]
+
+
+def _stdin_context(site, state: "str | None" = None, replace: bool = False) -> "shell.StdinContext":
+    """The stdin context a code string run by this command gets: its descriptors (after its redirections), fifos and `moved`.
+    `state` replaces the state of descriptor 0 when `replace`."""
+    ctx = site.ctx or shell.NO_CONTEXT
+    fds = {fd: st for fd, st in {**ctx.fds, **_site_fds(site)}.items() if st}
+    if replace:
+        fds.pop(0, None)
+        if state:
+            fds[0] = state
+    return ctx.inherit(fds)
+
+
 def _stdin_code(site) -> list[CodeArg]:
     """A shell that reads its program from stdin: the here-string is the code (X1); a heredoc is read by the
-    heredoc rules; a process substitution is code of unknown reach (X5); the stage of a pipeline that is not the
-    first reads what the others write (X4)."""
+    heredoc rules; a process substitution is code of unknown reach (X5), also after an earlier `< file`; and when
+    standard input is still a source the hook cannot read (X4) the program is unknown: a pipe (the stage of a pipeline
+    that is not the first, or a command inside a compound or substitution fed by one, `Site.stdin`), `piped_shell`; a
+    process substitution or an `exec` redirect from one, `dynamic_code`; a named pipe the text creates. The
+    redirections are read left to right (`shell.fd_states`): under a pipe only a heredoc or a here-string replaces
+    it, the last fd 0 one winning, and a file (`<`, `<>`, any target), `<&0`, a copy of the pipe or `<&-` keep it.
+    The code found in a here-string or process substitution is reported as well."""
+    out: list[CodeArg] = []
     for redirect in site.cmd.redirects:
         if redirect.op == "<<<" and redirect.target is not None:
-            return [CodeArg(redirect.target.text, None)]
-        if redirect.op == "<" and redirect.target is not None \
+            out = [CodeArg(redirect.target.text, None)]
+            break
+        if redirect.op in ("<", "<>") and redirect.target is not None \
                 and any(part.kind == "procsub_in" for part in redirect.target.parts):
-            return [CodeArg(None, "dynamic_code")]
+            out = [CodeArg(None, "dynamic_code")]
+            break
         if redirect.heredoc is not None:
-            return []
-    return [CodeArg(None, "piped_shell")] if site.stage > 0 else []
+            break
+    state = _site_stdin(site)
+    if state:
+        out.append(CodeArg(None, state))
+    return out
 
 
 def _first_operand_code(site, tokens: list[str], i: int, words: list) -> list[CodeArg]:
-    """A shell reader (`source`, `.`) whose operand is the program: `<(...)` is X5, a stdin file is X4. `words`
-    are the words of the command (None for one made of a value)."""
+    """A shell reader (`source`, `.`, a shell with a script file) whose operand is the program: `<(...)` is X5, and
+    the operand is a path (`_path_code`). `words` are the words of the command (None for one made of a value)."""
     if i >= len(tokens):
         return []
-    if i < len(words) and words[i] is not None and any(part.kind == "procsub_in" for part in words[i].parts):
+    word = words[i] if i < len(words) else None
+    if word is not None and any(part.kind == "procsub_in" for part in word.parts):
         return [CodeArg(None, "dynamic_code")]
-    return _stdin_code(site) if tokens[i] in _STDIN_FILES else []
+    return _path_code(site, tokens[i], word)
+
+
+def _path_code(site, text: str, word) -> list[CodeArg]:
+    """The code a shell reads from the path `text` (the word `word`, None for a value). A path that names stdin or a
+    descriptor (`/dev/./stdin`, `/proc/$$/fd/0`, `/dev/fd/3`, a relative one that goes up, `~user/..`, through
+    `/proc/<pid>/root`) is that descriptor, X4; a named pipe of the text is a pipe; when the text changes directory or
+    makes links a relative path may be any file, so it is stdin (after a link that reaches outside the plain names,
+    any path); under an active state (a pipe, a process
+    substitution, an `exec`) an operand with an expansion, a glob or `~user` may be any of them. A plain file is not
+    read."""
+    alias = shell.stdin_alias(text)
+    if alias == 0:
+        return _stdin_code(site)
+    fds = _site_fds(site)
+    ctx = site.ctx or shell.NO_CONTEXT
+    if alias is not None:
+        state = shell.descriptor(alias, fds, ctx.fds, fds[0])
+        return [CodeArg(None, state)] if state else []
+    if (ctx.fifos.match(word) if word is not None else ctx.fifos.match_text(text)):
+        return [CodeArg(None, shell.PIPED)]
+    if ctx.moved and (ctx.linked or not text.startswith(("/", "~"))):
+        out = _stdin_code(site)  # (after a `cd` or a link a relative name may be any descriptor: `source 3`)
+        state = fds[0] or shell.active(ctx.fds, fds)
+        return out if out or not state else [CodeArg(None, state)]
+    tilde_user = text.startswith("~") and text[1:2] not in ("", "/")
+    if tilde_user or (word is not None and (word.dynamic or word.has_glob)):
+        state = fds[0] or shell.active(ctx.fds, fds)
+        if state:
+            return [CodeArg(None, state)]
+    return []
 
 
 def _shell_code(site, tokens: list[str], p: int, words: list, fed: bool = False) -> list[CodeArg]:
@@ -2756,15 +3710,87 @@ def _shell_code(site, tokens: list[str], p: int, words: list, fed: bool = False)
     nothing runs (`zsh -n`, `bash -n` only parse). `fed`: an `xargs` runs it, so a `-c` with no operand gets the
     code from the words xargs reads: unknown (X5)."""
     seen, i = _shell_operands(tokens, p + 1)
+    rc: list[CodeArg] = []  # the file `--rcfile` / `--init-file` makes the shell read first
+    for k in range(p + 1, min(i, len(tokens))):
+        name, eq, value = tokens[k].partition("=")
+        if name in _SHELL_VALUE_LONG:
+            rc.extend(_path_code(site, value, None) if eq else _first_operand_code(site, tokens, k + 1, words))
     if "c" in seen:
         if i < len(tokens):
-            return [CodeArg(tokens[i], None)]
-        return [CodeArg(None, "dynamic_code")] if fed else []
+            return rc + [CodeArg(tokens[i], None)]
+        return rc + ([CodeArg(None, "dynamic_code")] if fed else [])
     if "n" in seen:
-        return []
+        return rc
     if i < len(tokens) and "s" not in seen:
-        return _first_operand_code(site, tokens, i, words)
-    return _stdin_code(site)
+        return rc + _first_operand_code(site, tokens, i, words)
+    return rc + _stdin_code(site)
+
+
+# Options of `fish`, `csh` and `tcsh`, by shell: letters that take no value, letters that take a value (the rest of the
+# cluster or the next word), the letters whose value is code, and the long options (matched by prefix, as the shells do).
+_FISH_FLAGS = frozenset("hilnPvN")
+_FISH_VALUES = frozenset("dDfop")
+_FISH_CODE = frozenset("cC")
+_FISH_LONG_FLAGS = frozenset({"help", "interactive", "login", "no-config", "no-execute", "print-rusage-self",
+                              "print-debug-categories", "private", "version"})
+_FISH_LONG_VALUES = frozenset({"debug", "debug-output", "debug-stack-frames", "features", "profile",
+                               "profile-startup"})
+_FISH_LONG_CODE = frozenset({"command", "init-command"})
+_CSH_FLAGS = frozenset("bdefFilmnqtvVxX")
+_CSH_CODE = frozenset("c")
+_CSH_STDIN = frozenset("s")  # the script is read from the standard input
+_CSH_ATTACHED = frozenset("D")  # `-Dname=value`
+_CSH_LONG_FLAGS = frozenset({"help", "version"})
+
+
+def _other_shell_code(site, tokens: list[str], p: int, words: list) -> list[CodeArg]:
+    """`fish`, `csh`, `tcsh`: not bash, so a code string (`-c`, `-C`, `--command`, `--init-command`) is never parsed
+    as bash and is code of unknown reach, `dynamic_code`. The options are read from a table of the shell: a value
+    option takes its value, a long option is matched by prefix (a prefix of a code option, or one that fits several, is
+    code), and an option outside the table (`tcsh -T`) is `dynamic_code`. `csh` and `tcsh` read their script from
+    stdin with `-s` (also bundled) or a lone `-`. A script file is read as a path; with none the stdin is the
+    program."""
+    fish = _program_name(tokens[p]) == "fish"
+    flags, values, code = (_FISH_FLAGS, _FISH_VALUES, _FISH_CODE) if fish else (_CSH_FLAGS, frozenset(), _CSH_CODE)
+    long_flags, long_values, long_code = (
+        (_FISH_LONG_FLAGS, _FISH_LONG_VALUES, _FISH_LONG_CODE) if fish else (_CSH_LONG_FLAGS, frozenset(), frozenset()))
+    dynamic = [CodeArg(None, "dynamic_code")]
+    rest = tokens[p + 1:]
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--":
+            i += 1
+            break
+        if tok == "-" and not fish:
+            return _stdin_code(site)
+        if tok == "-" or not tok.startswith("-"):
+            break
+        i += 1
+        if tok.startswith("--"):
+            name, eq, _ = tok[2:].partition("=")
+            longs = long_flags | long_values | long_code
+            found = [name] if name in longs else [o for o in longs if name and o.startswith(name)]
+            if len(found) != 1 or found[0] in long_code:
+                return dynamic
+            if found[0] in long_values and not eq:
+                i += 1
+            continue
+        for j, c in enumerate(tok[1:], 1):
+            if c in code:
+                return dynamic
+            if c in _CSH_STDIN and not fish:
+                return _stdin_code(site)
+            if c in flags:
+                continue
+            if c in values:
+                if not tok[j + 1:]:
+                    i += 1
+                break
+            if c in _CSH_ATTACHED and not fish:
+                break
+            return dynamic
+    return _first_operand_code(site, tokens, p + 1 + i, words) if i < len(rest) else _stdin_code(site)
 
 
 def _env_code(tokens: list[str], p: int) -> list[CodeArg]:
@@ -2823,13 +3849,266 @@ def _su_code(tokens: list[str], p: int) -> list[CodeArg]:
 
 
 def _trap_code(tokens: list[str], p: int) -> list[CodeArg]:
-    """`trap ACTION SIGNAL...`: ACTION is code, except for `-l`, `-p` and `-` (reset)."""
+    """`trap ACTION SIGNAL...`: ACTION is code, except for `-l`, `-p` and `-` (reset). The signals go with it: the
+    context the action fires in depends on them (`trap_stdin`)."""
     i = p + 1
     if i < len(tokens) and tokens[i] in {"-l", "-p", "-"}:
         return []
     if i < len(tokens) and tokens[i] == "--":
         i += 1
-    return [CodeArg(tokens[i], None)] if i < len(tokens) else []
+    return [CodeArg(tokens[i], None, tuple(tokens[i + 1:]))] if i < len(tokens) else []
+
+
+def _exit_signal(name: str) -> bool:
+    """`EXIT` or `0` (zsh and bash), with or without `SIG`: the trap fires where it was set, when that shell ends."""
+    return name.upper() in ("EXIT", "0", "SIGEXIT")
+
+
+# `parallel`: its options that take a value and those that do not. An option outside both makes the command line
+# unreadable (under a stdin state it is read as code).
+_PARALLEL_VALUE = frozenset({
+    "-j", "--jobs", "-n", "--max-args", "-N", "-a", "--arg-file", "-S", "--sshlogin", "-d", "--delimiter", "-L",
+    "--max-lines", "-P", "-I", "--replace", "-E", "--eof", "--env", "--tmpdir", "--timeout", "--halt", "--colsep",
+    "--joblog", "--results", "--workdir", "--retries", "--delay", "--load", "--memfree", "--sshloginfile",
+    "--transferfile", "--tf", "--return", "--basefile", "--bf", "--header", "--tagstring", "--sqlmaster",
+    "--max-replace-args", "--arg-file-sep", "--argsep"})
+_PARALLEL_FLAGS = frozenset({
+    "-k", "--keep-order", "-v", "--verbose", "-X", "-u", "--ungroup", "--group", "--tag", "--dry-run", "--pipe",
+    "--pipepart", "--nonall", "--bar", "--progress", "--eta", "-q", "--quote", "--no-notice", "-0", "--null",
+    "--link", "--xapply", "--line-buffer", "--lb", "-t", "--trim", "--will-cite", "--citation", "--silent",
+    "--semaphore", "--sem", "-x", "--round-robin", "--files", "--tty", "--fg", "--bg", "--onall", "--shellquote",
+    "-m", "--plus", "--shuf"})
+_PARALLEL_SHORT = frozenset(f[1] for f in _PARALLEL_FLAGS if len(f) == 2)
+_PARALLEL_SHORT_VALUE = frozenset(f[1] for f in _PARALLEL_VALUE if len(f) == 2 and f != "-I")
+
+
+def _parallel_cluster(tok: str) -> int:
+    """Words a bundled short cluster takes (0: not readable): flag letters, then at most one value option whose value is
+    the rest of the cluster or the next word. `I` and `i` (a replacement string) and unknown letters are not readable."""
+    for j, c in enumerate(tok[1:], 1):
+        if c in _PARALLEL_SHORT:
+            continue
+        return (1 if tok[j + 1:] else 2) if c in _PARALLEL_SHORT_VALUE else 0
+    return 1
+
+
+_PARALLEL_CUSTOM = ("--argsep", "--arg-sep", "--arg-file-sep", "--argfilesep", "--replace", "--rpl")
+_PARALLEL_SEPARATORS = frozenset({":::", "::::", ":::+", "::::+"})
+# `at`, `batch`: options that take a value, and those that list, remove or print jobs instead of reading one.
+_AT_VALUE = frozenset("qft")
+_AT_LISTING = frozenset("ldrc")  # (`-V` prints the version and still reads the job)
+
+
+def _parallel_arguments(tokens: list[str], words: list, start: int) -> "tuple[list[int], bool]":
+    """The `:::` arguments from `tokens[start]`: the indexes of the literal ones (no expansion, glob, brace or process
+    substitution), and whether some argument is not (a `::::` file, an expansion): its value is unknown."""
+    literal: list[int] = []
+    unknown = False
+    kind = None
+    for i in range(start, len(tokens)):
+        if tokens[i] in _PARALLEL_SEPARATORS:
+            kind = tokens[i]
+            unknown = unknown or kind.startswith("::::")
+            continue
+        word = words[i] if i < len(words) else None
+        if kind is None or kind.startswith("::::"):
+            continue
+        if word is None or word.dynamic or word.has_glob or word.has_brace \
+                or any(part.kind == "procsub_in" for part in word.parts):
+            unknown = True
+        else:
+            literal.append(i)
+    return literal, unknown
+
+
+# The replacement strings parallel defines (`{}`, `{.}`, `{/}`, `{//}`, `{/.}`, `{#}`, `{%}`, `{N}`, `{-N}`, `{N.}`...),
+# and with `--plus` its pattern forms (`{+/}`, `{..}`, `{/pattern/replacement}`, `{%suffix}`...): no `$`, backtick,
+# parenthesis, angle bracket or backslash in them. Any other brace group stays in the text for the shell parser, and
+# `{= perl =}` runs perl inside parallel itself.
+_PARALLEL_REPLACE = re.compile(r"\{(?:-?[0-9]+)?(?:\.|/|//|/\.|#|%)?\}")
+_PARALLEL_REPLACE_PLUS = re.compile(
+    r"\{(?:[+/%#^,.][^{}$`()<>\\]*|\.\.\.?|slot|host|sshlogin|hgrp|agrp|choose_[LH])\}|"
+    r"\{(?:-?[0-9]+)?(?:\.|/|//|/\.|#|%)?\}")
+# A brace group left over that holds an expansion (`{$(x)}`, `{a`x`}`): parallel may take it for a replacement string.
+_PARALLEL_BRACE_CODE = re.compile(r"(?<!\$)\{[^{}]*[$`(<][^{}]*\}")
+_PARALLEL_PLACEHOLDER = "$_P"
+_PARALLEL_HOST = re.compile(r"(?:[0-9]+/)?(?:[A-Za-z0-9_][\w.-]*@)?[A-Za-z0-9_][\w.-]*(?::[0-9]+)?")
+_PARALLEL_PLAIN_WORD = re.compile(r"[-_.+A-Za-z0-9/]+")  # a literal argument parallel leaves unquoted
+_PARALLEL_VARS = frozenset({"PARALLEL", "PARALLEL_SHELL"})  # they add options and pick the shell
+# What a command run by `parallel` may not be: a program that runs code it is given, or one that runs another program.
+_PARALLEL_FORBIDDEN = (_STDIN_CODE_READERS | _SAME_SHELL_LOADERS | _OTHER_SHELLS | _SHELLS | frozenset(_WRAPPERS)
+                       | _PLAIN_PREFIXES | frozenset({"mise", "nvim"}))  # (`mise` and `nvim` run the code they are given)
+
+
+def _parallel_takes_file(tok: str) -> bool:
+    """The option takes its arguments from a file: `-a`, `--arg-file`, also last in a short cluster (`-ka`)."""
+    if tok.partition("=")[0] in ("-a", "--arg-file"):
+        return True
+    if tok.startswith("--"):
+        return False
+    for c in tok[1:]:
+        if c not in _PARALLEL_SHORT:
+            return c == "a"
+    return False
+
+
+def _parallel_login(tok: str, following: str) -> "str | None":
+    """The value of `-S` / `--sshlogin` in this option word (`following`: the next word), None for any other option."""
+    if tok.startswith("--"):
+        name, eq, value = tok.partition("=")
+        return (value if eq else following) if name == "--sshlogin" else None
+    for j, c in enumerate(tok[1:], 1):
+        if c in _PARALLEL_SHORT:
+            continue
+        return (tok[j + 1:] or following) if c == "S" else None
+    return None
+
+
+def _parallel_login_plain(value: str) -> bool:
+    """Only plain `[n/][user@]host[:port]` comma lists, or `:` (this computer): anything else can run a command."""
+    return value == ":" or all(_PARALLEL_HOST.fullmatch(part) for part in value.split(","))
+
+
+def _marker_quoted(script) -> bool:
+    """The placeholder sits inside any quoting: `'...'`, `$'...'`, `"..."` at any depth (an operand of `${...}` in it
+    too), `$"..."`, or a heredoc body (parallel puts a quoted argument there, which can end the quote or the heredoc)."""
+    for site in shell.iter_sites(script):
+        cmd = site.cmd
+        words = [*cmd.assignments, *cmd.words, *(r.target for r in cmd.redirects if r.target is not None)]
+        for word in words:
+            for part in _walk_parts(word.parts):
+                if part.kind in ("sq", "ansi", "dq") and _PARALLEL_PLACEHOLDER in part.text:
+                    return True
+        for redirect in cmd.redirects:
+            if redirect.heredoc is not None and _PARALLEL_PLACEHOLDER in redirect.heredoc.body:
+                return True
+    return False
+
+
+def _parallel_template(command: list[str], sources: int, plus: bool, strict: bool) -> "str | None":
+    """The shell code `parallel` runs for the command words (it joins them with spaces and runs the result through a
+    shell when it holds shell syntax): each replacement string it defines (`--plus` forms only with `--plus`) is a
+    placeholder argument; with none, one placeholder per argument source is appended. Any other brace group stays for
+    the parser. None when it is not an allowed shape: perl (`{=`), a program position that is an expansion, a glob, a
+    brace or a replacement string, a program that runs code or another program (a shell, `eval`, a wrapper or
+    prefix), a placeholder inside any quoting or a heredoc (`_marker_quoted`) unless every source is a literal `:::` word
+    of `[-_.+A-Za-z0-9/]` only, which parallel leaves unquoted (`strict`), or text that does not parse."""
+    if any("{=" in word for word in command):
+        return None
+    pattern = _PARALLEL_REPLACE_PLUS if plus else _PARALLEL_REPLACE
+    template, count = pattern.subn(_PARALLEL_PLACEHOLDER, " ".join(command))
+    if _PARALLEL_BRACE_CODE.search(template.replace(_PARALLEL_PLACEHOLDER, "")):
+        return None
+    if not count:
+        template += (" " + _PARALLEL_PLACEHOLDER) * sources
+    try:
+        script = shell.parse(template, shell.Budget(MAX_LEX_CHARS))
+    except (shell.ShellError, shell.NestingTooDeep, shell.BudgetExceeded):
+        return None
+    if strict and _marker_quoted(script):
+        return None
+    for site in shell.iter_sites(script):
+        if not site.cmd.words:
+            continue
+        head = site.cmd.words[0]
+        tokens = [w.text for w in site.cmd.words]
+        name = _program_name(tokens[0])
+        if head.dynamic or head.has_glob or head.has_brace or name in _PARALLEL_FORBIDDEN \
+                or _VERSIONED_SHELL.fullmatch(name) \
+                or any(s != 0 for s in _prefix_steps(tokens, 0)):
+            return None
+    return template
+
+
+def _parallel_code(site, tokens: list[str], p: int, words: list, memo: "dict | None" = None) -> list[CodeArg]:
+    """`parallel [OPTIONS] [COMMAND [ARGS]] [::: ARGS]`, read as an allow-list. Every option must be in the tables
+    (`_PARALLEL_VALUE`, `_PARALLEL_FLAGS`, a bundled cluster of them): anything else is `dynamic_code`. The argument
+    sources are `:::` (literal words, or not), `::::`, `-a FILE` and, with none of them, stdin; a file and `::::` are
+    unknown. With no command the literal `:::` arguments are the commands, classified one level down. With a command,
+    `_parallel_template` gives the shell code it runs, which is classified as code one level down (the flags of what it
+    runs, a pipe in it, `git` with an unknown subcommand); a shape it does not allow is `dynamic_code`."""
+    rest = tokens[p + 1:]
+    closed = [CodeArg(None, "dynamic_code")]
+    if memo is not None and memo.get("parallel_env"):
+        return closed + _stdin_code(site)  # the text sets PARALLEL or PARALLEL_SHELL: options and shell are unknown
+    if any(t.startswith(_PARALLEL_CUSTOM) or (t.startswith("-I") and not t.startswith("--")) for t in rest):
+        return closed + _stdin_code(site)  # a custom separator or replacement string: the line is unreadable
+    i, from_file, plus = 0, False, False
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--":
+            i += 1
+            break
+        if tok in _PARALLEL_SEPARATORS or not tok.startswith("-") or tok == "-":
+            break
+        name, eq, _ = tok.partition("=")
+        from_file = from_file or _parallel_takes_file(tok)
+        plus = plus or tok == "--plus"
+        login = _parallel_login(tok, rest[i + 1] if i + 1 < len(rest) else "")
+        if name in ("--sshloginfile", "--slf") or (login is not None and not _parallel_login_plain(login)):
+            return closed + _stdin_code(site)  # a login can run a command, a login file is unknown
+        if name in _PARALLEL_VALUE:
+            i += 1 if eq else 2
+        elif name in _PARALLEL_FLAGS:
+            i += 1
+        elif not tok.startswith("--") and tok[:2] in _PARALLEL_VALUE:  # `-j4`
+            i += 1
+        elif not tok.startswith("--") and (step := _parallel_cluster(tok)):  # `-kv`, `-kj4`, `-kj 4`
+            i += step
+        else:  # an option outside the tables (a cluster with a value option, `-i`, an abbreviation): unreadable
+            return closed + _stdin_code(site)
+    cut = next((k for k in range(i, len(rest)) if rest[k] in _PARALLEL_SEPARATORS), len(rest))
+    command, has_args = rest[i:cut], cut < len(rest)
+    if any("{=" in t for t in rest[:cut]):
+        return closed + _stdin_code(site)  # perl in an option value or in the command, run by parallel itself
+    literal, dynamic = _parallel_arguments(tokens, words, p + 1 + cut) if has_args else ([], False)
+    if not command:
+        if from_file:
+            return closed
+        if not has_args:
+            return _stdin_code(site)
+        out = [CodeArg(tokens[j], None) for j in literal]
+        return out + (closed if dynamic or not literal else [])
+    sources = sum(1 for t in rest[cut:] if t in _PARALLEL_SEPARATORS) + from_file
+    strict = from_file or dynamic or not has_args or not all(_PARALLEL_PLAIN_WORD.fullmatch(tokens[j]) for j in literal)
+    template = _parallel_template(command, sources or 1, plus, strict)
+    if template is None:
+        return closed + _stdin_code(site)
+    return [CodeArg(template, None)]
+
+
+def _at_code(site, tokens: list[str], p: int, words: list) -> list[CodeArg]:
+    """`at` and `batch` read the job from stdin, unless `-f FILE` gives one (a file that names stdin, or `-`, is stdin)
+    or an option lists, removes or prints jobs. An option letter that takes a value (`-q`, `-f`, `-t`) takes the rest
+    of its cluster (`-qc` is queue `c`)."""
+    rest = tokens[p + 1:]
+    source = None  # where `-f` names its file: the text of the cluster, or the index of the next word
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--":
+            break
+        if not tok.startswith("-") or tok == "-":
+            i += 1  # (getopt permutes: the time may come before the options)
+            continue
+        step = 1
+        for j, c in enumerate(tok[1:], 1):
+            if c in _AT_LISTING:
+                return []
+            if c in _AT_VALUE:
+                attached = tok[j + 1:]
+                if c == "f":
+                    source = attached if attached else p + 2 + i
+                step = 1 if attached else 2
+                break
+        i += step
+    if source is None:
+        return _stdin_code(site)
+    if isinstance(source, str):
+        return _stdin_code(site) if source == "-" else _path_code(site, source, None)
+    if source >= len(tokens) or tokens[source] == "-":
+        return _stdin_code(site)
+    return _first_operand_code(site, tokens, source, words)
 
 
 def _mise_code(tokens: list[str], p: int) -> list[CodeArg]:
@@ -2912,13 +4191,108 @@ def _xargs_replace(flags: list[str]) -> frozenset:
     return frozenset(r for r in out if r)
 
 
-def _position_code(site, tokens: list[str], p: int, name: str, starts: list[int], words: list,
+# Git subcommands with options that hold shell code: subcommand -> (long names, short letters, whether the value
+# may be the next word; else only the attached one: `git grep -O<pager>`).
+_GIT_CODE_OPTIONS = {
+    "rebase": (("exec",), "x", True),
+    "filter-branch": (("env-filter", "tree-filter", "index-filter", "parent-filter", "msg-filter", "commit-filter",
+                       "tag-name-filter", "setup"), "", True),
+    "difftool": (("extcmd",), "x", True),
+    "clone": (("upload-pack",), "u", True),
+    "fetch": (("upload-pack",), "", True),
+    "pull": (("upload-pack",), "", True),
+    "fetch-pack": (("upload-pack", "exec"), "", True),
+    "ls-remote": (("upload-pack", "exec"), "", True),
+    "push": (("receive-pack", "exec"), "", True),
+    "send-pack": (("receive-pack", "exec"), "", True),
+    "archive": (("exec",), "", True),
+    "grep": (("open-files-in-pager",), "O", False),
+}
+_SEND_EMAIL_CODE = ("to-cmd", "cc-cmd", "header-cmd", "sendmail-cmd")
+# Subcommands whose URL words (or `--remote=`/`--repo=` values) can be `ext::` URLs.
+_GIT_EXT_URL_VERBS = frozenset({"clone", "fetch", "pull", "push", "ls-remote", "fetch-pack", "send-pack", "archive"})
+
+
+def _is_getopt(tok: str, name: str, exact: frozenset = frozenset()) -> bool:
+    """`tok` is the option `name` as Perl's Getopt::Long (git-send-email) reads it: the name in any case or any prefix
+    of it of two letters or more, after `-`, `--` or `+`, with or without `=value`."""
+    if not tok or tok[0] not in "-+" or tok in ("--", "-", "+"):
+        return False
+    body = tok[2:] if tok.startswith("--") else tok[1:]
+    part = body.partition("=")[0].lower()
+    return len(part) >= 2 and name.startswith(part) and part not in exact
+
+
+_SEND_EMAIL_EXACT = frozenset({"to", "cc"})
+
+
+def _git_exec_code(args: list[str]) -> list[str]:
+    """The shell code git runs for the options of `_GIT_CODE_OPTIONS` in `args` (the words after `git`), for every
+    reading of the global options: the next word or the attached value of the long option (any prefix:
+    `--ex=CODE`) and of a short cluster holding the letter (`-xCODE`, `-ix CODE`: the rest of the cluster after
+    it, else the next word); the command of `submodule foreach` (its first word is the shell code, the others its
+    arguments); the command an `ext::` URL of a transport subcommand runs."""
+    out: list[str] = []
+    for i in _git_walk(args)[0]:
+        sub = args[i]
+        rest = args[i + 1:]
+        if sub in ("submodule", "submodule--helper"):
+            j = next((k for k, tok in enumerate(rest) if not tok.startswith("-")), None)
+            if j is not None and rest[j] == "foreach":
+                tail = rest[j + 1:]
+                k = 0
+                while k < len(tail) and tail[k].startswith("-"):
+                    k += 1
+                    if tail[k - 1] == "--":
+                        break
+                if k < len(tail):
+                    out.append(" ".join([tail[k]] + [_sh_quote(t) for t in tail[k + 1:]]))
+            elif j is not None and rest[j] == "add":
+                out.extend(_ext_codes(rest[j + 1:]))
+            continue
+        if sub == "send-email":
+            for k, tok in enumerate(rest):
+                if _ends_options(rest, k):
+                    break
+                if any(_is_getopt(tok, name, _SEND_EMAIL_EXACT) for name in _SEND_EMAIL_CODE):
+                    value = tok.partition("=")[2] if "=" in tok else rest[k + 1] if k + 1 < len(rest) else None
+                    if value is not None:
+                        out.append(value)
+            continue
+        if sub in _GIT_EXT_URL_VERBS:
+            out.extend(_ext_codes(rest))
+        spec = _GIT_CODE_OPTIONS.get(sub)
+        if spec is None:
+            continue
+        names, letters, next_word = spec
+        for k, tok in enumerate(rest):
+            if _ends_options(rest, k):
+                break
+            following = rest[k + 1] if next_word and k + 1 < len(rest) else None
+            value = None
+            if any(_is_long(tok, name) for name in names):
+                value = tok.partition("=")[2] if "=" in tok else following
+            elif letters and tok.startswith("-") and not tok.startswith("--") and any(c in letters for c in tok[1:]):
+                at = min(tok.index(c) for c in letters if c in tok[1:])
+                value = tok[at + 1:] or following
+            if value is not None:
+                out.append(value)
+    return out
+
+
+def _position_code(site, tokens: list[str], p: int, name: str, starts: list[int], words: list, memo: "dict | None" = None,
                    fed: bool = False) -> list[CodeArg]:
     """The code arguments of the program named `name` at `tokens[p]`; `starts` are the positions where its
     wrapped command can start (when it is a wrapper); `fed`: an `xargs` of the prefix chain runs it."""
     n = len(tokens)
-    if name in _SHELLS:
+    if name in _SHELLS or _VERSIONED_SHELL.fullmatch(name):
         return _shell_code(site, tokens, p, words, fed)
+    if name in _OTHER_SHELLS:
+        return _other_shell_code(site, tokens, p, words)
+    if name == "parallel":
+        return _parallel_code(site, tokens, p, words, memo)
+    if name in _STDIN_LINE_READERS:
+        return _at_code(site, tokens, p, words)
     if name == "emulate":
         return _emulate_code(tokens, p)
     if name in {"mapfile", "readarray"}:
@@ -2943,6 +4317,8 @@ def _position_code(site, tokens: list[str], p: int, name: str, starts: list[int]
         for s in starts:
             if s < n and _flag_cluster(tokens[p + 1:s], "si"):
                 out.append(CodeArg(" ".join(tokens[s:]), None))
+    elif name == "git":  # `rebase -x CODE`, `filter-branch --tree-filter CODE`, `submodule foreach CODE`, ...
+        out.extend(CodeArg(code, None) for code in _git_exec_code(tokens[p + 1:]))
     elif name == "watch":  # without -x / --exec the words are run by `sh -c`
         for s in starts:
             flags = tokens[p + 1:s]
@@ -2951,14 +4327,16 @@ def _position_code(site, tokens: list[str], p: int, name: str, starts: list[int]
     return out
 
 
-def _code_args(site, tokens: list[str], words: "list | None" = None) -> list[CodeArg]:
+def _code_args(site, tokens: list[str], words: "list | None" = None, memo: "dict | None" = None) -> list[CodeArg]:
     """X1-X6: every argument of the simple command that runs code, at every program of its prefix chain
     (`sudo -u x bash -c ...`), once each. A code string that holds a replacement string of an enclosing `xargs`
     is made at run time (X3). More than MAX_CODE_ARGS: one level B entry and no more. `words`: the words of
-    `tokens` when a value took the place of one (None entries), else those of the site."""
+    `tokens` when a value took the place of one (None entries), else those of the site. `memo`: the prefix search
+    by `(words, position)`, shared by the calls of one text."""
     n = len(tokens)
     if words is None:
         words = site.cmd.words
+    key = tuple(tokens) if memo is not None else ()
     found: list[CodeArg] = []
     keys: set = set()
     seen: set[int] = set()
@@ -2969,13 +4347,20 @@ def _code_args(site, tokens: list[str], words: "list | None" = None) -> list[Cod
             continue
         seen.add(p)
         name = _program_name(tokens[p])
-        starts = [s for s in _prefix_steps(tokens, p) if s != p]
-        for text, reason in _position_code(site, tokens, p, name, starts, words, fed):
+        steps = memo.get((key, p)) if memo is not None else None
+        if steps is None:
+            steps = _prefix_steps(tokens, p)
+            if memo is not None:
+                memo[(key, p)] = steps
+        starts = [s for s in steps if s != p]
+        if name in _APPLET_LAUNCHERS and p + 1 < n and not tokens[p + 1].startswith("-") and p + 1 not in starts:
+            starts.append(p + 1)  # `busybox env sh`: the first operand is an applet, a program of its own
+        for text, reason, signals in _position_code(site, tokens, p, name, starts, words, memo, fed):
             if text is not None and any(r in text for r in replace):
                 text, reason = None, "dynamic_code"
-            if (text, reason) not in keys:
-                keys.add((text, reason))
-                found.append(CodeArg(text, reason))
+            if (text, reason, signals) not in keys:
+                keys.add((text, reason, signals))
+                found.append(CodeArg(text, reason, signals))
         if len(found) > MAX_CODE_ARGS:
             return found[:MAX_CODE_ARGS] + [CodeArg(None, "analysis_budget")]
         for s in reversed(starts):
@@ -2989,6 +4374,20 @@ def _function_names(script) -> frozenset:
     return frozenset(c.name for c in shell.iter_compounds(script) if c.kind == "function" and c.name)
 
 
+def _literal_slash(word) -> bool:
+    """A `/` written in the word itself (not inside an expansion): bash calls no function through such a name."""
+    return any((p.kind in ("lit", "sq") or (p.kind == "dq" and not p.inner)) and "/" in p.text for p in word.parts)
+
+
+def _function_readers(script) -> "dict[str, list]":
+    """The functions the text defines, name -> every definition (a redefined name counts each one)."""
+    found: dict = {}
+    for comp in shell.iter_compounds(script):
+        if comp.kind == "function" and comp.name:
+            found.setdefault(comp.name, []).append(comp)
+    return found
+
+
 def _receiver_reads_code(readings: Readings, functions: frozenset) -> bool:
     """Some reading of the receiver of a heredoc or here-string runs its input (a shell, `source`, `eval`, `xargs`,
     `at`, ...) or is a function of the text: the body is code, so a program name made by an expansion in it is level
@@ -2997,18 +4396,40 @@ def _receiver_reads_code(readings: Readings, functions: frozenset) -> bool:
                for t in readings.texts)
 
 
+def _receiver_heads(site, readings: Readings) -> "list[str] | None":
+    """The program names the receiver of a heredoc or here-string may be: the readings' own and, for a head made by a
+    brace expansion, each word it makes. None when a head stays unknown (an expansion, a brace expansion that cannot
+    be known): the caller fails closed."""
+    heads = [_head_of(t) for t in readings.texts]
+    words = site.cmd.words
+    for s in readings.starts:
+        word = words[s] if s < len(words) else None
+        if word is None:
+            continue
+        if word.has_brace:
+            expanded = _brace_words(word)
+            if expanded is None:
+                return None
+            heads.extend(expanded)
+        elif word.dynamic or word.has_glob:  # (`[s]ource`, `sourc?`: any program of the directory)
+            return None
+    return heads
+
+
 def _heredoc_code(site, readings: Readings, categories: list[str], flags: list[str], reasons: set[str],
                   disqualified: bool, _depth: int, budget, view_at, grouped: bool, functions,
-                  rebound: bool = False) -> None:
+                  rebound: bool = False, verdicts=None, shared: "dict | None" = None) -> "shell.Facts":
     """The bodies of the heredocs of one simple command (spec audit-shell-lexer, HD3-HD5): data is not read; the
     program of another language (`python`, `node`, ...) is not shell either; any other receiver gets its body
     classified as a script of its own. The expansions of an unquoted body are commands too (HD2), but they are
     sites of the walk, not handled here. The values of the variables go down into the body (V3); `view_at(pos)`
     gives the values at an offset of the text. `rebound`: the text gives a trusted program name another meaning (a
-    function, `hash -p`, a `PATH` assignment, `_rebinds`): no body is data and no receiver is foreign."""
+    function, `hash -p`, a `PATH` assignment, `_rebinds`): no body is data and no receiver is foreign. Returns the
+    facts of the bodies that reach the text (`_SAME` when the receiver is a loader, a function of the text (it may
+    `source /dev/stdin`, also through a forwarding function), a rebound name or unknown, else `_CHILD`)."""
     bodies = _stdin_texts(site.cmd)
     if not bodies or _heredoc_is_data(site, readings, disqualified or rebound, reasons, grouped):
-        return
+        return shell.NO_FACTS
     pos = site.cmd.span[0]
     names = functions()
     kind = None if rebound or any(_head_of(t).rsplit("/", 1)[-1] in names for t in readings.texts) \
@@ -3016,14 +4437,22 @@ def _heredoc_code(site, readings: Readings, categories: list[str], flags: list[s
     if kind:
         if kind == "query" and any(_query_escape(body) for body, _ in bodies):
             _block(categories, flags, reasons, "dynamic_code")  # `.shell`, `\!`: the client runs a command
-        return
+        return shell.NO_FACTS
     data = not rebound and _data_reader(readings)
-    code = _receiver_reads_code(readings, functions())
+    heads = _receiver_heads(site, readings)
+    in_text = rebound or any(_head_of(t).rsplit("/", 1)[-1] in names for t in readings.texts)  # a function, or a rebound name
+    same_shell = in_text or heads is None or any(h.rsplit("/", 1)[-1] in _SAME_SHELL_LOADERS for h in heads)
+    code = _receiver_reads_code(readings, functions()) or any(
+        h.rsplit("/", 1)[-1] in _STDIN_CODE_READERS or h in names for h in heads or ())
+    facts = shell.NO_FACTS
     for body, here in bodies:
         if here and data:
             continue
         env = view_at(pos) if "$" in body else None
-        _code_text(body, categories, flags, reasons, _depth, budget, code, env)
+        facts = facts.join(_code_text(body, categories, flags, reasons, _depth, budget, code, env,
+                                      verdicts() if verdicts else None, _SAME if same_shell else _CHILD,
+                                      shared=shared))
+    return facts
 
 
 _BAD = "bad"  # a positional form the substitution does not model: the call is level B (part E, V1)
@@ -3610,48 +5039,119 @@ def _quoted_reaches_arithmetic(script, values=None) -> bool:
             or _expansion_reaches_arithmetic(script, tainted))
 
 
-class _Run:
-    """The state of one `analyze_command` call: the text and its tree, what the commands found so far, and the
-    values of its variables (computed when one is needed). One method per step of the reading of a simple command;
-    each of them only adds to `categories`, `flags` and `reasons`."""
+class _Text:
+    """What is read once per text, whatever the number of rounds that classify it: the tree, the values of its
+    variables and their views, the functions (the ones it defines and the zsh `functions[NAME]=BODY` ones) and
+    their verdicts, the forwarding functions and their spans, the spans of the function and loop bodies, the prefix
+    memo of `_code_args`, the readings of each command, what the heredocs of the commands need (`_heredocs`), the
+    evaluation of text as code, the aliases of the repo and the `git-<name>` lookups (the two reads that go through
+    the `RESOLVERS` of the hook and do I/O), and the `blocks` those computations decide (level B for the whole text:
+    every round reports them)."""
 
-    __slots__ = ("command", "depth", "outer_env", "budget", "code", "script", "categories", "flags", "reasons",
-                 "has_dollar", "funcs", "forwarded", "raws", "_values", "_views", "_names", "fwd_spans", "in_fwd")
+    __slots__ = ("command", "depth", "outer_env", "budget", "code", "script", "cwd", "outer_fn", "has_dollar",
+                 "funcs", "fwd_spans", "steps", "blocks", "_verdicts", "_fn_spans", "_moved", "_repo_aliases",
+                 "_values", "_views", "_names", "_readings", "_evaluation", "_heredocs", "_repeated", "kind", "shared")
 
-    def __init__(self, command: str, depth: int, outer_env, budget, code: bool, script):
+    def __init__(self, command: str, depth: int, outer_env, budget, code: bool, script, cwd=None, outer_fn=None,
+                 kind: str = _CHILD, shared: "dict | None" = None):
         self.command = command
+        self.shared = shared if shared is not None else {}  # what the whole analysis reads once: `git_external`
+        self.kind = kind  # how the text runs: `_CHILD`, `_SAME` or `_BODY`
+        self.outer_fn = outer_fn or {}  # the functions of the enclosing texts: name -> may read code from stdin
+        self.blocks: list[str] = []  # the reasons of level B decided for the whole text
+        self._verdicts: list = []  # `function_verdicts`, computed when a call needs it
+        self._fn_spans = None  # the spans of the function definitions, read when a trap needs them
+        # the cwd of the tool call (the hook registers it); None: the process's; False: a nested text (not known)
+        self.cwd = cwd if cwd is not None else RESOLVERS.get("cwd")
+        self._moved: list = []  # `cwd_moved`, computed when needed
+        self.steps: dict = {}  # the prefix search of `_code_args` by words, and `parallel_env`: every round shares it
+        self._repo_aliases: list = []  # the aliases of the repo (`_read_repo_git_aliases`), read once, when needed
+        self._readings: dict = {}  # the tokens and readings of each command, by `id(cmd)`
+        self._evaluation: list = []  # `_code_evaluation`, computed when needed
+        self._heredocs: list = []  # `(disqualified, rebound spans, grouped commands)` of the heredocs, computed when needed
+        self._repeated: list = []  # the spans of the function and loop bodies, computed when the contexts need them
         self.depth = depth
         self.outer_env = outer_env  # the values of the variables of the outer text (V3)
         self.budget = budget
         self.code = code
         self.script = script
-        self.categories: list[str] = []
-        self.flags: list[str] = []
-        self.reasons: set[str] = set()
         # no expansion in the text: no value to resolve, none to pass down (the `GIT_CONFIG_*` names are values too)
-        self.has_dollar = "$" in command or "GIT_CONFIG_" in command
+        self.has_dollar = "$" in command or any(h in command for h in _GIT_ENV_HINTS)
         self.funcs = _forwarding_functions(script, command) if self.has_dollar and (
             "function" in command or "()" in command.replace(" ", "")) else {}
-        self.forwarded: set = set()
         # the source spans of the bodies of the forwarding functions: what runs there is what the calls pass (D1)
         self.fwd_spans: list = _forwarding_spans(script, self.funcs) if self.funcs else []
-        self.in_fwd = False  # the simple command being read sits in one of those bodies
-        self.raws: list[str] = []
         self._values: list = []  # `_known_values` of the script, computed when a value is needed (V1-V4)
         self._views: dict[int, "_Values"] = {}
         self._names: list = []  # `_function_names` of the script, computed when a heredoc or here-string needs it
 
     def block(self, reason: str) -> None:
-        _block(self.categories, self.flags, self.reasons, reason)
+        """Level B for the whole text: every round of its reading reports it."""
+        if reason not in self.blocks:
+            self.blocks.append(reason)
 
-    def unclassified(self) -> None:
-        self.categories.append("unclassified")
-        self.flags.append("unclassified_command")
+    def charge(self, cost: int) -> bool:
+        """Charge the budget; False (and level B for the text) when it is spent."""
+        try:
+            self.budget.charge(cost)
+        except shell.BudgetExceeded:
+            self.block("analysis_budget")
+            return False
+        return True
+
+    def repo_aliases(self) -> "dict[str, str] | None":
+        """The aliases the configuration of the repo at the cwd defines (read once), or None when they cannot be
+        read (a nested text has no known cwd)."""
+        if self.cwd is False:
+            return None
+        if not self._repo_aliases:
+            self._repo_aliases.append(_read_repo_git_aliases(self.cwd))
+        return self._repo_aliases[0]
+
+    def git_external(self, name: str) -> bool:
+        """A program `git-<name>` is on the PATH (read once per name in the whole analysis: the nested texts and the
+        rounds share the answer)."""
+        if name not in self.shared:
+            self.shared[name] = _git_external_exists(name)
+        return self.shared[name]
+
+    def cwd_moved(self) -> bool:
+        """The directory git runs in may not be the cwd of the call: a nested text, or the text changes directory."""
+        if not self._moved:
+            self._moved.append(self.cwd is False or _script_moves(self.script, self.command))
+        return self._moved[0]
 
     def functions(self) -> frozenset:
+        """The names of the functions of this text (the `name() {}` ones and the zsh `functions[NAME]=BODY` ones) and
+        of the enclosing ones."""
         if not self._names:
-            self._names.append(_function_names(self.script))
+            names = _function_names(self.script) | frozenset(self.outer_fn)
+            if "functions" in self.command:
+                names |= _zsh_function_names(self.script)
+            self._names.append(names)
         return self._names[0]
+
+    def repeated_spans(self) -> list:
+        """The spans of the bodies that run when the text is somewhere else (a function: called after any command;
+        a loop: again after its last command), as `(start, end)` pairs."""
+        if not self._repeated:
+            self._repeated.append([c.span for c in shell.iter_compounds(self.script) if c.kind in _REPEATED_KINDS])
+        return self._repeated[0]
+
+    def function_verdicts(self) -> dict:
+        """Per function name (this text and the enclosing ones), whether some definition may read code from the
+        stdin its call gives it (`_compound_reads_code`). Read once per text; each body read is charged."""
+        if not self._verdicts:
+            verdicts = dict(self.outer_fn)
+            names = self.functions()
+            for name, comps in _function_readers(self.script).items():
+                for comp in comps:
+                    if not self.charge(VARIANT_COST):
+                        verdicts[name] = True  # (fail closed) the budget is spent
+                        break
+                    verdicts[name] = verdicts.get(name, False) or _compound_reads_code(comp, names)
+            self._verdicts.append(verdicts)
+        return self._verdicts[0]
 
     def values(self) -> "_Values":
         return _values_of(self.script, self.outer_env, self._values, self.command)
@@ -3664,12 +5164,280 @@ class _Run:
             view = self._views[pos] = self.values().at(pos)
         return view
 
-    def code_text(self, text: str, env, code: bool = True, named: bool = True) -> None:
+    def code_evaluation(self) -> bool:
+        """The shell evaluates text as code where no command is written (`_code_evaluation`), read once."""
+        if not self._evaluation:
+            self._evaluation.append(_code_evaluation(self.command, self.script, self.values))
+        return self._evaluation[0]
+
+    def readings(self, site) -> "tuple[list[str], Readings]":
+        """The words of a command and their readings, read once per command of the tree."""
+        key = id(site.cmd)
+        found = self._readings.get(key)
+        if found is None:
+            tokens = [w.text for w in site.cmd.words]
+            found = self._readings[key] = (tokens, _token_readings(tokens))
+        return found
+
+    def heredocs(self, items: list) -> "tuple[bool, tuple, set]":
+        """`(disqualified, rebound spans, grouped commands)` of a text with a heredoc, read once from the readings of
+        its commands (`items`: `(site, tokens, readings)`)."""
+        if not self._heredocs:
+            disqualified = _heredocs_disqualified(self.script, items)
+            rebound = _rebound_spans(self.script, items)
+            grouped = _grouped_commands(self.script) if not disqualified else ()
+            self._heredocs.append((disqualified, rebound, grouped))
+        return self._heredocs[0]
+
+    def in_function(self, site) -> bool:
+        """The command sits in the body of a function the text defines."""
+        if self._fn_spans is None:
+            self._fn_spans = [c.span for c in shell.iter_compounds(self.script) if c.kind == "function"]
+        return any(lo <= site.cmd.span[0] < hi for lo, hi in self._fn_spans)
+
+
+class _Run:
+    """The state of one round of the reading of a text (`_Text`): the facts and `exec`s it assumes (`assumed`,
+    `prior_execs`, which make its `StdinContext`s), what the commands found so far, and the facts and `exec`s it observes
+    while classifying (`observed`, `execs`), which the next round assumes. One method per step of the reading of a
+    simple command; each of them only adds to `categories`, `flags` and `reasons`. The text's own blocks join the
+    result."""
+
+    __slots__ = ("text", "command", "depth", "budget", "code", "script", "categories", "flags", "reasons",
+                 "has_dollar", "funcs", "forwarded", "raws", "fwd_spans", "in_fwd", "cwd", "steps", "assumed",
+                 "execs", "moving", "_fifos", "_unknown", "_moved", "_linked", "_cd", "_made", "_exec_ids", "prior_execs", "stdin",
+                 "reads")
+
+    def __init__(self, text: "_Text", assumed: "shell.Facts" = shell.NO_FACTS, prior_execs=(), stdin=None):
+        self.text = text
+        self.assumed = assumed  # the facts the contexts of this reading assume
+        self.prior_execs = prior_execs  # the `ExecSeen` of the round before, whose descriptors the contexts assume
+        self.stdin = stdin  # the `StdinContext` of the command that runs the text as code
+        self.reads: set = set()  # the assumed facts this round consulted ("fifos", "moved", "linked"): see `_analyze`
+        self.execs: list = []  # the `ExecSeen` of the reading (the bare `exec` it classified)
+        self.moving = False  # some command may move a fifo (`mv`, `ln`...)
+        self._fifos: set = set()  # what the reading observes: `observed`
+        self._unknown = False
+        self._moved = False
+        self._linked = False  # some command makes a link that reaches outside the plain names (`_link_reaches_outside`)
+        self._cd = False  # the text changed directory (`cd`, `pushd`...) before the command being read
+        self._made = False  # the command being read made a fifo in some reading
+        self._exec_ids: set = set()
+        self.command = text.command
+        self.depth = text.depth
+        self.budget = text.budget
+        self.code = text.code
+        self.script = text.script
+        self.cwd = text.cwd
+        self.steps = text.steps
+        self.has_dollar = text.has_dollar
+        self.funcs = text.funcs
+        self.fwd_spans = text.fwd_spans
+        self.categories: list[str] = []
+        self.flags: list[str] = []
+        self.reasons: set[str] = set()
+        self.forwarded: set = set()
+        self.in_fwd = False  # the simple command being read sits in one of those bodies
+        self.raws: list[str] = []
+
+    def block(self, reason: str) -> None:
+        _block(self.categories, self.flags, self.reasons, reason)
+
+    @property
+    def observed(self) -> "shell.Facts":
+        """The facts of the text this reading saw: what its commands, as the classification reads them, and the nested
+        texts it analyzed, do to the stdin that later commands read."""
+        return shell.Facts(frozenset(self._fifos), self._unknown, self._moved, self._linked)
+
+    def absorb(self, facts: "shell.Facts") -> None:
+        """Join the facts a nested text handed up."""
+        self._fifos.update(facts.fifos)
+        self._unknown = self._unknown or facts.fifo_unknown
+        self._moved = self._moved or facts.moved
+        self._linked = self._linked or facts.linked
+
+    def observe_reading(self, site, tokens: list[str], words: list, readings: Readings) -> None:
+        """The facts of one final reading of a command (after the values, the variants and the aliases): a fifo made
+        by its simple head (a name that is a value, an expansion or a pattern makes every file a possible one), one
+        made behind a wrapper (`sudo mkfifo p`, `xargs mkfifo`: the operands may come from elsewhere), a change of
+        directory or a link, a command that may move a fifo, and a bare `exec`."""
+        fifos = shell.Fifos()
+        made = _fifo_operands(tokens, words, fifos)
+        k = _plain_head(tokens)
+        if made:
+            self._made = True
+            self._fifos.update(fifos.names)
+            self._unknown = self._unknown or fifos.unknown
+        for s in {*readings.starts, k}:
+            if s >= len(tokens):
+                continue
+            name = _program_name(tokens[s])
+            if name in ("mkfifo", "mknod") and not (made and s == k):
+                self._unknown = True
+            if name in _CHANGING_HEADS:
+                self._moved = True
+                if name in _LINKING_HEADS:
+                    # a link made by a program another one runs (`xargs ln`, `find -exec ln`: the operands come from
+                    # elsewhere), one with a `{}` operand, one after a change of directory, or one that names a path
+                    # outside the plain relative names is a link that outlives the shell and may name a descriptor
+                    if (s != k and _program_name(tokens[k]) not in _OPERAND_KEEPING_WRAPPERS) or self._cd \
+                            or any("{}" in t for t in tokens[s + 1:]) \
+                            or _link_reaches_outside(tokens[s + 1:], words[s + 1:]):
+                        self._linked = True
+                else:
+                    self._cd = True
+            if name in _MOVING_HEADS:
+                self.moving = True
+        for i in range(1, len(tokens)):  # `find -exec ln -s {} d \;`: a link the operands of another program make
+            if tokens[i - 1] in _FIND_EXECS and _program_name(tokens[i]) in _LINKING_HEADS:
+                self._moved = self._linked = True
+        if id(site.cmd) not in self._exec_ids and _bare_exec(site, tokens, words):
+            self._exec_ids.add(id(site.cmd))
+            if _copies_input(site.cmd.redirects) and self.in_repeated(site):
+                self.block("dynamic_code")  # `f() { exec 4<&3; }; exec 3< <(x); f`: the body runs after any command
+            incoming = shell.PIPED if site.stage > 0 else site.stdin
+            self.execs.append(ExecSeen(site.cmd.span[0], site.cmd.span[1], site.cmd.redirects, incoming))
+
+    def observe_site(self, site, tokens: list[str], expansion_head: bool) -> None:
+        """What the command says as a whole: a word that holds `mkfifo` or `mknod` where no reading made a fifo
+        (every file may be one), and a program that stays an expansion (`$X p`): at the top it may be a fifo maker or
+        a `cd` once the expansions that can be empty are gone; in a nested text it may be a fifo maker, and a `cd` of
+        this shell when the text runs here."""
+        if not self._made and _mentions_fifo_maker(site, tokens):
+            self._unknown = True
+        if not expansion_head:
+            return
+        if self.depth > 0:
+            self._unknown = True
+            if self.text.kind != _CHILD:
+                self._moved = True
+            return
+        k = _plain_head(tokens)
+        bare = _STRIPPABLE_EXPANSION.sub("", tokens[k]).rsplit("/", 1)[-1] if k < len(tokens) else ""
+        if bare in ("mkfifo", "mknod"):
+            self._unknown = True
+        elif bare in _CHANGING_HEADS:
+            self._moved = True
+
+    def exec_key(self) -> tuple:
+        return _exec_key(self.execs)
+
+    def classify(self) -> Analysis:
+        """One round: the contexts from the facts and `exec`s the round assumes, every command of the text read with
+        them (the facts they show are observed), and the blocks that hold for the text as a whole."""
+        text, stdin, kind = self.text, self.stdin, self.text.kind
+        initial = stdin.fds.get(0) if stdin else None
+        resolve, first, last = _contexts(self.assumed, self.prior_execs, stdin, text.repeated_spans(), self.reads)
+        sites = list(shell.iter_sites(self.script, initial, resolve))  # compounds read the context at their offset
+        if "parallel_env" not in text.steps:
+            text.steps["parallel_env"] = _sets_parallel_vars(sites, text.outer_env)
+        items = []
+        for site in sites:
+            tokens, readings = text.readings(site)
+            items.append((site, tokens, readings))
+        if text.code_evaluation():  # the shell evaluates text as code where no command is written
+            text.block("dynamic_code")
+        has_heredoc = "<<" in self.command
+        disqualified, rebound_spans, grouped = text.heredocs(items) if has_heredoc else (False, (), ())
+        for site, tokens, readings in items:
+            self.simple(site, tokens, readings)
+            self.zsh_hooks(site, tokens)
+            if has_heredoc:
+                self.absorb(_heredoc_code(site, readings, self.categories, self.flags, self.reasons, disqualified,
+                                          self.depth, self.budget, text.view_at, id(site.cmd) in grouped,
+                                          text.functions, any(lo <= site.cmd.span[0] < hi for lo, hi in rebound_spans),
+                                          text.function_verdicts, text.shared))
+        if has_heredoc:
+            self.compound_heredocs()
+        self.finish()
+        if kind != _CHILD and last.fds != first.fds:
+            # `eval 'exec < <(x)'`, `f exec` with `f() { "$@" < <(x); }`: the descriptors it sets outlive the text, not seen here
+            self.block("dynamic_code")
+        return self.result()
+
+    def finish(self) -> None:
+        """The end of the reading: a command that may move a fifo makes every file a possible one when the text
+        (or the one around it) made some."""
+        if self.moving:
+            self.reads.add("fifos")
+            if self.assumed.fifos or self._fifos:
+                self._unknown = True
+        self.exec_sources()
+
+    def exec_sources(self) -> None:
+        """A bare `exec` that copies a descriptor the text never opens (by an `exec` of its own, or one it inherits)
+        takes the state of a redirection of an enclosing compound or of a call (`f() { exec 4<&3; }; f 3< <(x)`),
+        which this reading does not see: `dynamic_code`. Descriptor 0 is the stdin the command is given (read), and
+        a copy of 1 or 2 by `>&` is the output of the shell."""
+        if not self.execs:
+            return
+        opened = set(self.stdin.fds) if self.stdin is not None else set()
+        named = False  # `{fd}<`: some descriptor from 10 up
+        for seen in self.execs:
+            for r in seen.redirects:
+                if r.fd is not None:
+                    if r.fd.isdigit():
+                        opened.add(int(r.fd))
+                    else:
+                        named = True
+        for seen in self.execs:
+            for r in seen.redirects:
+                if r.op not in ("<&", ">&") or r.target is None:
+                    continue
+                number = r.target.text[:-1] if r.target.text.endswith("-") else r.target.text
+                if not (number.isdigit() and number.isascii()):
+                    continue
+                source = int(number)
+                if source == 0 or source in opened or (named and source >= 10) or (r.op == ">&" and source in (1, 2)):
+                    continue
+                self.block("dynamic_code")
+                return
+
+    def unclassified(self) -> None:
+        self.categories.append("unclassified")
+        self.flags.append("unclassified_command")
+
+    def functions(self) -> frozenset:
+        return self.text.functions()
+
+    def function_verdicts(self) -> dict:
+        return self.text.function_verdicts()
+
+    def function_call(self, site, readings: Readings, unresolved: bool = False) -> None:
+        """A call of a function the text defines (or an enclosing text does), with a pipe or a `<(...)` on its
+        standard input, runs the body on it: when some definition may read code from stdin the call is as the shell it
+        holds, `piped_shell` or `dynamic_code` (the rules of `_stdin_code`). `unresolved`: the program name is an
+        expansion that stays unknown, so it may be any function: every one that reads code counts. A function from
+        an earlier command is not known and not resolved."""
+        names = self.functions()
+        if not names:
+            return
+        called = names if unresolved else {_head_of(t) for t in readings.texts} & names
+        if not called:
+            return
+        reasons = [code.reason for code in _stdin_code(site) if code.reason]
+        if not reasons:
+            return
+        verdicts = self.function_verdicts()
+        if any(verdicts.get(name) for name in called):
+            for reason in reasons:
+                self.block(reason)
+
+    def values(self) -> "_Values":
+        return self.text.values()
+
+    def view_at(self, pos: int) -> "_Values":
+        return self.text.view_at(pos)
+
+    def code_text(self, text: str, env, code: bool = True, named: bool = True, kind: str = _CHILD,
+                  stdin=None) -> None:
         """`named`: the text is a string a nested shell reads (not the source of a function body, which is in this
-        text with its quotes)."""
+        text with its quotes). `kind`: how the text runs (`_CHILD`, `_SAME`, `_BODY`). `stdin`: the `StdinContext`
+        of the command that runs it (the text inherits it). The facts of the text join `observed`."""
         if named and self.funcs and _mentions(text, self.funcs):
             self.block("dynamic_code")  # a nested shell that names a forwarding function: `export -f f; bash -c 'f x'`
-        _code_text(text, self.categories, self.flags, self.reasons, self.depth, self.budget, code, env)
+        self.absorb(_code_text(text, self.categories, self.flags, self.reasons, self.depth, self.budget, code, env,
+                               self.function_verdicts(), kind, stdin, self.text.shared))
 
     def forwarded_misuse(self, tokens: list[str], readings: Readings) -> None:
         """D1: a forwarding function named where it is not called with its arguments in view (`xargs f`, `eval f x`,
@@ -3695,7 +5463,16 @@ class _Run:
     def simple(self, site, tokens: list[str], readings: Readings) -> None:
         """One simple command of the tree with its readings."""
         self.reasons.update(readings.reasons)
+        self._made = False
+        if _names_functions_parameter(tokens, site.cmd.words):
+            self.block("dynamic_code")  # the zsh `functions` parameter set where `zsh_hooks` does not read it
+        if site.given:  # `{ bash; } < <(x)`: the body of a compound with a process substitution on a descriptor
+            words = site.cmd.words
+            if _site_reads_code(words, _word_readings(words), self.text.functions(), site):
+                self.block(site.given)
         if not readings.complete:  # too many possible readings: not classified, blocked (no canary: already denied)
+            self.observe_reading(site, tokens, list(site.cmd.words), readings)  # (the facts of its words as written)
+            self.observe_site(site, tokens, False)
             self.unclassified()
             return
         cmd = site.cmd
@@ -3717,10 +5494,20 @@ class _Run:
             self.forwarded_misuse(tokens, readings)
         env = self.view_at(start) if self.has_dollar else _NO_VALUES
         variants, head_unresolved, from_variant = self.head_variants(tokens, words, readings, env)
+        expansion_head = head_unresolved or (not from_variant and any(
+            s < len(words) and words[s] is not None and (words[s].dynamic or words[s].has_glob)
+            and not _literal_slash(words[s])
+            for s in readings.starts))
+        if expansion_head:
+            self.function_call(site, readings, True)  # the program is an expansion: it may name any function
         if head_unresolved:
             self.block("dynamic_code")
+        state = _site_stdin(site)
+        if state and any(s < len(words) and words[s] is not None and words[s].has_glob for s in readings.starts):
+            self.block(state)  # a program name that is a glob (`/bin/[c]at`) may be any program, a shell reading that stdin
         for v_tokens, v_words, v_readings in variants:
             self.variant(site, v_tokens, v_words, v_readings, env, from_variant)
+        self.observe_site(site, tokens, expansion_head)
 
     def head_variants(self, tokens: list[str], words: list, readings: Readings, env: "_Values") -> "tuple[list, bool, bool]":
         """N6/V2: the readings of the command with its program made by a brace expansion or by a variable of known
@@ -3773,15 +5560,19 @@ class _Run:
         if not readings.complete:
             self.unclassified()
             return
+        self.function_call(site, readings)  # (each resolved program: `$g` with g=f, `{f,}`, `${g:-f}`)
         arg_variants, args_unresolved = _arg_variants(tokens, words, readings, env)
         if args_unresolved:
             self.block("dynamic_code")
         # item 6: `git -c alias.p=push p` and the `GIT_CONFIG_*` variables: the alias as the command it is
-        arg_variants, alias_code, alias_unresolved = _git_alias_variants(arg_variants, cmd, env)
-        if alias_unresolved:
-            self.block("dynamic_code")
+        arg_variants, alias_code, alias_reasons = _git_alias_variants(
+            arg_variants, cmd, env, self.text.repo_aliases, self.text.cwd_moved, self.in_fwd, self.text.git_external)
+        for reason in sorted(alias_reasons):
+            self.block(reason)
+        if "dynamic_code" in alias_reasons:  # a configuration that cannot be read may make any file a fifo
+            self._unknown = True
         for code in alias_code:
-            self.code_text(code, env if "$" in code else None)
+            self.code_text(code, env if "$" in code else None, stdin=_stdin_context(site))
         for a_tokens, a_words, a_readings in arg_variants:
             if (from_variant or len(arg_variants) > 1) and not self.charge(VARIANT_COST):
                 break
@@ -3795,6 +5586,7 @@ class _Run:
         if not readings.complete:
             self.unclassified()
             return
+        self.observe_reading(site, tokens, words, readings)
         for n, seg in enumerate(readings.texts):
             seg_categories: list[str] = []
             _classify_segment(tokens, seg, seg_categories, self.flags, readings.starts[n])
@@ -3806,7 +5598,7 @@ class _Run:
                 self.block("dynamic_code")
         self.dynamic_program(words, tokens, readings, env, from_variant)
         self.forwarded_calls(site, tokens, words, readings, env)
-        self.code_arguments(site, tokens, words, env)
+        self.code_arguments(site, tokens, words, env, readings)
 
     def dynamic_program(self, words: list, tokens: list[str], readings: Readings, env: "_Values",
                         from_variant: bool) -> None:
@@ -3854,12 +5646,15 @@ class _Run:
                     self.block("dynamic_code")
                     continue
                 text = _positional_text(body, args, tokens[s + 1:], marks)
-                self.code_text(text, env if "$" in text else None, named=False)
+                self.code_text(text, env if "$" in text else None, named=False, kind=_BODY,
+                               stdin=_stdin_context(site))
 
-    def code_arguments(self, site, tokens: list[str], words: list, env: "_Values") -> None:
+    def code_arguments(self, site, tokens: list[str], words: list, env: "_Values", readings: Readings) -> None:
         """X1-X6: the code the arguments of the command run, classified one level deeper."""
         cmd = site.cmd
-        for text, reason in _code_args(site, tokens, words):
+        heads = {_program_name(tokens[s]) for s in readings.starts if s < len(tokens)}
+        same_shell = bool(heads & _SAME_SHELL_LOADERS)  # what these run lives on in this shell
+        for text, reason, signals in _code_args(site, tokens, words, self.steps):
             texts = None if text is None else (_expand_values(text, env) if self.has_dollar else [text])
             if texts is None:  # unknown code (X3/X5), or more than MAX_VALUE_CANDIDATES values (V4)
                 self.block(reason or "dynamic_code")
@@ -3868,7 +5663,81 @@ class _Run:
             for code in texts:
                 if len(texts) > 1 and not self.charge(VARIANT_COST):
                     break
-                self.code_text(code, inner if "$" in code else None)
+                self.code_text(code, inner if "$" in code else None, kind=_SAME if same_shell else _CHILD,
+                               stdin=self.trap_stdin(site, signals))
+
+    def trap_stdin(self, site, signals) -> "shell.StdinContext":
+        """The stdin context a code string gets. A trap action fires where the signal does: EXIT where the trap was
+        set (the state of this command), any other signal, `DEBUG`, `ERR` or `RETURN` anywhere in the text, so its
+        stdin is a source the hook cannot read (`dynamic_code`)."""
+        if signals is None:
+            return _stdin_context(site)
+        if all(_exit_signal(sig) for sig in signals):
+            if self.in_function(site):  # it fires when the shell ends, whatever called the function
+                return _stdin_context(site, shell.DYNAMIC, True)
+            ctx = _stdin_context(site)  # where it was set, or what an `exec` after it left stdin
+            for fd, state in (site.ctx or shell.NO_CONTEXT).end.items():
+                ctx.fds.setdefault(fd, state)
+            return ctx
+        return _stdin_context(site, shell.DYNAMIC, True)
+
+    def in_function(self, site) -> bool:
+        """The command sits in the body of a function the text defines."""
+        return self.text.in_function(site)
+
+    def in_repeated(self, site) -> bool:
+        """The command sits in the body of a function or a loop of the text."""
+        start = site.cmd.span[0]
+        return any(lo <= start < hi for lo, hi in self.text.repeated_spans())
+
+    def zsh_hooks(self, site, tokens: list[str]) -> None:
+        """zsh runs some functions by itself (`_IMPLICIT_FUNCTIONS`, `TRAP<SIG>`, the `*_functions` arrays, what
+        `add-zsh-hook` registers): one that may read code is `dynamic_code`. `functions[NAME]=BODY` and
+        `functions -c SRC NAME` define one without the `name() {}` form."""
+        ctx = site.ctx or shell.NO_CONTEXT
+        for word in site.cmd.assignments:
+            text = word.text
+            found = _FUNCTIONS_SUBSCRIPT.match(text)
+            if found:
+                self.zsh_function(found.group(2), ctx)
+                continue
+            found = _FUNCTIONS_ARRAY.match(text)
+            if found:
+                self.zsh_function_pairs(found.group(1), ctx)
+                continue
+            found = _HOOK_ARRAY.match(text)
+            if found:
+                self.hook_functions(found.group(2).strip("()").split())
+        k = _plain_head(tokens)
+        if k >= len(tokens):
+            return
+        rest = tokens[k + 1:]
+        if tokens[k] == "add-zsh-hook" and "-d" not in rest:
+            args = [t for t in rest if not t.startswith("-")]
+            if len(args) >= 2:
+                self.hook_functions(args[1:])
+        elif tokens[k] == "functions" and len(rest) >= 3 and rest[0] == "-c" and _hook_name(rest[2]):
+            self.hook_functions(rest[1:2])
+
+    def zsh_function(self, body: str, ctx: "shell.StdinContext") -> None:
+        """`functions[NAME]=BODY` (any name): the body is code that runs in this shell, with the stdin of whoever
+        calls it (a hook: the shell itself, with whatever it has then), so it is read as same-shell code with an
+        unknown stdin."""
+        self.code_text(body, None, stdin=ctx.inherit({0: shell.DYNAMIC}), kind=_SAME)
+
+    def zsh_function_pairs(self, inner: str, ctx: "shell.StdinContext") -> None:
+        """`functions+=(NAME BODY ...)`: the words are read as the shell does, and each body as `zsh_function` does."""
+        items = _array_words(inner, self.budget)
+        if items is None or len(items) % 2:
+            self.block("dynamic_code")  # not read: the elements may be any function
+            return
+        for body in items[1::2]:
+            self.zsh_function(body, ctx)
+
+    def hook_functions(self, names: list[str]) -> None:
+        verdicts = self.function_verdicts()
+        if any(verdicts.get(name) for name in names):
+            self.block("dynamic_code")
 
     def compound_heredocs(self) -> None:
         """A heredoc or here-string on a compound command (`{ bash; } <<EOF`) feeds code of unknown reach."""
@@ -3882,60 +5751,351 @@ class _Run:
                     continue
                 body = redirect.heredoc.body if redirect.heredoc is not None else redirect.target.text
                 env = self.view_at(compound.span[0]) if "$" in body else None
-                self.code_text(body, env, reads)
+                self.code_text(body, env, reads, kind=_SAME)
 
     def result(self) -> Analysis:
+        for reason in self.text.blocks:  # decided once for the text
+            self.block(reason)
         flag_set = set(self.flags)  # the flag may come from another command of the same text
         if any(_deny_token_unmatched(raw, flag_set) for raw in self.raws):
             self.reasons.add("deny_token_unmatched")
         return Analysis(sorted(set(self.categories)) or ["other"], sorted(set(self.flags)), sorted(self.reasons))
 
 
-def analyze_command(command: str, _depth: int = 0, _env=None, _budget=None, _code: bool = False) -> Analysis:
+# Functions the shell calls by itself: bash `command_not_found_handle`; zsh `command_not_found_handler`, `chpwd`,
+# `precmd`, `preexec`, `periodic`, `zshexit`, and `TRAP<SIG>` (any name that starts with `TRAP`).
+_IMPLICIT_FUNCTIONS = frozenset({"command_not_found_handle", "command_not_found_handler", "chpwd", "precmd", "preexec",
+                                 "periodic", "zshexit"})
+_FUNCTIONS_SUBSCRIPT = re.compile(r"functions\[([^\]]+)\]\+?=(.*)", re.S)  # zsh: `functions[NAME]=BODY`
+_FUNCTIONS_ARRAY = re.compile(r"functions\+?=\((.*)\)\s*$", re.S)  # zsh: `functions+=(NAME BODY ...)`
+_HOOK_ARRAY = re.compile(r"(chpwd|precmd|preexec|periodic|zshexit|zshaddhistory)_functions(?:\[[^\]]*\])?\+?=(.*)", re.S)
+
+
+# Where the zsh `functions` parameter defines a function in a way `zsh_hooks` does not read: an assignment word
+# (`functions[g]=...`, `functions=(...)`, `functions+=...`) at the start of a command or among the operands of a builtin
+# that takes assignments; a name operand of the builtins that set a parameter (`set -A functions ...`, `typeset -A
+# functions`, `read functions[g]`, `print -v 'functions[g]'`); an expansion `${functions[g]::=...}` of any word that is
+# not in single quotes. Text a program receives (`grep 'functions\['`, `echo functions[g]=x`) does not set anything.
+_FUNCTIONS_NAME = re.compile(r"functions(?:\[[^\]]*\])?")
+_FUNCTIONS_ASSIGNMENT = re.compile(r"functions(?:\[[^\]]*\])?\+?=", re.S)
+_FUNCTIONS_EXPANSION = re.compile(r"\$\{[^}]*\bfunctions\b")
+_FUNCTIONS_ASSIGNING_HEADS = frozenset({"typeset", "declare", "local", "export", "readonly", "integer", "float"})
+_PRINT_INTO_VARIABLE = re.compile(r"-[A-Za-z]*v[A-Za-z]*")
+
+
+def _names_functions_parameter(tokens: list[str], words: "list | None" = None) -> bool:
+    """The command sets the zsh `functions` parameter where `zsh_hooks` does not read it (see above). `words`: the
+    words of the command, to tell an expansion from text in single quotes (the same positions as `tokens`). The plain
+    assignment `functions[g]=...; g` is read by `zsh_hooks`, which does not come here: it is not a word of the command."""
+    if not any("functions" in token for token in tokens):
+        return False
+    aligned = words if words is not None and len(words) == len(tokens) else None
+    for i, token in enumerate(tokens):
+        if _FUNCTIONS_EXPANSION.search(token) and (aligned is None or aligned[i].dynamic):
+            return True
+    k = _plain_head(tokens)
+    if k >= len(tokens):
+        return False
+    if _FUNCTIONS_ASSIGNMENT.match(tokens[k]):  # `functions[g]=...` or `noglob functions[g]=...`: the word is the head
+        return True
+    head = _program_name(tokens[k])
+    operands = tokens[k + 1:]
+    if head in _FUNCTIONS_ASSIGNING_HEADS:
+        return any(_FUNCTIONS_NAME.fullmatch(t) or _FUNCTIONS_ASSIGNMENT.match(t) for t in operands)
+    if head in ("set", "read"):
+        return any(_FUNCTIONS_NAME.fullmatch(t) for t in operands)
+    if head in ("print", "printf"):  # `print -v NAME`, `printf -v NAME`
+        return any(_PRINT_INTO_VARIABLE.fullmatch(before) and _FUNCTIONS_NAME.fullmatch(t)
+                   for before, t in zip(operands, operands[1:]))
+    return False
+
+
+def _array_words(inner: str, budget) -> "list[str] | None":
+    """The words of the inside of an array assignment `(a 'b c')`, decoded as the shell does; None when they do not
+    parse (or the budget is spent)."""
+    try:
+        script = shell.parse("x " + inner, budget)
+    except shell.ShellError:
+        return None
+    sites = list(shell.iter_sites(script))
+    if len(sites) != 1:
+        return None
+    return [w.text for w in sites[0].cmd.words[1:]]
+
+
+def _zsh_function_names(script) -> frozenset:
+    """The names the text gives zsh functions without the `name() {}` form: `functions[NAME]=BODY` and
+    `functions+=(NAME BODY ...)` (a name that is an expansion is not one)."""
+    names: set = set()
+    for site in shell.iter_sites(script):
+        for word in site.cmd.assignments:
+            found = _FUNCTIONS_SUBSCRIPT.match(word.text)
+            if found:
+                names.add(found.group(1))
+                continue
+            found = _FUNCTIONS_ARRAY.match(word.text)
+            if found:
+                items = _array_words(found.group(1), shell.Budget(MAX_LEX_CHARS))
+                names.update(items[0::2] if items is not None and not len(items) % 2 else ())
+    return frozenset(name for name in names if re.fullmatch(r"[^\s$`'\"\\]+", name))
+
+
+def _hook_name(name: str) -> bool:
+    """A function the shell calls by itself."""
+    return name in _IMPLICIT_FUNCTIONS or (name.startswith("TRAP") and len(name) > 4)
+
+
+def _plain_head(tokens: list[str]) -> int:
+    """The index of the first word that is not a plain prefix (`builtin`, `command`, `noglob`, ...)."""
+    k = 0
+    while k < len(tokens) and (tokens[k] in _PLAIN_PREFIXES or tokens[k] == "command"):
+        k += 1
+        if tokens[k - 1] == "command":
+            while k < len(tokens) and (tokens[k] == "--" or re.fullmatch(r"-p+", tokens[k])):
+                k += 1
+    return k
+
+
+def _fifo_operands(tokens: list[str], words: list, fifos: "shell.Fifos") -> bool:
+    """`mkfifo [-m MODE] NAME...` and `mknod [-m MODE] NAME p` (bare, at the head): the names are named pipes of the
+    text; a name that is an expansion makes every file a possible one. True when the command is one of them."""
+    k = _plain_head(tokens)
+    name = tokens[k] if k < len(tokens) else ""
+    if name not in ("mkfifo", "mknod"):
+        return False
+    operands: list = []
+    i = k + 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            operands.extend(range(i + 1, len(tokens)))
+            break
+        if tok in ("-m", "--mode"):
+            i += 2
+            continue
+        if not tok.startswith("-") or tok == "-":
+            operands.append(i)
+        i += 1
+    if name == "mknod":
+        kind = words[operands[1]] if len(operands) > 1 and operands[1] < len(words) else None
+        if len(operands) < 2 or (tokens[operands[1]] != "p" and not (kind is not None and kind.dynamic)):
+            return True
+        operands = operands[:1]
+    for i in operands:
+        word = words[i] if i < len(words) else None
+        if word is None or word.dynamic or word.has_glob:
+            fifos.unknown = True
+        else:
+            fifos.names.add(shell.normalize_name(tokens[i]))
+    return True
+
+
+# What a bare `exec` takes as options before it has a command: `-c`, `-l`, `-a NAME`, `--`.
+_MOVING_HEADS = frozenset({"mv", "ln", "link", "cp", "rename", "install"})
+_CHANGING_HEADS = frozenset({"cd", "pushd", "popd", "chdir", "ln", "link"})
+_LINKING_HEADS = frozenset({"ln", "link"})
+_FIND_EXECS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+# Wrappers that run the command with the operands as written (`sudo ln -s a b`); any other program that runs `ln`
+# (`xargs`, `parallel`, `watch`...) may give it operands the text does not show.
+_OPERAND_KEEPING_WRAPPERS = frozenset({"env", "sudo", "doas", "timeout", "nice", "nohup", "ionice", "time", "stdbuf",
+                                       "setsid", "command", "builtin"})
+# The bodies that run when the text is somewhere else: a function (called after any command), a loop (again).
+_REPEATED_KINDS = frozenset({"function", "while", "until", "for", "select", "coproc"})
+
+
+def _link_reaches_outside(tokens: list[str], words: list) -> bool:
+    """The operands of `ln` / `link` (after the program) name something other than plain relative names: an absolute
+    path, `..`, `~`, an expansion or a glob. A link between plain names of the directory only renames what the text
+    can already name; a link to (or made in) any other path may make a path read through it a descriptor, and it
+    outlives the shell that made it."""
+    for i, token in enumerate(tokens):
+        word = words[i] if i < len(words) else None
+        if word is None or word.dynamic or word.has_glob or token.startswith(("/", "~")) or "=/" in token \
+                or ".." in token or (token.startswith("-") and "/" in token):
+            return True
+    return False
+
+
+def _bare_exec(site, tokens: list[str], words: "list | None" = None) -> bool:
+    """A command that only rebinds the descriptors of the shell: `exec` (also behind `command`, `builtin`, ..., or as
+    an expansion that may be it: `$e < <(x)`) with redirections and no program, after its options. `words`: the words
+    of the reading (default: those of the command)."""
+    if not site.cmd.redirects:
+        return False
+    words = site.cmd.words if words is None else words
+    k = _plain_head(tokens)
+    if k >= len(tokens):
+        return False
+    if tokens[k] != "exec":
+        word = words[k] if k < len(words) else None
+        return k + 1 == len(tokens) and word is not None and word.dynamic
+    i = k + 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            i += 1
+            break
+        if not tok.startswith("-") or tok == "-":
+            break
+        i += 2 if tok.startswith("-") and not tok.startswith("--") and tok.endswith("a") else 1
+    # what is left may all expand to nothing (`exec ${e:-}`, `exec $unset`): then it is bare
+    return all(j < len(words) and words[j] is not None and words[j].dynamic for j in range(i, len(tokens)))
+
+
+_STRIPPABLE_EXPANSION = re.compile(r"\$\{[^}]*\}|\$[A-Za-z_]\w*")  # (the ones that may expand to nothing)
+
+
+def _mentions_fifo_maker(site, tokens: list[str]) -> bool:
+    """A word of the command (or its redirection targets and heredoc bodies) holds the name `mkfifo` or `mknod`."""
+    if any("mkfifo" in t or "mknod" in t for t in tokens):
+        return True
+    for redirect in site.cmd.redirects:
+        text = redirect.target.text if redirect.target is not None else ""
+        if redirect.heredoc is not None:
+            text += redirect.heredoc.body
+        if "mkfifo" in text or "mknod" in text:
+            return True
+    return False
+
+
+def _sets_parallel_vars(sites: list, outer) -> bool:
+    """The text (or the enclosing one) assigns `PARALLEL` or `PARALLEL_SHELL`: as a prefix of a command, an operand of
+    `env`, `export`, `declare`, `typeset` and the like, or a name read into (`read`, `printf -v`)."""
+    if outer is not None and any(name in _PARALLEL_VARS for name in outer):
+        return True
+    for site in sites:
+        if any(w.text.partition("=")[0] in _PARALLEL_VARS for w in site.cmd.assignments):
+            return True
+        tokens = [w.text for w in site.cmd.words]
+        k = _plain_head(tokens)
+        head = tokens[k] if k < len(tokens) else ""
+        if any(t.partition("=")[0] in _PARALLEL_VARS and ("=" in t or head in _NAME_READERS or head in _DECLARE_BUILTINS) for t in tokens[k + 1:]):
+            return True
+    return False
+
+
+def _contexts(assumed: "shell.Facts", execs, outer, repeated=(), reads=None):
+    """`StdinContext`s of a text from the facts it assumes: one before any `exec`, one after each bare `exec` that
+    changes the descriptors (`ExecSeen`, in the order of the text, whatever encloses it: a subshell, an `if`, a
+    function body; a branch that does not run is taken as run). A command inside a body that runs when the text is
+    somewhere else (`repeated`: the spans of the function and loop bodies, called or run again after any `exec`)
+    gets the union of every context of the text instead, so it may read any descriptor an `exec` of the text sets
+    (fail closed). Returns `(resolve, first, last)`: `resolve(offset)` gives the context at an offset. `reads`: the set
+    the contexts record the facts they are asked about in."""
+    first = shell.StdinContext.of(dict(outer.fds) if outer is not None else {}, assumed, None, reads)
+    contexts, ends = [first], []
+    current = first
+    for seen in sorted(execs, key=lambda seen: seen.start):
+        fds = shell.exec_fds(seen.redirects, current, seen.incoming or current.fds.get(0))
+        if fds != current.fds:
+            current = shell.StdinContext.of(fds, assumed, None, reads)
+            contexts.append(current)
+            ends.append(seen.end)
+    for context in contexts:
+        context.end = current.fds
+    everywhere = None
+    bodies: list = []
+    if len(contexts) > 1 and repeated:
+        fds: dict = {}
+        for context in contexts:
+            for fd, state in context.fds.items():
+                if state and not fds.get(fd):
+                    fds[fd] = state
+        everywhere = shell.StdinContext.of(fds, assumed, current.fds, reads)
+        for lo, hi in sorted(repeated):  # (nested and overlapping spans joined)
+            if bodies and lo < bodies[-1][1]:
+                bodies[-1][1] = max(bodies[-1][1], hi)
+            else:
+                bodies.append([lo, hi])
+
+    def resolve(offset: int) -> "shell.StdinContext":
+        if everywhere is not None:
+            lo, hi = 0, len(bodies)  # (the last body that starts at or before the offset: a binary search)
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if bodies[mid][0] <= offset:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            if lo and offset < bodies[lo - 1][1]:
+                return everywhere
+        lo, hi = 0, len(ends)  # (the number of ends at or before the offset: a binary search)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if ends[mid] <= offset:
+                lo = mid + 1
+            else:
+                hi = mid
+        return contexts[lo]
+
+    return resolve, first, current
+
+
+def analyze_command(command: str, _depth: int = 0, _budget=None, cwd: "str | None" = None) -> Analysis:
+    """Classify a Bash command (`_analyze` without the facts it hands up to a text around it)."""
+    return _analyze(command, _depth, None, _budget, False, cwd)[0]
+
+
+def _analyze(command: str, depth: int = 0, env=None, budget=None, code: bool = False, cwd=None, fn=None,
+             kind: str = _CHILD, stdin=None, shared: "dict | None" = None) -> "tuple[Analysis, shell.Facts]":
     """Classify a Bash command: categories, flags and the reasons of any parser uncertainty (spec
-    audit-hook-hardening, section 3; audit-shell-lexer, section 4.1). The command is read by the shell parser, and
+    audit-hook-hardening, section 3; audit-shell-lexer, section 4.1), and the `shell.Facts` the text has for the stdin
+    later commands read. The text is read in rounds (`_Run.classify`) up to a fixed point: the first assumes only what
+    `stdin` carries, each next one assumes the facts (fifos, directory changes) and `exec`s the one before observed
+    while classifying, and the text is done when a round observes nothing it did not assume, or only facts the round
+    never consulted (`_Run.reads`: a fact nobody asked about cannot change a decision) (`MAX_FACT_ROUNDS`; a
+    text that does not settle is level B, `analysis_budget`). The command is read by the shell parser, and
     every simple command of the tree is classified by its readings. Uncertainty never becomes an allow:
     alternative readings are all classified (level A), and what cannot be enumerated, does not parse or goes past
     a limit is `unclassified` / `unclassified_command` (level B). The arguments that run code (X1-X6) are analyzed
-    one level deeper, through this same function. `_env` holds the values of the variables of the outer text
+    one level deeper, through this same function. `env` holds the values of the variables of the outer text
     (V3); the values assigned in this text resolve the program of a command (N6) and the variables of a code
-    string (V2). `_budget` is the character budget shared by every parse of one analysis (nested texts);
-    `_code`: the text is a code argument, where a command name made by an expansion is level B
+    string (V2). `budget` is the character budget shared by every parse of one analysis (nested texts);
+    `code`: the text is a code argument, where a command name made by an expansion is level B
     (`dynamic_code`, X3); outside one, it is level A (`dynamic_command`, N6) only for a name the text does not
-    assign (the environment's); a name the text assigns whose value it cannot give is level B (B1)."""
+    assign (the environment's); a name the text assigns whose value it cannot give is level B (B1). `cwd`: None is
+    the process's, False a nested text (not known). `kind`: how the text runs (`_CHILD`, `_SAME`, `_BODY`). `stdin`: the `StdinContext` of the command that
+    runs this text as code (the standard input it inherits). The facts are the ones `stdin` carries plus what the
+    text observes (`_Run.observed`); the caller filters them by `kind` (`Facts.for_parent`). A text that cannot be
+    read is `UNKNOWN_FACTS`. `shared`: what the whole analysis reads once, passed down to the nested texts."""
     command = command or ""
     if len(command) > MAX_COMMAND_LEN:  # checked before any regex or parse touches the text
-        return Analysis(["other"], ["command_too_long"], [])
-    budget = _budget if _budget is not None else shell.Budget(MAX_LEX_CHARS)
+        return Analysis(["other"], ["command_too_long"], []), shell.UNKNOWN_FACTS
+    budget = budget if budget is not None else shell.Budget(MAX_LEX_CHARS)
     try:
         budget.charge(TEXT_COST)  # besides its length, which the parser charges: every text analyzed has a cost
         script = shell.parse(command, budget)
     except shell.NestingTooDeep:
-        return _level_b("nesting_depth")
+        return _level_b("nesting_depth"), shell.UNKNOWN_FACTS
     except shell.BudgetExceeded:
-        return _level_b("analysis_budget")
+        return _level_b("analysis_budget"), shell.UNKNOWN_FACTS
     except shell.ShellError:  # does not close, or is outside the subset: never read as a guess (S3)
-        return _level_b("lex_error")
-    run = _Run(command, _depth, _env, budget, _code, script)
-    items = []
-    for site in shell.iter_sites(script):
-        tokens = [w.text for w in site.cmd.words]
-        items.append((site, tokens, _token_readings(tokens)))
-    if _code_evaluation(command, script, run.values):  # the shell evaluates text as code where no command is written
-        run.block("dynamic_code")
-    has_heredoc = "<<" in command
-    disqualified = has_heredoc and _heredocs_disqualified(script, items)
-    rebound_spans = _rebound_spans(script, items) if has_heredoc else ()
-    grouped = _grouped_commands(script) if has_heredoc and not disqualified else ()
-    for site, tokens, readings in items:
-        run.simple(site, tokens, readings)
-        if has_heredoc:
-            _heredoc_code(site, readings, run.categories, run.flags, run.reasons, disqualified, _depth, budget,
-                          run.view_at, id(site.cmd) in grouped, run.functions,
-                          any(lo <= site.cmd.span[0] < hi for lo, hi in rebound_spans))
-    if has_heredoc:
-        run.compound_heredocs()
-    return run.result()
+        return _level_b("lex_error"), shell.UNKNOWN_FACTS
+    inherited = stdin.facts() if stdin is not None else shell.NO_FACTS  # (a context handed down records no reads)
+    text = _Text(command, depth, env, budget, code, script, cwd, fn, kind, shared)
+    hooks = _IMPLICIT_FUNCTIONS & text.functions()  # (the parsed names: `command_not_found_\<newline>handle`)
+    hooks = hooks | {name for name in text.functions() if name.startswith("TRAP") and name[4:]}
+    if hooks:
+        verdicts = text.function_verdicts()
+        if any(verdicts.get(name) for name in hooks):
+            text.block("dynamic_code")  # the shell calls it by itself, with whatever stdin it has then
+    if kind == _SAME and _function_readers(script):
+        text.block("dynamic_code")  # `eval 'f() { bash; }'`: the function exists in the text that ran it, not seen here
+    assumed, execs = inherited, ()
+    for n in range(MAX_FACT_ROUNDS):  # each round assumes what the one before observed, up to a fixed point
+        if n and not text.charge(TEXT_COST + len(command)):  # (an extra round costs as a text)
+            return _level_b("analysis_budget"), shell.UNKNOWN_FACTS
+        run = _Run(text, assumed, execs, stdin)
+        analysis = run.classify()
+        if stdin is not None and stdin.sink is not None:
+            stdin.sink.update(run.reads)  # what this round consulted of the facts it got is a read of the round around it
+        facts = assumed.join(run.observed)
+        if run.exec_key() == _exec_key(execs):
+            changed = _changed_facts(assumed, facts)
+            if not changed or (not _FORCE_FACT_ROUNDS and changed.isdisjoint(run.reads)):
+                return analysis, facts  # (a fact the round never asked about cannot change a decision it made)
+        assumed, execs = facts, run.execs
+    return _level_b("analysis_budget"), shell.UNKNOWN_FACTS  # (the facts do not settle: fail closed)
 
 
 def classify_command(command: str, _depth: int = 0) -> tuple[list[str], list[str]]:
@@ -3963,13 +6123,21 @@ def _classify_segment(tokens: list[str], seg: str, categories: list[str], flags:
         else:
             categories.append("docker-other")
     elif seg.startswith("git "):
-        if _is_git_commit(tokens[start:]):  # `commit` as the subcommand only (A2): not `config --get commit.x`
+        committing = _creates_git_commits(tokens[start:])  # the subcommand only (A2): not `config --get commit.x`
+        if committing:
             categories.append("git-commit")
             flags.append("git_commit")
-        elif re.match(r"^git (\S+ )*push\b", seg):
+        # Not an `elif` after every git_commit: `merge`, `rebase`... can carry a `push` word too. After a plain
+        # `commit` it stays one (a `push` in its message is data).
+        pushes = re.match(r"^git (\S+ )*push\b", seg) and not (committing and _is_git_commit(tokens[start:]))
+        if not pushes:  # (`send-pack` pushes too: as the subcommand, not as a word)
+            pushes = _git_has_subcommand(_git_args(tokens[start:]) or [], "send-pack")
+        if pushes:
             categories.append("git-push")
             flags.append("git_push")
-        else:
+        if _git_config_writes_risky(tokens[start:]):
+            flags.append("git_config_exec")
+        if not committing and not pushes:
             categories.append("git-other")
     elif seg == "mise" or seg.startswith("mise "):
         categories.extend(mise_categories(seg))

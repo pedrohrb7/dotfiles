@@ -53,6 +53,7 @@ TEST_CONFIG: dict = {
         "parse_uncertain": _AUDIT,
         "git_commit": _ASK,
         "git_push": _ASK,
+        "git_config_exec": _ASK,
         "docker_build": _AUDIT,
         "external_request": _WARN,
         "suite_by_non_runner": _WARN,

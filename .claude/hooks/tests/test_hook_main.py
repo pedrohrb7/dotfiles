@@ -91,6 +91,21 @@ class Events(TempRepoCase):
                 self.assertEqual(rec["decision"], decision)
                 self.assertEqual(rec["decision_category"], category)
 
+    def test_e5_a_git_config_write_of_an_alias_asks_with_the_git_config_exec_reason(self):
+        res = self.pre("git config alias.c commit")
+        self.assertIsNotNone(res.output)
+        out = res.output["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "ask")
+        self.assertIn("git_config_exec", out["permissionDecisionReason"])
+        self.assertEqual(len(res.records), 1)
+        self.assertEqual(res.records[0]["decision"], "ask")
+        self.assertEqual(res.records[0]["decision_category"], "git_config_exec")
+
+    def test_e5_a_harmless_git_config_write_is_silent(self):
+        res = self.pre("git config user.name x")
+        self.assertIsNone(res.output)
+        self.assertEqual(res.records, [])
+
     def test_e6_failed_follows_the_event(self):
         for event, failed in (("PostToolUse", False), ("PostToolUseFailure", True)):
             with self.subTest(case="E6", event=event):
@@ -191,6 +206,74 @@ class BashRecords(TempRepoCase):
         res = call_main(payload("PostToolUse", "Bash", cwd=self.repo, tool_input={"command": command}))
         self.assertEqual(len(res.records[0]["cmd"]), 300)
         self.assertEqual(res.records[0]["cmd"], command[:300])
+
+
+class ResolverHermeticity(TempRepoCase):
+    """The classifier's `RESOLVERS` are registered for one analysis only: nothing leaks into the next one."""
+
+    def test_call_main_leaves_the_resolvers_as_it_found_them(self):
+        before = dict(classifier.RESOLVERS)
+        call_main(payload("PreToolUse", "Bash", cwd=self.repo, tool_input={"command": "git log"}))
+        self.assertEqual(classifier.RESOLVERS, before)
+
+    def test_classify_in_restores_the_resolvers(self):
+        before = dict(classifier.RESOLVERS)
+        audit._classify_in(classifier, "git log", str(self.repo))
+        self.assertEqual(classifier.RESOLVERS, before)
+
+    def test_classify_in_restores_the_resolvers_when_the_analysis_raises(self):
+        before = dict(classifier.RESOLVERS)
+        with mock.patch.object(classifier, "analyze_command", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                audit._classify_in(classifier, "git log", str(self.repo))
+        self.assertEqual(classifier.RESOLVERS, before)
+
+
+class ReadGitAliases(TempRepoCase):
+    """`read_git_aliases(cwd)`: the aliases git finds for a repo, None when they cannot be read."""
+
+    def write_config(self, text):
+        (self.repo / ".git" / "config").write_text(text, encoding="utf-8")
+
+    def test_the_aliases_of_the_repo_are_read_lower_cased(self):
+        self.write_config("[alias]\n\tc = commit\n\tLong = log --oneline\n\tnovalue\n")
+        got = audit.read_git_aliases(str(self.repo))
+        self.assertEqual(got.get("c"), "commit")
+        self.assertEqual(got.get("long"), "log --oneline")
+        self.assertIn("novalue", got)
+
+    def test_a_repo_without_aliases_gives_the_aliases_of_the_global_config_only(self):
+        self.write_config("[user]\n\tname = x\n")
+        got = audit.read_git_aliases(str(self.repo))
+        self.assertIsInstance(got, dict)
+        self.assertNotIn("c", got)
+
+    def test_a_directory_that_does_not_exist_is_unreadable(self):
+        self.assertIsNone(audit.read_git_aliases(str(self.repo / "missing")))
+
+    def test_git_variables_of_the_session_do_not_break_the_read_or_leak_into_it(self):
+        self.write_config("[alias]\n\tc = commit\n")
+        with mock.patch.dict("os.environ", {"GIT_PAGER": "false", "GIT_TRACE": str(self.repo / "trace"),
+                                            "GIT_CONFIG_GLOBAL": "/nonexistent"}):
+            got = audit.read_git_aliases(str(self.repo))
+        self.assertEqual((got or {}).get("c"), "commit")
+        self.assertFalse((self.repo / "trace").exists())
+
+    def test_a_session_git_dir_work_tree_or_common_dir_makes_the_read_unreadable(self):
+        self.write_config("[alias]\n\tc = commit\n")
+        for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"):
+            with self.subTest(var=var):
+                with mock.patch.dict("os.environ", {var: str(self.repo / ".git")}):
+                    self.assertTrue(audit.read_git_aliases(str(self.repo)) is None)
+
+    def test_a_config_larger_than_the_byte_cap_is_unreadable(self):
+        self.write_config("[alias]\n" + "".join(f"\ta{i} = {'x' * 90}\n" for i in range(22000)))  # about 2 MB
+        self.assertGreater((self.repo / ".git" / "config").stat().st_size, 1_500_000)
+        self.assertTrue(audit.read_git_aliases(str(self.repo)) is None, "the read must give None above the cap")
+
+    def test_a_program_that_does_not_exist_is_not_an_external_git_command(self):
+        self.assertFalse(audit.git_external_exists("definitely-not-a-cmd-xyz"))
+        self.assertFalse(audit.git_external_exists("a/b"))
 
 
 class AnalysisTimeout(TempRepoCase):
