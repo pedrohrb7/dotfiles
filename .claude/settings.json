@@ -169,6 +169,10 @@
       }
     ]
   },
+  "statusLine": {
+    "type": "command",
+    "command": "sh \"$HOME/dotfiles/.claude/statusline.sh\""
+  },
   "enabledPlugins": {
     "skill-creator@claude-plugins-official": false,
     "code-simplifier@claude-plugins-official": false,
@@ -194,14 +198,11 @@
       "effortLevel": "high"
     }
   },
-  "statusLine": {
-    "type": "command",
-    "command": "sh \"$HOME/dotfiles/.claude/statusline.sh\""
-  },
   "timeFormat": "24-hour",
   "theme": "dark",
+  "switchModelsOnFlag": false,
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
   "useAutoModeDuringPlan": false,
-  "switchModelsOnFlag": false
+  "model": "opus"
 }
